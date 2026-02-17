@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Jackbox Lobby Clone</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="join" class="panel">
+    <h1>Join the Game</h1>
+    <input id="name" placeholder="Name">
+    <input id="room" placeholder="Room Code">
+    <button onclick="joinRoom()">Enter</button>
+  </div>
+
+  <div id="lobby" class="panel">
+    <h1>Room: <span id="roomCode"></span></h1>
+    <p>Connected Players:</p>
+    <ul id="playerList"></ul>
+    <button onclick="showCharSelect()">Pick Your Character</button>
+  </div>
+
+  <div id="charSelect" class="panel">
+    <h1>Choose Your Character</h1>
+    <div class="chars">
+      <button onclick="selectChar('🎩')">🎩</button>
+      <button onclick="selectChar('🤖')">🤖</button>
+      <button onclick="selectChar('👽')">👽</button>
+      <button onclick="selectChar('🦄')">🦄</button>
+      <button onclick="selectChar('🧠')">🧠</button>
+    </div>
+    <p id="charConfirm"></p>
+  </div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="lobby.js"></script>
+</body>
+</html>

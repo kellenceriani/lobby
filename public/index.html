@@ -149,6 +149,26 @@
             </label>
           </div>
           <div class="setting-item">
+            <label for="scenarioTheme">
+              <strong>🎭 Scenario Theme</strong>
+              <select id="scenarioTheme" onchange="updateSetting('scenarioTheme', this.value)" aria-label="Scenario theme">
+                <option value="all" selected>🎲 All (Random Mix)</option>
+                <option value="food">🍳 Food & Cooking</option>
+                <option value="action">⚔️ Action & Combat</option>
+                <option value="adventure">🗺️ Adventure</option>
+                <option value="sports">🏀 Sports & Games</option>
+                <option value="performance">🎤 Performance</option>
+                <option value="absurd">🌀 Weird & Absurd</option>
+              </select>
+            </label>
+          </div>
+          <div class="setting-item">
+            <label for="customScenario">
+              <strong>🎨 Custom Scenario <span style="opacity: 0.6; font-size: 0.9em;">(Optional)</span></strong>
+              <input type="text" id="customScenario" placeholder="e.g., BUILD THE PERFECT TREEHOUSE" maxlength="60" onchange="updateSetting('customScenario', this.value.trim())" aria-label="Custom scenario">
+            </label>
+          </div>
+          <div class="setting-item">
             <label class="checkbox-label">
               <input type="checkbox" id="plotTwists" checked onchange="updateSetting('plotTwists', this.checked)">
               <span>✨ Enable Plot Twists</span>

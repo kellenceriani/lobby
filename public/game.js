@@ -383,8 +383,12 @@ socket.on('roomData', (data) => {
 socket.on('settingsUpdated', (settings) => {
   roomState.settings = settings;
   const difficulty = document.getElementById('difficulty');
+  const scenarioTheme = document.getElementById('scenarioTheme');
+  const customScenario = document.getElementById('customScenario');
   const plotTwists = document.getElementById('plotTwists');
   if (difficulty && settings.difficulty) difficulty.value = settings.difficulty;
+  if (scenarioTheme && settings.scenarioTheme) scenarioTheme.value = settings.scenarioTheme;
+  if (customScenario && settings.customScenario !== undefined) customScenario.value = settings.customScenario;
   if (plotTwists && settings.plotTwists !== undefined) plotTwists.checked = settings.plotTwists;
 });
 
@@ -1226,7 +1230,7 @@ socket.on('finalRoundResults', (data) => {
   let winnerHTML = '';
   if (data.winner) {
     winnerHTML = `
-      <h2>🏆 ${data.winner} WINS THE GAME! 🏆</h2>
+      <h2>🏆 ${data.winner} WINS THE FINAL ROUND!... 🏆</h2>
       <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
     `;
   }

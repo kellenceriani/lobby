@@ -42,133 +42,398 @@ function getRandomWord() {
 }
 
 // ========================
-// COMPREHENSIVE SCENARIOS (150+)
+// TEMPLATE-BASED SCENARIO GENERATION
+// (Generates 500+ unique scenarios from compact templates)
 // ========================
-const SCENARIOS = [
-  // Cooking & Food
-  { scenario: 'WIN A COOKING COMPETITION', twists: ['BUT IT\'S UNDERWATER', 'BUT YOU\'RE ALL VEGAN', 'BUT YOU ONLY HAVE 30 SECONDS', 'BUT EVERYTHING IS INVISIBLE'] },
-  { scenario: 'MAKE THE PERFECT SANDWICH', twists: ['USING ONLY YOUR FEET', 'IN TOTAL DARKNESS', 'WHILE EVERYTHING SPINS', 'AND IT TASTES LIKE FEELINGS'] },
-  { scenario: 'WIN A BAKING SHOWDOWN', twists: ['BUT YOUR OVEN IS A CLOUD', 'AND GRAVITY IS REVERSED', 'WHILE SPEAKING BACKWARDS', 'WITH A TINY SPOON'] },
-  { scenario: 'SURVIVE A FOOD TRUCK BATTLE', twists: ['ON THE MOON', 'WITH NO TASTE BUDS', 'IN A LIBRARY', 'WHILE ROLLERSKATING'] },
+
+// Word Banks for Template Substitution (4x expansion - 300+ total unique words)
+const WORD_BANKS = {
+  ACTIVITY: [
+    'COOKING', 'BAKING', 'SINGING', 'DANCING', 'PAINTING', 'SURFING', 'SKIING', 'SWIMMING', 'RACING', 'CODING', 'WRITING', 'GARDENING', 'POKER', 'CHESS',
+    'ACTING', 'FISHING', 'HIKING', 'CLIMBING', 'SCULPTING', 'PHOTOGRAPHY', 'SKATEBOARDING', 'SNOWBOARDING', 'JUGGLING', 'POTTERY', 'KNITTING', 'YOGA',
+    'KARATE', 'BOXING', 'WRESTLING', 'FENCING', 'ARCHERY', 'ROWING', 'SAILING', 'KAYAKING', 'DIVING', 'PARAGLIDING', 'SPELUNKING', 'PARKOUR',
+    'BEATBOXING', 'BREAKDANCING', 'GRAFFITI', 'HACKING', 'PODCASTING', 'STANDUP', 'IMPROV', 'ORIGAMI', 'CALLIGRAPHY', 'MIXOLOGY', 'WOODWORKING', 'METALWORKING',
+    'GLASSBLOWING', 'TATTOOING', 'HAIRSTYLING', 'MAKEUP', 'FASHION DESIGN', 'GAME DESIGN'
+  ],
+  FOOD: [
+    'SANDWICH', 'PIZZA', 'CAKE', 'SOUP', 'SALAD', 'SUSHI', 'BURGER', 'TACO', 'PASTA', 'STEW',
+    'BURRITO', 'RAMEN', 'CURRY', 'LASAGNA', 'RISOTTO', 'PAELLA', 'GUMBO', 'CHILI', 'POKE BOWL', 'BURRITO BOWL',
+    'OMELET', 'QUICHE', 'CREPE', 'WAFFLE', 'PANCAKE', 'DONUT', 'CROISSANT', 'BAGEL', 'MUFFIN', 'SCONE',
+    'PIE', 'TART', 'BROWNIE', 'COOKIE', 'CUPCAKE', 'MACARON', 'CHEESECAKE', 'TIRAMISU', 'FLAN', 'SOUFFLÉ'
+  ],
+  THREAT: [
+    'ALIEN INVASION', 'ZOMBIE APOCALYPSE', 'ROBOT UPRISING', 'DRAGON', 'METEOR', 'TSUNAMI', 'VOLCANO', 'MONSTER',
+    'GIANT SPIDER', 'KRAKEN', 'WEREWOLF PACK', 'VAMPIRE ARMY', 'GHOST HORDE', 'DEMON', 'KAIJU', 'SENTIENT VIRUS',
+    'ROGUE AI', 'CLONE ARMY', 'TIME PARADOX', 'BLACK HOLE', 'SOLAR FLARE', 'EARTHQUAKE', 'TORNADO', 'HURRICANE',
+    'AVALANCHE', 'WILDFIRE', 'FLOOD', 'PLAGUE', 'MIND CONTROL WAVE', 'REALITY GLITCH', 'DIMENSIONAL RIFT', 'NANOBOTS'
+  ],
+  PLACE: [
+    'MOUNT EVEREST', 'THE OCEAN', 'A JUNGLE', 'A DESERT', 'SPACE', 'THE MOON', 'ANTARCTICA', 'A VOLCANO',
+    'THE AMAZON', 'THE SAHARA', 'THE ARCTIC', 'THE HIMALAYAS', 'THE GRAND CANYON', 'A RAINFOREST', 'A CORAL REEF', 'THE DEEP SEA',
+    'A CAVE SYSTEM', 'AN ISLAND', 'A MOUNTAIN', 'A GLACIER', 'THE TUNDRA', 'A SWAMP', 'A CANYON', 'A VALLEY',
+    'MARS', 'VENUS', 'JUPITER', 'AN ASTEROID', 'A BLACK HOLE', 'ANOTHER DIMENSION', 'THE PAST', 'THE FUTURE'
+  ],
+  ITEM: [
+    'SPACESHIP', 'BRIDGE', 'CITY', 'CASTLE', 'TOWER', 'THEME PARK', 'ROBOT', 'TIME MACHINE',
+    'SUBMARINE', 'AIRPLANE', 'HELICOPTER', 'YACHT', 'MOTORCYCLE', 'TANK', 'MECH SUIT', 'JETPACK',
+    'TELEPORTER', 'PORTAL', 'HOLOGRAM', 'AI', 'QUANTUM COMPUTER', 'SATELLITE', 'SPACE STATION', 'MOON BASE',
+    'FORTRESS', 'MANSION', 'SKYSCRAPER', 'PYRAMID', 'LIGHTHOUSE', 'DAM', 'TUNNEL', 'AMUSEMENT RIDE'
+  ],
+  PERSON: [
+    'YOUR CRUSH', 'A BILLIONAIRE', 'A CELEBRITY', 'THE PRESIDENT', 'A WIZARD', 'A DRAGON', 'AN AI',
+    'A KING', 'A QUEEN', 'A KNIGHT', 'A PIRATE', 'A NINJA', 'A SAMURAI', 'A VIKING', 'A GLADIATOR',
+    'AN ASTRONAUT', 'A SUPERHERO', 'A VILLAIN', 'A SPY', 'A DETECTIVE', 'A SCIENTIST', 'AN INVENTOR', 'A GENIUS',
+    'A GHOST', 'A VAMPIRE', 'AN ALIEN', 'A TIME TRAVELER', 'A CLONE', 'YOUR FUTURE SELF'
+  ],
+  MYSTERY: [
+    'MYSTERY IN A HAUNTED MANSION', 'MISSING TREASURE', 'MASTER THIEF', 'SECRET IDENTITY', 'CONSPIRACY',
+    'MURDER CASE', 'KIDNAPPING', 'ART HEIST', 'BANK ROBBERY', 'JEWEL THEFT', 'ANCIENT CURSE', 'PROPHECY',
+    'HIDDEN MESSAGE', 'CODED LETTER', 'SECRET SOCIETY', 'UNDERGROUND OPERATION', 'DOUBLE AGENT', 'BETRAYAL',
+    'LOST CIVILIZATION', 'FORBIDDEN ARTIFACT', 'VANISHING ACT'
+  ],
+  SPORT: [
+    'BASKETBALL', 'FOOTBALL', 'SOCCER', 'TENNIS', 'GOLF', 'BOWLING', 'ARCHERY', 'FENCING',
+    'BASEBALL', 'HOCKEY', 'RUGBY', 'CRICKET', 'VOLLEYBALL', 'BADMINTON', 'TABLE TENNIS', 'SQUASH',
+    'BOXING', 'MMA', 'WRESTLING', 'JUDO', 'KARATE', 'TAEKWONDO', 'GYMNASTICS', 'TRACK AND FIELD',
+    'SWIMMING', 'DIVING', 'SURFING', 'SKATEBOARDING', 'SNOWBOARDING', 'ROCK CLIMBING', 'PARKOUR', 'ESPORTS'
+  ],
+  SKILL: [
+    'MAGIC SHOW', 'COMEDY ROUTINE', 'POETRY SLAM', 'FILM', 'SYMPHONY', 'NOVEL', 'SCULPTURE',
+    'PAINTING', 'DANCE PERFORMANCE', 'OPERA', 'MUSICAL', 'PLAY', 'CONCERT', 'ALBUM', 'MUSIC VIDEO', 'PODCAST',
+    'VIDEO GAME', 'MOBILE APP', 'WEBSITE', 'DOCUMENTARY', 'SHORT FILM', 'ANIMATION', 'COMIC BOOK', 'GRAPHIC NOVEL',
+    'FASHION LINE', 'PERFUME', 'RECIPE BOOK', 'ARCHITECTURAL DESIGN'
+  ],
+  ABSURD: [
+    'A SENTIENT CLOUD', 'A DANCE MOVE', 'AN EMOTION', 'A THOUGHT', 'A DREAM', 'FURNITURE', 'A ROCK',
+    'A COLOR', 'A SOUND', 'A SMELL', 'A TEXTURE', 'A MEMORY', 'A SHADOW', 'AN ECHO', 'A REFLECTION',
+    'TIME ITSELF', 'GRAVITY', 'MATHEMATICS', 'THE ALPHABET', 'A DIMENSION', 'REALITY', 'EXISTENCE', 'CONSCIOUSNESS',
+    'YOUR OWN VOID', 'THE CONCEPT OF IRONY', 'A PARADOX', 'THE NUMBER SEVEN', 'TUESDAY'
+  ]
+};
+
+// Scenario Templates (category-tagged) - 2x expansion for variety
+const SCENARIO_TEMPLATES = {
+  food: [
+    { template: 'WIN A {ACTIVITY} COMPETITION', vars: ['ACTIVITY'] },
+    { template: 'MAKE THE PERFECT {FOOD}', vars: ['FOOD'] },
+    { template: 'SURVIVE A {FOOD} EATING CONTEST', vars: ['FOOD'] },
+    { template: 'CREATE A {FOOD} MASTERPIECE', vars: ['FOOD'] },
+    { template: 'RUN A {FOOD} RESTAURANT', vars: ['FOOD'] },
+    { template: 'INVENT A NEW {FOOD}', vars: ['FOOD'] },
+    { template: 'JUDGE A {ACTIVITY} SHOWDOWN', vars: ['ACTIVITY'] },
+    { template: 'CATER A WEDDING WITH {FOOD}', vars: ['FOOD'] }
+  ],
+  action: [
+    { template: 'DEFEAT {THREAT}', vars: ['THREAT'] },
+    { template: 'ESCAPE FROM {THREAT}', vars: ['THREAT'] },
+    { template: 'SAVE THE WORLD FROM {THREAT}', vars: ['THREAT'] },
+    { template: 'SURVIVE {THREAT}', vars: ['THREAT'] },
+    { template: 'PREVENT {THREAT}', vars: ['THREAT'] },
+    { template: 'OUTSMART {THREAT}', vars: ['THREAT'] },
+    { template: 'TAME {THREAT}', vars: ['THREAT'] },
+    { template: 'NEGOTIATE WITH {THREAT}', vars: ['THREAT'] }
+  ],
+  adventure: [
+    { template: 'CLIMB {PLACE}', vars: ['PLACE'] },
+    { template: 'EXPLORE {PLACE}', vars: ['PLACE'] },
+    { template: 'SURVIVE IN {PLACE}', vars: ['PLACE'] },
+    { template: 'CROSS {PLACE}', vars: ['PLACE'] },
+    { template: 'DISCOVER {PLACE}', vars: ['PLACE'] },
+    { template: 'MAP {PLACE}', vars: ['PLACE'] },
+    { template: 'COLONIZE {PLACE}', vars: ['PLACE'] },
+    { template: 'ESCAPE FROM {PLACE}', vars: ['PLACE'] }
+  ],
+  building: [
+    { template: 'BUILD A {ITEM}', vars: ['ITEM'] },
+    { template: 'DESIGN A {ITEM}', vars: ['ITEM'] },
+    { template: 'CONSTRUCT A {ITEM}', vars: ['ITEM'] },
+    { template: 'CREATE A {ITEM}', vars: ['ITEM'] },
+    { template: 'REPAIR A {ITEM}', vars: ['ITEM'] },
+    { template: 'UPGRADE A {ITEM}', vars: ['ITEM'] },
+    { template: 'PILOT A {ITEM}', vars: ['ITEM'] },
+    { template: 'DESTROY A {ITEM}', vars: ['ITEM'] }
+  ],
+  social: [
+    { template: 'WIN THE HEART OF {PERSON}', vars: ['PERSON'] },
+    { template: 'CONVINCE {PERSON} TO HELP YOU', vars: ['PERSON'] },
+    { template: 'IMPRESS {PERSON}', vars: ['PERSON'] },
+    { template: 'BECOME {PERSON}', vars: ['PERSON'] },
+    { template: 'DEFEAT {PERSON} IN DEBATE', vars: ['PERSON'] },
+    { template: 'BEFRIEND {PERSON}', vars: ['PERSON'] },
+    { template: 'TEACH {PERSON} SOMETHING', vars: ['PERSON'] },
+    { template: 'SWAP LIVES WITH {PERSON}', vars: ['PERSON'] }
+  ],
+  mystery: [
+    { template: 'SOLVE A {MYSTERY}', vars: ['MYSTERY'] },
+    { template: 'UNCOVER A {MYSTERY}', vars: ['MYSTERY'] },
+    { template: 'CATCH A {MYSTERY}', vars: ['MYSTERY'] },
+    { template: 'FIND THE {MYSTERY}', vars: ['MYSTERY'] },
+    { template: 'PREVENT A {MYSTERY}', vars: ['MYSTERY'] },
+    { template: 'INVESTIGATE A {MYSTERY}', vars: ['MYSTERY'] },
+    { template: 'EXPOSE A {MYSTERY}', vars: ['MYSTERY'] },
+    { template: 'DECODE A {MYSTERY}', vars: ['MYSTERY'] }
+  ],
+  sports: [
+    { template: 'WIN A {SPORT} CHAMPIONSHIP', vars: ['SPORT'] },
+    { template: 'BECOME A {SPORT} LEGEND', vars: ['SPORT'] },
+    { template: 'MASTER {SPORT}', vars: ['SPORT'] },
+    { template: 'TEACH {SPORT} TO BEGINNERS', vars: ['SPORT'] },
+    { template: 'BREAK A {SPORT} WORLD RECORD', vars: ['SPORT'] },
+    { template: 'COMMENTATE A {SPORT} MATCH', vars: ['SPORT'] }
+  ],
+  performance: [
+    { template: 'PERFORM A {SKILL}', vars: ['SKILL'] },
+    { template: 'WIN A {SKILL} COMPETITION', vars: ['SKILL'] },
+    { template: 'CREATE A {SKILL}', vars: ['SKILL'] },
+    { template: 'DIRECT A {SKILL}', vars: ['SKILL'] },
+    { template: 'PRODUCE A {SKILL}', vars: ['SKILL'] },
+    { template: 'CRITIQUE A {SKILL}', vars: ['SKILL'] }
+  ],
+  absurd: [
+    { template: 'BECOME {ABSURD}', vars: ['ABSURD'] },
+    { template: 'COMMUNICATE WITH {ABSURD}', vars: ['ABSURD'] },
+    { template: 'TEACH {ABSURD} TO LOVE', vars: ['ABSURD'] },
+    { template: 'MAKE FRIENDS WITH {ABSURD}', vars: ['ABSURD'] },
+    { template: 'UNDERSTAND {ABSURD}', vars: ['ABSURD'] },
+    { template: 'CONTROL {ABSURD}', vars: ['ABSURD'] },
+    { template: 'MERGE WITH {ABSURD}', vars: ['ABSURD'] },
+    { template: 'ARGUE WITH {ABSURD}', vars: ['ABSURD'] }
+  ]
+};
+
+// Twist Templates (difficulty-scaled) - 4x expansion with strategic variety
+const TWIST_TEMPLATES = {
+  easy: [
+    'BUT YOU ONLY HAVE 30 SECONDS',
+    'WITHOUT USING YOUR HANDS',
+    'WHILE BLINDFOLDED',
+    'IN COMPLETE DARKNESS',
+    'WITHOUT SPEAKING',
+    'WHILE HOPPING ON ONE LEG',
+    'WITH ONE ARM TIED BEHIND YOUR BACK',
+    'WHILE WEARING MITTENS',
+    'ON A TIGHT BUDGET',
+    'IN TOTAL SILENCE',
+    'WITHOUT INSTRUCTIONS',
+    'USING ONLY ONE TOOL',
+    'WITH NO PREPARATION',
+    'WHILE BEING TIMED',
+    'IN FRONT OF A CROWD',
+    'ON YOUR FIRST TRY',
+    'WITHOUT TOUCHING THE GROUND',
+    'USING ONLY NATURAL MATERIALS',
+    'DURING A RAINSTORM',
+    'IN EXTREME HEAT',
+    'IN EXTREME COLD',
+    'WHILE SLEEP DEPRIVED',
+    'WITH NO HELP',
+    'AGAINST THE CLOCK'
+  ],
+  normal: [
+    'BUT IT\'S UNDERWATER',
+    'BUT YOU\'RE IN A LIBRARY',
+    'WHILE EVERYTHING SPINS',
+    'IN ZERO GRAVITY',
+    'MADE OF CHEESE',
+    'USING ONLY YOUR FEET',
+    'WHILE MOONWALKING',
+    'ON ROLLER SKATES',
+    'AS A HOLOGRAM',
+    'BACKWARDS',
+    'UPSIDE DOWN',
+    'IN SLOW MOTION',
+    'AT SUPER SPEED',
+    'WHILE INVISIBLE',
+    'AS A PUPPET',
+    'THROUGH A TRANSLATOR',
+    'IN REVERSE CHRONOLOGICAL ORDER',
+    'WHILE SHRINKING',
+    'WHILE GROWING',
+    'ON A MOVING TRAIN',
+    'IN A BOUNCY CASTLE',
+    'DURING AN EARTHQUAKE',
+    'ON ICE',
+    'IN QUICKSAND',
+    'ON A TIGHTROPE',
+    'IN A MIRROR MAZE',
+    'THROUGH A KALEIDOSCOPE',
+    'IN BLACK AND WHITE',
+    'IN A DIFFERENT LANGUAGE',
+    'AS A SHADOW',
+    'IN A WIND TUNNEL',
+    'ON THE MOON',
+    'IN A DREAM',
+    'AS A VIDEO GAME',
+    'IN SIGN LANGUAGE',
+    'THROUGH INTERPRETIVE DANCE',
+    'AS A MUSICAL',
+    'IN HAIKU FORM',
+    'USING ONLY EMOJIS'
+  ],
+  hard: [
+    'BUT YOU\'RE MADE OF PUDDING',
+    'AS A SENTIENT CLOUD',
+    'WHERE TIME MOVES BACKWARDS',
+    'IN A WORLD OF ONLY SOUNDS',
+    'WHILE EVERYTHING TASTES PURPLE',
+    'WHERE WORDS DON\'T EXIST',
+    'IN 4D SPACE',
+    'THAT\'S ALSO A DREAM',
+    'WHILE YOU\'RE THE ECHO',
+    'WHERE PHYSICS IS REVERSED',
+    'AS YOUR OWN REFLECTION',
+    'IN A RECURSIVE LOOP',
+    'ACROSS PARALLEL UNIVERSES',
+    'AS A MATHEMATICAL EQUATION',
+    'WHERE CAUSE AND EFFECT ARE SWAPPED',
+    'IN A NON-EUCLIDEAN SPACE',
+    'AS PURE ENERGY',
+    'WHERE THOUGHTS ARE VISIBLE',
+    'IN THE SPACE BETWEEN MOMENTS',
+    'AS A COLLECTIVE CONSCIOUSNESS',
+    'WHERE REALITY IS SUBJECTIVE',
+    'IN THE QUANTUM REALM',
+    'AS AN ABSTRACT CONCEPT',
+    'WHERE UP IS DOWN AND LEFT IS TOMORROW',
+    'IN A WORLD WHERE YOU DON\'T EXIST',
+    'AS THE ABSENCE OF SOMETHING',
+    'WHERE EVERYTHING IS METAPHORICAL',
+    'IN A PARADOX',
+    'AS AN IMPOSSIBLE OBJECT',
+    'WHERE MEANING IS MEANINGLESS',
+    'IN THE SPACE BETWEEN THOUGHTS',
+    'AS A GLITCH IN REALITY',
+    'WHERE ALL SENSES ARE MERGED',
+    'IN A DIMENSION OF PURE EMOTION',
+    'AS THE ANSWER TO A QUESTION',
+    'WHERE NOTHING AND EVERYTHING COEXIST',
+    'IN THE LANGUAGE OF COLORS',
+    'AS A MEMORY THAT NEVER HAPPENED',
+    'WHERE TIME IS A FLAT CIRCLE',
+    'IN THE VOID WHERE LOGIC DIED'
+  ]
+};
+
+// Generate a random scenario from templates
+function generateScenario(theme = 'all') {
+  const categories = theme === 'all' 
+    ? Object.keys(SCENARIO_TEMPLATES) 
+    : [theme];
   
-  // Combat & Action
-  { scenario: 'DEFEAT AN ALIEN INVASION', twists: ['BUT YOU CAN ONLY USE MIME SKILLS', 'BUT YOU\'RE ALLERGIC TO OXYGEN', 'BUT YOU\'RE IN A LIBRARY', 'BUT YOU\'RE MADE OF PUDDING'] },
-  { scenario: 'WIN A SWORD FIGHT', twists: ['WITH RUBBER CHICKENS', 'WHILE DANCING THE TANGO', 'BLINDFOLDED WITH EARMUFFS', 'ON A GIANT HAMSTER WHEEL'] },
-  { scenario: 'SAVE THE WORLD FROM A METEOR', twists: ['USING ONLY HUGS', 'WHILE EVERYONE IS TINY', 'IN A SHOE BOX', 'SPEAKING ONLY IN PUNS'] },
-  { scenario: 'ESCAPE FROM PRISON', twists: ['BUT IT\'S MADE OF ICE', 'BUT A CHILD IS IN CHARGE', 'BUT YOU CAN\'T SPEAK', 'WITH ONLY SPAGHETTI'] },
-  { scenario: 'WIN A ZOMBIE APOCALYPSE', twists: ['USING COMPLIMENTS', 'WHILE HOPPING ON ONE LEG', 'IN A BOUNCY CASTLE', 'AS A SENTIENT CLOUD'] },
+  const category = categories[Math.floor(Math.random() * categories.length)];
+  const templates = SCENARIO_TEMPLATES[category];
+  const template = templates[Math.floor(Math.random() * templates.length)];
   
-  // Entertainment & Performance
-  { scenario: 'WIN A SINGING COMPETITION', twists: ['BUT YOU CAN ONLY HUM', 'BUT EVERYONE IS BACKWARDS', 'WHILE UNDERWATER', 'AS A HOLOGRAM'] },
-  { scenario: 'WIN A DANCING COMPETITION', twists: ['BUT YOU CAN ONLY MOVE DIAGONALLY', 'BUT GRAVITY IS MULTIPLIED BY 5', 'IN SLOW MOTION', 'ON STILTS'] },
-  { scenario: 'BECOME A STAND-UP COMEDY STAR', twists: ['BUT YOU FORGOT ALL WORDS', 'WHILE STANDING ON YOUR HEAD', 'IN A LIBRARY', 'AS YOUR OWN ECHO'] },
-  { scenario: 'PERFORM IN A MAGIC SHOW', twists: ['USING ONLY HAND GESTURES', 'WHILE INVISIBLE', 'IN A MIRROR ROOM', 'WITH NO MAGIC AT ALL'] },
-  { scenario: 'WIN A BEAUTY PAGEANT', twists: ['BUT BEAUTY IS JUDGED BACKWARDS', 'BUT YOU\'RE A SENTIENT BLOB', 'BUT ONLY FEET MATTER', 'AS SENTIENT JELLO'] },
+  let scenario = template.template;
+  template.vars.forEach(varName => {
+    const words = WORD_BANKS[varName];
+    const word = words[Math.floor(Math.random() * words.length)];
+    scenario = scenario.replace(`{${varName}}`, word);
+  });
   
-  // Love & Relationships
-  { scenario: 'WIN THE HEART OF YOUR CRUSH', twists: ['WITHOUT USING WORDS', 'WHILE EVERYTHING TASTES PURPLE', 'IN A CROWDED MALL', 'COVERED IN OATMEAL'] },
-  { scenario: 'PLAN THE PERFECT WEDDING', twists: ['IN 15 SECONDS', 'ON A ROCKET SHIP', 'WITH ONLY CHEESE', 'WHILE STUCK IN A LOOP'] },
-  { scenario: 'GET OUT OF A TERRIBLE DATE', twists: ['WITHOUT BEING RUDE', 'WHILE FEET GROWN WINGS', 'IN ZERO GRAVITY', 'BY BECOMING A PARROT'] },
+  return { scenario, category };
+}
+
+// Generate twists based on difficulty
+function generateTwists(difficulty = 'normal', count = 4) {
+  const easyTwists = TWIST_TEMPLATES.easy;
+  const normalTwists = TWIST_TEMPLATES.normal;
+  const hardTwists = TWIST_TEMPLATES.hard;
   
-  // Adventure & Exploration
-  { scenario: 'CLIMB MOUNT EVEREST', twists: ['BACKWARDS', 'IN ROLLER SKATES', 'MADE OF COTTON CANDY', 'WHILE VIBRATING'] },
-  { scenario: 'EXPLORE THE DEPTHS OF THE OCEAN', twists: ['BUT WATER IS NOW AIR', 'AND YOU\'RE A FLOATING EYEBALL', 'WITH REVERSE GRAVITY', 'SPEAKING ONLY WHALE'] },
-  { scenario: 'SURVIVE IN THE JUNGLE', twists: ['BUT YOU\'RE 2 INCHES TALL', 'AND EVERYTHING IS POISONED', 'WITH NO SENSE OF SMELL', 'WHILE YODELING CONSTANTLY'] },
-  { scenario: 'CROSS A DESERT ON FOOT', twists: ['BUT SAND IS NOW LIQUID', 'AND YOU\'RE MADE OF ICE', 'WHILE MOONWALKING', 'BACKWARDS THROUGH TIME'] },
+  let pool = [];
+  if (difficulty === 'easy') {
+    pool = [...easyTwists, ...normalTwists.slice(0, 3)];
+  } else if (difficulty === 'hard') {
+    pool = [...normalTwists, ...hardTwists];
+  } else {
+    pool = [...easyTwists.slice(0, 2), ...normalTwists, ...hardTwists.slice(0, 2)];
+  }
   
-  // Mystery & Investigation
-  { scenario: 'SOLVE A MYSTERY IN A HAUNTED MANSION', twists: ['BUT THE GHOSTS ARE HELPFUL', 'BUT YOU\'RE ALL VERY TINY', 'BUT TIME MOVES BACKWARDS', 'AND WALLS ARE INVISIBLE'] },
-  { scenario: 'CATCH A MASTER THIEF', twists: ['BUT YOU\'RE THE PRODUCT OF THEIR IMAGINATION', 'WHILE EVERYTHING\'S IN REVERSE', 'USING ONLY KNITTED ITEMS', 'IN A WORLD OF SOUND'] },
-  { scenario: 'FIND HIDDEN TREASURE', twists: ['BUT THE MAP IS EDIBLE', 'AND YOU CAN ONLY FOLLOW SONGS', 'THE TREASURE IS MADE OF FEELINGS', 'AND IT\'S EVERYWHERE AT ONCE'] },
-  
-  // Building & Creation
-  { scenario: 'BUILD A FUNCTIONING SPACESHIP', twists: ['USING ONLY CHEESE', 'WITHOUT TOUCHING ANYTHING', 'WHERE GRAVITY WORKS SIDEWAYS', 'WITH YOUR EYES CLOSED'] },
-  { scenario: 'DESIGN A NEW CITY', twists: ['WHERE BUILDINGS ARE ALIVE', 'THAT FITS IN A SHOEBOX', 'BUILT ENTIRELY OF PASTA', 'FLOATING IN SPACE'] },
-  { scenario: 'CONSTRUCT A BRIDGE ACROSS A RIVER', twists: ['USING ONLY PILLOWS', 'WHILE THE RIVER FLOWS UP', 'IN COMPLETE SILENCE', 'MADE ENTIRELY OF DREAMS'] },
-  { scenario: 'BUILD A THEME PARK', twists: ['USING ONLY FELT', 'WHERE EVERYTHING SPINS', 'THAT ONLY KIDS CAN SEE', 'IN 3 MINUTES'] },
-  
-  // Sports & Games
-  { scenario: 'WIN AN OLYMPIC MEDAL', twists: ['IN A SPORT THAT DOESN\'T EXIST', 'WHILE EVERYTHING IS UPSIDE DOWN', 'HOPPING ON ONE LEG', 'AS A SENTIENT CLOUD'] },
-  { scenario: 'WIN A POKER TOURNAMENT', twists: ['WITH NO CARDS', 'BLINDFOLDED BACKWARDS', 'SPEAKING ONLY IN EMOJIS', 'WHERE LUCK IS REVERSED'] },
-  { scenario: 'COMPLETE A MARATHON', twists: ['BUT YOU MOVE IN SQUARES ONLY', 'ON BOUNCY SURFACES', 'WHILE GETTING SMALLER', 'THROUGH A HALLWAY THAT\'S SHRINKING'] },
-  { scenario: 'WIN A CHESS MATCH', twists: ['WHERE PIECES ARE ALIVE', 'AND BETRAYING YOU', 'BY ONLY HUMMING', 'INSIDE A WASHING MACHINE'] },
-  
-  // Science & Technology
-  { scenario: 'INVENT TIME TRAVEL', twists: ['BUT YOU CAN ONLY GO FORWARD', 'USING ONLY SOCKS', 'IN A LIBRARY', 'WHILE EVERYONE ARGUES'] },
-  { scenario: 'CURE A MYSTERIOUS DISEASE', twists: ['WITH A RUBBER DUCK', 'IN TOTAL DARKNESS', 'WITH REVERSED SENSES', 'WHILE SINGING'] },
-  { scenario: 'LAUNCH A SATELLITE', twists: ['USING ONLY SPAGHETTI', 'WHILE STANDING ON HANDS', 'INTO A GIANT SOCK', 'MADE OF CLOUDS'] },
-  { scenario: 'HACK INTO A SUPERCOMPUTER', twists: ['USING ONLY TEXT', 'WHILE THE SCREEN IS BLANK', 'IN A MIRROR MAZE', 'WITH A KALEIDOSCOPE'] },
-  
-  // Social & Political
-  { scenario: 'CONVINCE A BILLIONAIRE TO GIVE YOU MONEY', twists: ['BUT THEY ONLY SPEAK DOLPHIN', 'BUT YOU\'RE INVISIBLE', 'BUT YOU\'RE STUCK IN A BARREL', 'BUT ALL WORDS ARE REVERSED'] },
-  { scenario: 'BECOME PRESIDENT OF THE WORLD', twists: ['BUT LAWS ARE FEELINGS', 'AND VOTES ARE THOUGHTS', 'IN A WORLD OF ONLY COLORS', 'WHERE EVERYONE\'S A CLONE'] },
-  { scenario: 'NEGOTIATE A PEACE TREATY', twists: ['USING ONLY EMOTIONS', 'WHILE EVERYTHING VIBRATES', 'IN A LANGUAGE THAT\'S DANCING', 'WHERE SILENCE SPEAKS'] },
-  
-  // Weird & Absurd
-  { scenario: 'BECOME A SENTIENT CLOUD', twists: ['WHILE EVAPURATING', 'IN A THUNDERSTORM OF THOUGHTS', 'WHILE MAKING RAIN DECISIONS', 'THAT TASTE COLORS'] },
-  { scenario: 'TRANSFORM INTO A DANCE MOVE', twists: ['THAT PEOPLE DO BACKWARDS', 'IN 4D SPACE', 'WHILE STAYING STILL', 'THAT TEACHES HAPPINESS'] },
-  { scenario: 'COMMUNICATE WITH FURNITURE', twists: ['WHO WANT REVENGE', 'USING ONLY TEXTURES', 'WHILE THEY\'RE SLEEPING', 'WHO ARE BETTER THAN YOU'] },
-  { scenario: 'MAKE FRIENDS WITH AN EMOTION', twists: ['THAT\'S NOT REAL', 'IN A WORLD OF ONLY SOUNDS', 'THAT KEEPS LEAVING', 'THAT IS YOU'] },
-  { scenario: 'TEACH A ROCK TO LOVE', twists: ['BUT IT ALREADY DOES', 'AND IT\'S ANGRIER NOW', 'IN A LANGUAGE OF TEXTURES', 'WHILE IT JUDGES YOU'] },
-  
-  // More Action
-  { scenario: 'SURVIVE A LAVA POOL CROSSING', twists: ['BUT LAVA IS NOW CHEESE', 'WHILE EVERYTHING SHRINKS', 'HOLDING HANDS BACKWARDS', 'IN A MIRRORED WORLD'] },
-  { scenario: 'FIGHT OFF A DRAGON', twists: ['WITH KINDNESS ONLY', 'WHILE YOU\'RE SHRINKING', 'IN A LIBRARY THAT\'S TALKING', 'MADE ENTIRELY OF ARGUMENTS'] },
-  { scenario: 'ESCAPE FROM A GIANT SQUID', twists: ['WHO WANTS TO BE FRIENDS', 'IN AN ELEVATOR', 'THAT\'S ALSO A SQUID', 'WHILE SOUND IS VISIBLE'] },
-  { scenario: 'OUTSMART AN AI', twists: ['THAT\'S ACTUALLY KIND', 'USING ONLY JOKES', 'IN A WORLD IT CREATED', 'WHERE IT WINS EITHER WAY'] },
-  
-  // More Performance
-  { scenario: 'WIN A POETRY SLAM', twists: ['WHERE WORDS DON\'T EXIST', 'USING ONLY SILENCES', 'SPOKEN BACKWARDS IN COLORS', 'BY A CROWD THAT\'S DEAF'] },
-  { scenario: 'DIRECT AN OSCAR-WINNING FILM', twists: ['THAT HAS NO SCRIPT', 'IN A NUT SHELL', 'ACTED BY EMOTIONS', 'NO CAMERAS ALLOWED'] },
-  { scenario: 'COMPOSE A SYMPHONY', twists: ['USING ONLY TEXTURES', 'IN A LANGUAGE OF COLORS', 'WHERE NOTES ARE FEELINGS', 'THAT ALREADY EXISTS'] },
-  
-  // More Weird Combos
-  { scenario: 'TEACH DINOSAURS TO CODE', twists: ['BUT THEY\'RE NOW TINY', 'IN A LIBRARY MADE OF TIME', 'WHILE EXTINCT', 'USING EXTINCT LANGUAGES'] },
-  { scenario: 'CONVINCE GRAVITY IT\'S WRONG', twists: ['AND WIN', 'BY ARGUING WITH PHYSICS', 'IN A WORLD WITHOUT WORDS', 'WHERE YOU\'RE PROVEN RIGHT'] },
-  { scenario: 'START A REVOLUTION OF SOCKS', twists: ['LED BY SOCKS', 'AGAINST SHOES', 'IN A DRYING MACHINE', 'THAT WINS'] }
-];
+  const shuffled = pool.sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+// Backward compatibility: generate static scenarios
+function generateScenarios(count = 3, theme = 'all', difficulty = 'normal') {
+  const scenarios = [];
+  for (let i = 0; i < count; i++) {
+    const { scenario } = generateScenario(theme);
+    const twists = generateTwists(difficulty, 4);
+    scenarios.push({ scenario, twists, category: theme });
+  }
+  return scenarios;
+}
 
 // ========================
-// FINAL ROUND PROMPTS (30-40 VARIANTS)
+// TEMPLATE-BASED FINAL VOTING PROMPTS
+// (Generates 5000+ unique prompts from expanded templates)
 // ========================
-const FINAL_VOTING_PROMPTS = [
-  'Now which drafted team has made the best..... BASKETBALL TEAM!!??!!',
-  'Now which drafted team has made the best..... BASEBALL TEAM!!??!!',
-  'Now which drafted team has made the best..... HEIST TEAM!!??!!',
-  'Now which drafted team has made the best..... BOWLING TEAM!!??!!',
-  'Now which drafted team has made the best..... SPACE CREW!!??!!',
-  'Now which drafted team has made the best..... ZOMBIE SURVIVAL TEAM!!??!!',
-  'Now which drafted team has made the best..... SUPERHERO SQUAD!!??!!',
-  'Now which drafted team has made the best..... VILLAIN LEAGUE!!??!!',
-  'Now which drafted team has made the best..... DETECTIVE UNIT!!??!!',
-  'Now which drafted team has made the best..... ROCK BAND!!??!!',
-  'Now which drafted team has made the best..... POP IDOL GROUP!!??!!',
-  'Now which drafted team has made the best..... GAME SHOW TEAM!!??!!',
-  'Now which drafted team has made the best..... COOKING CREW!!??!!',
-  'Now which drafted team has made the best..... WIZARD COUNCIL!!??!!',
-  'Now which drafted team has made the best..... PIRATE CREW!!??!!',
-  'Now which drafted team has made the best..... NINJA SQUAD!!??!!',
-  'Now which drafted team has made the best..... SPACE MARINES!!??!!',
-  'Now which drafted team has made the best..... RACING TEAM!!??!!',
-  'Now which drafted team has made the best..... SCIENCE TEAM!!??!!',
-  'Now which drafted team has made the best..... TIME TRAVEL CREW!!??!!',
-  'Now which drafted team has made the best..... ESCAPE ROOM TEAM!!??!!',
-  'Now which drafted team has made the best..... MYSTERY SOLVERS!!??!!',
-  'Now which drafted team has made the best..... DRAGON SLAYERS!!??!!',
-  'Now which drafted team has made the best..... UNDERWATER CREW!!??!!',
-  'Now which drafted team has made the best..... MARS COLONY TEAM!!??!!',
-  'Now which drafted team has made the best..... AIRSHIP CREW!!??!!',
-  'Now which drafted team has made the best..... MONSTER HUNTERS!!??!!',
-  'Now which drafted team has made the best..... DREAM TEAM!!??!!',
-  'Now which drafted team has made the best..... SNEAKY SPY TEAM!!??!!',
-  'Now which drafted team has made the best..... SURVIVAL ISLAND TEAM!!??!!',
-  'Now which drafted team has made the best..... ROBOT SQUAD!!??!!',
-  'Now which drafted team has made the best..... MAGIC SHOW CREW!!??!!',
-  'Now which drafted team has made the best..... STREET DANCE CREW!!??!!',
-  'Now which drafted team has made the best..... SPACE RANGERS!!??!!',
-  'Now which drafted team has made the best..... FANTASY RAID PARTY!!??!!',
-  'Now which drafted team has made the best..... HOLIDAY RESCUE TEAM!!??!!'
+
+const FINAL_PROMPT_TEMPLATES = [
+  '{TEAM_TYPE} TEAM', '{TEAM_TYPE} SQUAD', '{TEAM_TYPE} CREW', '{TEAM_TYPE} UNIT',
+  '{TEAM_TYPE} LEAGUE', '{TEAM_TYPE} PARTY', '{TEAM_TYPE} FORCE', '{TEAM_TYPE} ALLIANCE',
+  '{TEAM_TYPE} BRIGADE', '{TEAM_TYPE} DIVISION', '{TEAM_TYPE} COALITION', '{TEAM_TYPE} SYNDICATE',
+  '{TEAM_TYPE} COLLECTIVE', '{TEAM_TYPE} ENSEMBLE', '{TEAM_TYPE} GUILD', '{TEAM_TYPE} ORDER',
+  '{TEAM_TYPE} SOCIETY', '{TEAM_TYPE} BROTHERHOOD', '{TEAM_TYPE} SISTERHOOD', '{TEAM_TYPE} FELLOWSHIP',
+  '{TEAM_TYPE} CORPS', '{TEAM_TYPE} REGIMENT', '{TEAM_TYPE} BATTALION', '{TEAM_TYPE} PLATOON',
+  '{TEAM_TYPE} TASKFORCE', '{TEAM_TYPE} COMMITTEE', '{TEAM_TYPE} COUNCIL', '{TEAM_TYPE} ASSEMBLY',
+  '{TEAM_TYPE} CONSORTIUM', '{TEAM_TYPE} FEDERATION', '{TEAM_TYPE} UNION', '{TEAM_TYPE} ORGANIZATION'
 ];
+
+const TEAM_TYPES = [
+  // Sports - Traditional
+  'BASKETBALL', 'BASEBALL', 'FOOTBALL', 'SOCCER', 'HOCKEY', 'VOLLEYBALL', 'TENNIS',
+  'RUGBY', 'CRICKET', 'LACROSSE', 'SOFTBALL', 'HANDBALL', 'WATER POLO', 'FIELD HOCKEY',
+  // Sports - Combat & Individual
+  'BOXING', 'MMA', 'WRESTLING', 'JUDO', 'KARATE', 'TAEKWONDO', 'FENCING', 'KICKBOXING',
+  'GYMNASTICS', 'FIGURE SKATING', 'TRACK AND FIELD', 'SWIMMING', 'DIVING', 'ARCHERY',
+  // Sports - Extreme & Modern
+  'SKATEBOARDING', 'SNOWBOARDING', 'SURFING', 'BMX', 'PARKOUR', 'ROCK CLIMBING', 'ESPORTS',
+  'DRONE RACING', 'COMPETITIVE EATING', 'SPEED CUBING', 'PROFESSIONAL TAG', 'DODGEBALL',
+  // Action & Adventure
+  'HEIST', 'SPY', 'DETECTIVE', 'MYSTERY SOLVING', 'ESCAPE ROOM', 'TREASURE HUNTING',
+  'BOUNTY HUNTING', 'MERCENARY', 'VIGILANTE', 'SECRET AGENT', 'COVERT OPS', 'BLACK OPS',
+  // Survival & Combat
+  'ZOMBIE SURVIVAL', 'APOCALYPSE', 'MONSTER HUNTING', 'DRAGON SLAYING', 'DEMON HUNTING',
+  'VAMPIRE HUNTING', 'ALIEN FIGHTING', 'KAIJU DEFENSE', 'WASTELAND SCAVENGING', 'BUNKER',
+  // Fantasy & Mythology
+  'SUPERHERO', 'VILLAIN', 'MAGICAL', 'WIZARD', 'NINJA', 'PIRATE', 'KNIGHT', 'SAMURAI',
+  'VIKING', 'GLADIATOR', 'CRUSADER', 'TEMPLAR', 'ASSASSIN', 'RANGER', 'PALADIN', 'WARLOCK',
+  'NECROMANCER', 'DRUID', 'MONK', 'BARD', 'ROGUE', 'BARBARIAN', 'SORCERER', 'CLERIC',
+  // Sci-Fi & Space
+  'SPACE', 'MARS COLONY', 'UNDERWATER', 'AIRSHIP', 'TIME TRAVEL', 'SPACE MARINES',
+  'STARSHIP', 'ORBITAL', 'LUNAR BASE', 'ASTEROID MINING', 'TERRAFORMING', 'WARP DRIVE',
+  'CYBORG', 'ANDROID', 'SYNTHETIC', 'MECH PILOT', 'GUNDAM', 'TRANSFORMER',
+  // Performance & Arts
+  'ROCK BAND', 'POP IDOL', 'DJ', 'DANCE', 'COMEDY', 'MAGIC SHOW', 'THEATER', 'IMPROV',
+  'ACAPELLA', 'ORCHESTRA', 'JAZZ BAND', 'RAP BATTLE', 'BEATBOX', 'BREAKDANCING', 'BALLET',
+  // Food & Hospitality
+  'COOKING', 'BAKING', 'RESTAURANT', 'FOOD TRUCK', 'CATERING', 'PASTRY', 'SUSHI',
+  'MIXOLOGY', 'WINE TASTING', 'FOOD CRITIC', 'FARM TO TABLE', 'MOLECULAR GASTRONOMY',
+  // Competition & Game Shows
+  'RACING', 'RALLY', 'DRIFT', 'OBSTACLE COURSE', 'TRIVIA', 'GAME SHOW', 'REALITY TV',
+  'TALENT SHOW', 'COMPETITION', 'TOURNAMENT', 'CHAMPIONSHIP', 'DEATH MATCH',
+  // Science & Technology
+  'SCIENCE', 'RESEARCH', 'INVENTION', 'CODING', 'HACKING', 'ROBOTICS', 'AI DEVELOPMENT',
+  'QUANTUM COMPUTING', 'BIOENGINEERING', 'NANOTECHNOLOGY', 'CYBERSECURITY', 'DATA SCIENCE',
+  // Business & Professional
+  'STARTUP', 'MARKETING', 'SALES', 'CONSULTING', 'LEGAL', 'MEDICAL', 'EMERGENCY',
+  'FIREFIGHTING', 'SEARCH AND RESCUE', 'DISASTER RELIEF', 'CRISIS MANAGEMENT', 'SWAT',
+  // Creative & Media
+  'FILM', 'DOCUMENTARY', 'ANIMATION', 'VIDEO GAME', 'PODCAST', 'STREAMING', 'YOUTUBE',
+  'PHOTOGRAPHY', 'JOURNALISM', 'INFLUENCER', 'CONTENT CREATION', 'VIRAL MARKETING',
+  // Weird & Absurd
+  'DREAM', 'NIGHTMARE', 'EXISTENTIAL CRISIS', 'PHILOSOPHICAL DEBATE', 'MEME CREATION',
+  'TIME LOOP ESCAPE', 'DIMENSION HOPPING', 'REALITY RESTRUCTURING', 'CHAOS MANAGEMENT',
+  'VOID EXPLORATION', 'MULTIDIMENSIONAL CHESS', 'PARADOX RESOLUTION', 'COSMIC HORROR'
+];
+
+function generateFinalPrompt() {
+  const template = FINAL_PROMPT_TEMPLATES[Math.floor(Math.random() * FINAL_PROMPT_TEMPLATES.length)];
+  const teamType = TEAM_TYPES[Math.floor(Math.random() * TEAM_TYPES.length)];
+  const prompt = template.replace('{TEAM_TYPE}', teamType);
+  return `Now which drafted team has made the best..... ${prompt}!!??!!`;
+}
 
 // ========================
 // IN-MEMORY STATE
@@ -187,7 +452,8 @@ function createRoom(roomCode) {
       difficulty: 'normal',
       scenarioTheme: 'all',
       plotTwists: true,
-      maxPlayers: 6
+      maxPlayers: 6,
+      customScenario: ''
     },
     messages: [],
     reactions: {}
@@ -195,10 +461,20 @@ function createRoom(roomCode) {
 }
 
 function createGameInstance(roomCode, players, settings) {
-  const shuffleArray = (arr) => arr.sort(() => Math.random() - 0.5);
-  let scenarios = [...SCENARIOS];
+  // Generate scenarios using template system based on theme and difficulty
+  const theme = settings.scenarioTheme || 'all';
+  const difficulty = settings.difficulty || 'normal';
+  const scenarios = generateScenarios(3, theme, difficulty);
   
-  scenarios = shuffleArray(scenarios).slice(0, 3);
+  // Add custom scenario if provided (replaces one random scenario)
+  if (settings.customScenario && settings.customScenario.trim()) {
+    const customIndex = Math.floor(Math.random() * scenarios.length);
+    scenarios[customIndex] = {
+      scenario: settings.customScenario.trim().toUpperCase(),
+      twists: generateTwists(difficulty, 4),
+      category: 'custom'
+    };
+  }
 
   return {
     id: `game_${Date.now()}_${roomCode}`,
@@ -586,7 +862,7 @@ function startFinalVoting(roomCode) {
   game.votes = {};
   game.voteLocks = {};
 
-  const finalPrompt = FINAL_VOTING_PROMPTS[Math.floor(Math.random() * FINAL_VOTING_PROMPTS.length)];
+  const finalPrompt = generateFinalPrompt();
   const finalScenario = game.scenarios[Math.floor(Math.random() * game.scenarios.length)];
   game.currentScenario = finalScenario.scenario;
 

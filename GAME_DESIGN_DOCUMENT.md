@@ -857,13 +857,13 @@ console.log('User connected:', socket.id)
 - [ ] Tutorial/help screen
 - [ ] Keyboard shortcuts display
 
-### Phase 2: Content Expansion (Month 1)
+### Phase 2: Content Expansion (Month 1) <--FINISHED-->
 
 - [ ] Add 50+ more scenarios
 - [ ] Scenario categories/themes
 - [ ] Custom scenario editor (host)
 - [ ] Scenario voting (players choose)
-- [ ] Difficulty scaling (more twists on hard)
+- [ ] Difficulty scaling (more unique/out of left field twists on hard)
 
 ### Phase 3: Social Features (Month 2-3)
 

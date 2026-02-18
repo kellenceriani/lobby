@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ff4081">
+  <meta name="description" content="Team Chaos - Real-time multiplayer party game for 3-6 players">
   <title>Team Chaos - Party Game</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -14,10 +16,21 @@
       <h1>⚡ TEAM CHAOS ⚡</h1>
       <p class="subtitle">Real-Time Party Game for 3-6 Players</p>
       <p class="tagline">Build absurd teams • Vote for chaos • Win glory</p>
-      <input id="name" placeholder="Enter your name" maxlength="20" autocomplete="off" aria-label="Player name">
-      <input id="room" placeholder="Room Code (e.g., ABC123)" maxlength="6" aria-label="Room code">
+      
+      <div class="input-group">
+        <label for="name">🎭 Your Name:</label>
+        <input id="name" placeholder="Enter your name" maxlength="20" autocomplete="off" aria-label="Player name">
+      </div>
+      
+      <div class="input-group">
+        <label for="room">🏠 Room Code:</label>
+        <input id="room" placeholder="ABC123" maxlength="6" aria-label="Room code">
+      </div>
+      
       <button class="btn btn-primary" onclick="joinRoom()" aria-label="Join room and start game">ENTER THE CHAOS</button>
+      
       <p class="hint">💡 Share the room code with friends to play together</p>
+      <p class="hint" style="font-size: 0.85em; color: #999;">Need 3-6 players to start a game</p>
     </div>
   </div>
 
@@ -25,8 +38,14 @@
   <div id="lobby" class="screen">
     <div class="lobby-container">
       <div class="lobby-header">
-        <h1>🎮 TEAM CHAOS</h1>
-        <p>Room Code: <span id="roomCode" class="room-badge">----</span></p>
+        <div style="display: flex; align-items: center; gap: 20px; justify-content: space-between;">
+          <h1>🎮 TEAM CHAOS</h1>
+          <div style="text-align: right;">
+            <p style="margin: 0; font-size: 0.9em; color: #999;">Room Code:</p>
+            <span id="roomCode" class="room-badge">----</span>
+            <p style="margin: 5px 0 0 0; font-size: 0.85em;">Players: <span id="playerCountBadge" class="player-count">0/6</span></p>
+          </div>
+        </div>
       </div>
 
       <div class="lobby-main">
@@ -35,19 +54,19 @@
           <h3>⚙️ GAME SETTINGS</h3>
           <div id="settingsContent" class="settings-content" style="display: none;">
             <label>
-              <strong>Difficulty:</strong>
-              <select id="difficulty" onchange="updateSetting('difficulty', this.value)">
-                <option value="easy">🟢 Easy (Obvious picks)</option>
-                <option value="normal" selected>🟡 Normal (Balanced)</option>
-                <option value="hard">🔴 Hard (Tricky choices)</option>
+              <strong>📊 Difficulty:</strong>
+              <select id="difficulty" onchange="updateSetting('difficulty', this.value)" aria-label="Game difficulty">
+                <option value="easy">🟢 Easy</option>
+                <option value="normal" selected>🟡 Normal</option>
+                <option value="hard">🔴 Hard</option>
               </select>
             </label>
             <label>
               <input type="checkbox" id="plotTwists" checked onchange="updateSetting('plotTwists', this.checked)">
-              ✨ Plot Twists Enabled
+              ✨ Enable Plot Twists
             </label>
             <hr>
-            <p class="settings-note"><strong>✓ You are the HOST</strong> - Change these settings as you like!</p>
+            <p class="settings-note"><strong>✓ You are the HOST</strong></p>
           </div>
           <div id="hostNote" class="host-note" style="display: none;">
             <p id="settingsNote">👤 Host: <strong id="hostNameDisplay">Loading...</strong></p>
@@ -56,26 +75,26 @@
 
         <!-- Players List -->
         <div class="players-panel">
-          <h3>👥 PLAYERS <span id="playerCountLabel" class="player-count">(0/6)</span></h3>
-          <ul id="playerList" class="player-list">
-            <li style="font-size: 0.9em; color: #999;">Waiting for players...</li>
+          <h3>👥 PLAYERS</h3>
+          <ul id="playerList" class="player-list" role="list">
+            <li style="font-size: 0.9em; color: #999; text-align: center;">Waiting for players...</li>
           </ul>
         </div>
 
         <!-- Chat Section -->
         <div class="chat-panel">
-          <h3>💬 CHAT & REACTIONS</h3>
+          <h3>💬 CHAT</h3>
           <ul id="chatMessages" class="chat-messages"></ul>
           <div class="chat-input-area">
-            <input id="chatInput" placeholder="Say something..." maxlength="50">
-            <button class="btn btn-chat" onclick="sendMessage()">Send</button>
+            <input id="chatInput" placeholder="Say something..." maxlength="50" aria-label="Chat message">
+            <button class="btn btn-chat" onclick="sendMessage()" aria-label="Send message">Send</button>
           </div>
           <div class="reactions-bar">
-            <button class="reaction-btn" onclick="sendReaction('😂')">😂</button>
-            <button class="reaction-btn" onclick="sendReaction('🔥')">🔥</button>
-            <button class="reaction-btn" onclick="sendReaction('👏')">👏</button>
-            <button class="reaction-btn" onclick="sendReaction('🤔')">🤔</button>
-            <button class="reaction-btn" onclick="sendReaction('💀')">💀</button>
+            <button class="reaction-btn" onclick="sendReaction('😂')" title="Laugh">😂</button>
+            <button class="reaction-btn" onclick="sendReaction('🔥')" title="Fire">🔥</button>
+            <button class="reaction-btn" onclick="sendReaction('👏')" title="Applause">👏</button>
+            <button class="reaction-btn" onclick="sendReaction('🤔')" title="Think">🤔</button>
+            <button class="reaction-btn" onclick="sendReaction('💀')" title="Dying">💀</button>
           </div>
         </div>
       </div>
@@ -83,20 +102,16 @@
       <!-- Ready & Start Actions -->
       <div class="lobby-actions">
         <div class="action-buttons">
-          <button id="readyBtn" class="btn btn-secondary" onclick="toggleReady()">
+          <button id="readyBtn" class="btn btn-secondary" onclick="toggleReady()" aria-label="Toggle ready status">
             <span class="ready-indicator">○</span> NOT READY
           </button>
-          <button id="startBtn" class="btn btn-success" onclick="sendStartGame()" style="display: none;" disabled>
+          <button id="startBtn" class="btn btn-success" onclick="sendStartGame()" style="display: none;" disabled aria-label="Start game">
             ▶️ START GAME
           </button>
-          <button class="btn btn-danger" onclick="leaveRoom()">LEAVE</button>
+          <button class="btn btn-danger" onclick="leaveRoom()" aria-label="Leave room">LEAVE</button>
         </div>
-        <p id="minPlayersMsg" class="warning" style="display: none;">
-          ⚠️ HOST NEEDS: 2+ players ready to start
-        </p>
-        <p id="hostWaiting" class="info" style="display: none;">
-          ⏳ Waiting for host to start...
-        </p>
+        <p id="minPlayersMsg" class="warning" style="display: none;" role="status"></p>
+        <p id="hostWaiting" class="info" style="display: none;" role="status"></p>
       </div>
     </div>
   </div>
@@ -105,7 +120,7 @@
   <div id="preRound" class="screen">
     <div class="central-content">
       <h2 id="roundLabel">ROUND 1 OF 3</h2>
-      <div id="countdown" class="countdown">3</div>
+      <div id="countdown" class="countdown" role="status">3</div>
       <p>⚡ Get Ready for Chaos ⚡</p>
     </div>
   </div>
@@ -114,7 +129,7 @@
   <div id="scenarioScreen" class="screen">
     <div class="game-header">
       <div><strong>Round:</strong> <span id="currentRound">1</span>/3</div>
-      <div><strong>Time:</strong> <span id="draftTimer">45</span>s</div>
+      <div><strong>Time:</strong> <span id="draftTimer" style="color: #ff4081;">45</span>s</div>
     </div>
 
     <div class="scenario-box">
@@ -123,13 +138,16 @@
 
     <div class="draft-container">
       <div class="draft-section">
-        <p>✍️ Type a character and press ENTER <span id="draftCounter" style="color: #666; font-weight: normal;">(0/2)</span></p>
-        <input id="charInput" placeholder="Batman, Oprah, A Sentient Banana..." maxlength="30">
-        <div id="draftWarning"></div>  <!-- NEW WARNING ELEMENT -->
+        <p>✍️ Type a character and press ENTER or click CONFIRM <span id="draftCounter" style="color: #666; font-weight: normal;">(0/2)</span></p>
+        <div style="display: flex; gap: 10px; margin: 10px auto; width: 95%; max-width: 350px;">
+          <input id="charInput" placeholder="Batman, Oprah, A Sentient Banana..." maxlength="30" style="flex: 1;">
+          <button onclick="submitDraft(document.getElementById('charInput').value)" class="btn btn-success" style="padding: 12px 20px; flex-shrink: 0;" title="Confirm character">✓</button>
+        </div>
+        <div id="draftWarning"></div>
         <ul id="myTeam" class="my-team"></ul>
-          <button id="lockDraftBtn" class="btn btn-success" onclick="lockDraft()" style="display: none; margin-top: 10px; width: 90%; max-width: 350px;">
-            🔒 LOCK IN MY TEAM
-          </button>
+        <button id="lockDraftBtn" class="btn btn-success" onclick="lockDraft()" style="display: none; margin-top: 10px; width: 90%; max-width: 350px;">
+          🔒 LOCK IN MY TEAM
+        </button>
       </div>
 
       <div class="live-draft">
@@ -152,15 +170,15 @@
   <div id="votingScreen" class="screen">
     <div class="game-header">
       <div>⏱️ Voting Phase</div>
-      <div id="voteTimer">30</div>s remaining
+      <div id="voteTimer" style="color: #ff4081;">30</div>s remaining
     </div>
 
     <div class="voting-context">
       <div class="scenario-context">
-        <strong>Scenario:</strong> <span id="votingScenario"></span>
+        <strong>📋 Scenario:</strong> <span id="votingScenario"></span>
       </div>
       <div class="twist-context">
-        <strong>Plot Twist:</strong> <span id="votingTwist"></span>
+        <strong>🌀 Plot Twist:</strong> <span id="votingTwist"></span>
       </div>
     </div>
 
@@ -169,23 +187,21 @@
     <div id="votingTeams" class="voting-grid"></div>
 
     <div id="voteLockSection" class="vote-lock-section" style="display: none;">
-      <p id="voteLockStatus" style="font-size: 0.9em; color: #00bcd4; margin: 10px 0;"></p>
-      <button id="lockVoteBtn" class="btn btn-success" onclick="lockVote()" style="display: none;">
+      <p id="voteLockStatus" style="font-size: 0.9em; color: #00bcd4; margin: 10px 0;" role="status"></p>
+      <button id="lockVoteBtn" class="btn btn-success" onclick="lockVote()" style="display: none;" aria-label="Lock in your vote">
         🔒 LOCK MY VOTE
       </button>
     </div>
 
-    <p id="votedIndication" class="voted-indication">✓ Vote Locked In!</p>
+    <p id="votedIndication" class="voted-indication" style="display: none;" role="status">✓ Vote Locked In!</p>
   </div>
 
   <!-- ==================== RESULTS SCREEN ==================== -->
   <div id="resultsScreen" class="screen">
     <div class="panel results-panel">
-      <h2>📊 ROUND RESULTS <span id="resultRound">1</span></h2>
-      
+      <h2>📊 ROUND <span id="resultRound">1</span> RESULTS</h2>
       <div id="roundWinner" class="winner-box"></div>
-
-      <button id="nextRoundReadyBtn" class="btn btn-success" onclick="readyForNextRound()" style="display: none; margin-top: 20px;">
+      <button id="nextRoundReadyBtn" class="btn btn-success" onclick="readyForNextRound()" style="display: none; margin-top: 20px;" aria-label="Ready for next round">
         ✓ READY FOR NEXT ROUND
       </button>
     </div>
@@ -195,12 +211,11 @@
   <div id="finalScreen" class="screen">
     <div class="panel final-panel">
       <h1>🎉 FINAL RESULTS 🎉</h1>
-
       <ol id="finalLeaderboard" class="leaderboard final"></ol>
 
       <div class="final-actions">
-        <button class="btn btn-success" onclick="sendPlayAgain()">PLAY AGAIN!</button>
-        <button class="btn btn-secondary" onclick="goToLobby()">NEW GAME</button>
+        <button class="btn btn-success" onclick="sendPlayAgain()" aria-label="Play another game">PLAY AGAIN!</button>
+        <button class="btn btn-secondary" onclick="goToLobby()" aria-label="Return to lobby">NEW GAME</button>
       </div>
     </div>
   </div>

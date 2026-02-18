@@ -18,11 +18,12 @@ let gameState = {
   voteLocked: false,
   leaderboard: [],
   myFinalTeam: [],
-  draftWarnings: {} // Track duplicate warnings per player
+  draftWarnings: {}
 };
 
 let activeTimers = [];
 let toastQueue = [];
+let devMode = false; // Hidden dev mode for testing
 
 // ========================
 // UI UTILITIES
@@ -30,7 +31,14 @@ let toastQueue = [];
 function showScreen(screenId) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const screen = document.getElementById(screenId);
-  if (screen) screen.classList.add('active');
+  if (screen) {
+    screen.classList.add('active');
+    // Auto-focus first focusable element for accessibility
+    const firstFocusable = screen.querySelector('input, button, [tabindex]:not([tabindex="-1"])');
+    if (firstFocusable && !document.activeElement.matches('input[type="text"]')) {
+      setTimeout(() => firstFocusable.focus(), 100);
+    }
+  }
 }
 
 function clearTimers() {
@@ -39,11 +47,13 @@ function clearTimers() {
 }
 
 // ========================
-// TOAST NOTIFICATION SYSTEM
+// TOAST NOTIFICATION SYSTEM (IMPROVED)
 // ========================
 function showToast(message, type = 'info', duration = 3000) {
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
+  toast.setAttribute('role', 'alert');
+  toast.setAttribute('aria-live', 'polite');
   toast.textContent = message;
   toast.style.cssText = `
     position: fixed;
@@ -58,18 +68,37 @@ function showToast(message, type = 'info', duration = 3000) {
     animation: slideInRight 0.3s ease;
     max-width: 300px;
     word-wrap: break-word;
+    font-weight: bold;
   `;
   
+  // Add close button for accessibility
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '✕';
+  closeBtn.style.cssText = `
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 1.2em;
+    margin-left: 10px;
+    padding: 0;
+  `;
+  closeBtn.onclick = () => {
+    toast.style.animation = 'slideOutRight 0.3s ease';
+    setTimeout(() => toast.remove(), 300);
+  };
+  
+  toast.appendChild(closeBtn);
   document.body.appendChild(toast);
   
-  setTimeout(() => {
+  const timeout = setTimeout(() => {
     toast.style.animation = 'slideOutRight 0.3s ease';
     setTimeout(() => toast.remove(), 300);
   }, duration);
 }
 
 // ========================
-// INLINE WARNING SYSTEM (Duplicate detection)
+// INLINE WARNING SYSTEM (IMPROVED WITH VISUAL FEEDBACK)
 // ========================
 function updateDraftWarning(character, isDuplicate = false) {
   const warningEl = document.getElementById('draftWarning');
@@ -78,17 +107,24 @@ function updateDraftWarning(character, isDuplicate = false) {
   if (!warningEl) return;
   
   if (isDuplicate) {
-    warningEl.style.display = 'block';
+    warningEl.style.display = 'flex';
+    warningEl.style.alignItems = 'center';
+    warningEl.style.gap = '10px';
     warningEl.innerHTML = `
-      <strong>⚠️ "${character}" is DUPLICATE!</strong><br>
-      Will auto-fill with a random word instead.
+      <span style="font-size: 1.2em;">⚠️</span>
+      <div style="text-align: left;">
+        <strong>"${character}" is DUPLICATE!</strong><br>
+        <small>Will auto-fill with a random word instead.</small>
+      </div>
     `;
     warningEl.style.background = '#fff3e0';
     warningEl.style.borderColor = '#ff9800';
     charInput.style.borderColor = '#ff9800';
+    charInput.style.borderWidth = '3px';
   } else {
     warningEl.style.display = 'none';
     charInput.style.borderColor = '#333';
+    charInput.style.borderWidth = '2px';
   }
 }
 
@@ -97,10 +133,15 @@ function updateAutoFillWarning() {
   if (!warningEl) return;
   
   if (gameState.myTeam.length === 0) {
-    warningEl.style.display = 'block';
+    warningEl.style.display = 'flex';
+    warningEl.style.alignItems = 'center';
+    warningEl.style.gap = '10px';
     warningEl.innerHTML = `
-      <strong>ℹ️ No picks made?</strong><br>
-      An auto-fill random word will be added when timer ends.
+      <span style="font-size: 1.2em;">ℹ️</span>
+      <div style="text-align: left;">
+        <strong>Time Running Out!</strong><br>
+        <small>No picks made? Random words will fill your team.</small>
+      </div>
     `;
     warningEl.style.background = '#e3f2fd';
     warningEl.style.borderColor = '#2196f3';
@@ -114,10 +155,24 @@ function joinRoom() {
   const name = document.getElementById('name').value.trim();
   const room = document.getElementById('room').value.trim().toUpperCase();
 
-  if (!name) return alert('Please enter your name.');
-  if (!room) return alert('Please enter a room code.');
-  if (name.length < 2) return alert('Name must be at least 2 characters.');
-  if (room.length < 2) return alert('Room code must be at least 2 characters.');
+  if (!name) {
+    showToast('Please enter your name!', 'warning');
+    document.getElementById('name').focus();
+    return;
+  }
+  if (!room) {
+    showToast('Please enter a room code!', 'warning');
+    document.getElementById('room').focus();
+    return;
+  }
+  if (name.length < 2) {
+    showToast('Name must be at least 2 characters.', 'warning');
+    return;
+  }
+  if (room.length < 2) {
+    showToast('Room code must be at least 2 characters.', 'warning');
+    return;
+  }
 
   player.name = name;
   player.room = room;
@@ -127,24 +182,26 @@ function joinRoom() {
 }
 
 function leaveRoom() {
-  socket.disconnect();
-  socket.connect();
-  showScreen('join');
-  document.getElementById('name').value = '';
-  document.getElementById('room').value = '';
-  player = { name: '', room: '', ready: false };
+  if (confirm('Are you sure you want to leave? You\'ll disconnect from the room.')) {
+    socket.disconnect();
+    socket.connect();
+    showScreen('join');
+    document.getElementById('name').value = '';
+    document.getElementById('room').value = '';
+    player = { name: '', room: '', ready: false };
+  }
 }
 
 socket.on('connect', () => {
-  console.log('Socket connected:', socket.id);
+  console.log('✓ Socket connected:', socket.id);
 });
 
 socket.on('joinError', (msg) => {
-  alert('❌ ' + msg);
+  showToast(msg, 'error', 5000);
 });
 
 socket.on('gameError', (msg) => {
-  alert('❌ ' + msg);
+  showToast(msg, 'error', 5000);
 });
 
 socket.on('roomData', (data) => {
@@ -153,6 +210,17 @@ socket.on('roomData', (data) => {
   const isHost = data.host === player.name;
 
   document.getElementById('roomCode').textContent = player.room;
+  document.getElementById('playerCountBadge').textContent = `${data.players.length}/6`;
+  
+  // Update color based on player count
+  const badge = document.getElementById('playerCountBadge');
+  if (data.players.length >= 6) {
+    badge.style.background = '#ff5252';
+  } else if (data.players.length >= 5) {
+    badge.style.background = '#ffc107';
+  } else {
+    badge.style.background = '#4caf50';
+  }
 
   const settingsContent = document.getElementById('settingsContent');
   const hostNote = document.getElementById('hostNote');
@@ -161,7 +229,7 @@ socket.on('roomData', (data) => {
   if (isHost) {
     settingsContent.style.display = 'block';
     hostNote.style.display = 'none';
-    settingsNote.textContent = '✓ You are the HOST - Change these settings as you like!';
+    settingsNote.textContent = '✓ You are the HOST - Configure the game settings below!';
     if (data.settings) {
       if (data.settings.difficulty) document.getElementById('difficulty').value = data.settings.difficulty;
       if (data.settings.plotTwists !== undefined) document.getElementById('plotTwists').checked = data.settings.plotTwists;
@@ -174,16 +242,20 @@ socket.on('roomData', (data) => {
 
   const ul = document.getElementById('playerList');
   ul.innerHTML = '';
-  data.players.forEach(p => {
+  data.players.forEach((p, idx) => {
     const li = document.createElement('li');
     li.className = `player-item ${p.ready ? 'ready' : 'not-ready'}`;
+    li.setAttribute('role', 'listitem');
     const badge = p.ready ? '✓ ' : '○ ';
-    const hostBadge = p.name === data.host ? '👑 ' : '👤 ';
-    li.innerHTML = `<span class="ready-badge">${badge}</span>${hostBadge}<strong>${p.name}</strong>`;
+    const hostBadge = p.name === data.host ? '👑 ' : '';
+    const isMe = p.name === player.name ? ' (YOU)' : '';
+    li.innerHTML = `
+      <span class="ready-badge">${badge}</span>
+      <span>${hostBadge}<strong>${p.name}</strong>${isMe}</span>
+      <span style="margin-left: auto; font-size: 0.85em; opacity: 0.7;">#${idx + 1}</span>
+    `;
     ul.appendChild(li);
   });
-
-  document.getElementById('playerCountLabel').textContent = `(${data.players.length}/6)`;
 
   if (!data.isGameActive) {
     console.log('✅ Showing lobby - game not active');
@@ -202,17 +274,25 @@ socket.on('roomData', (data) => {
       const allReady = readyCount === data.players.length && data.players.length >= 3;
       if (allReady) {
         startBtn.disabled = false;
+        startBtn.style.background = '#4caf50';
+        startBtn.style.boxShadow = '0 0 20px rgba(76, 175, 80, 0.6)';
         minPlayersMsg.style.display = 'none';
       } else {
         startBtn.disabled = true;
+        startBtn.style.background = '#ccc';
+        startBtn.style.boxShadow = 'none';
         minPlayersMsg.style.display = 'block';
-        minPlayersMsg.textContent = `⚠️ HOST NEEDS: ${readyCount}/${data.players.length} ready players to start (min 3 players)`;
+        minPlayersMsg.innerHTML = `
+          <strong>⏳ Waiting for Players:</strong> 
+          ${readyCount}/${data.players.length} ready 
+          ${data.players.length < 3 ? '(Need 3+ players)' : ''}
+        `;
       }
     } else {
       startBtn.style.display = 'none';
       minPlayersMsg.style.display = 'none';
       hostWaiting.style.display = 'block';
-      hostWaiting.textContent = '⏳ Waiting for ' + (data.host || 'host') + ' to start...';
+      hostWaiting.textContent = '⏳ Waiting for ' + (data.host || 'host') + ' to start the game...';
     }
 
     if (currentPlayer) {
@@ -220,22 +300,26 @@ socket.on('roomData', (data) => {
       if (currentPlayer.ready) {
         readyBtn.textContent = '✓ READY';
         readyBtn.className = 'btn btn-success';
+        readyBtn.style.boxShadow = '0 0 15px rgba(76, 175, 80, 0.5)';
       } else {
         readyBtn.textContent = '○ NOT READY';
         readyBtn.className = 'btn btn-secondary';
+        readyBtn.style.boxShadow = 'none';
       }
     }
   }
 
   const chatContainer = document.getElementById('chatMessages');
-  chatContainer.innerHTML = '';
-  data.messages.forEach(msg => {
-    const div = document.createElement('div');
-    div.className = 'chat-message';
-    div.innerHTML = `<strong>${msg.player}:</strong> ${msg.text}`;
-    chatContainer.appendChild(div);
-  });
-  chatContainer.scrollTop = chatContainer.scrollHeight;
+  if (chatContainer) {
+    chatContainer.innerHTML = '';
+    data.messages.slice(-10).forEach(msg => {
+      const div = document.createElement('div');
+      div.className = 'chat-message';
+      div.innerHTML = `<strong>${msg.player}:</strong> ${msg.text}`;
+      chatContainer.appendChild(div);
+    });
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
 });
 
 socket.on('settingsUpdated', (settings) => {
@@ -263,6 +347,7 @@ function sendMessage() {
   if (!message) return;
   socket.emit('sendMessage', message);
   input.value = '';
+  input.focus();
 }
 
 function sendReaction(emoji) {
@@ -271,6 +356,8 @@ function sendReaction(emoji) {
 
 socket.on('newMessage', (msg) => {
   const chatContainer = document.getElementById('chatMessages');
+  if (!chatContainer) return;
+  
   const div = document.createElement('div');
   div.className = msg.isReaction ? 'chat-reaction' : 'chat-message';
   if (msg.isReaction) {
@@ -279,6 +366,12 @@ socket.on('newMessage', (msg) => {
     div.innerHTML = `<strong>${msg.player}:</strong> ${msg.text}`;
   }
   chatContainer.appendChild(div);
+  
+  // Keep only last 10 messages
+  while (chatContainer.children.length > 10) {
+    chatContainer.firstChild.remove();
+  }
+  
   chatContainer.scrollTop = chatContainer.scrollHeight;
 });
 
@@ -296,6 +389,7 @@ socket.on('gameStarting', (data) => {
   gameState.voted = false;
   gameState.voteLocked = false;
   gameState.draftWarnings = {};
+  showToast('🎉 Game starting! Get ready!', 'info');
   showScreen('preRound');
 });
 
@@ -310,11 +404,12 @@ socket.on('roundStart', (data) => {
 
   const isFinal = data.isFinalRound;
   document.getElementById('roundLabel').textContent = isFinal 
-    ? `FINAL ROUND - ASSEMBLE YOUR ULTIMATE TEAM!`
-    : `ROUND ${data.roundNumber} OF ${data.totalRounds}`;
+    ? `🏆 FINAL ROUND - ASSEMBLE YOUR ULTIMATE TEAM! 🏆`
+    : `📍 ROUND ${data.roundNumber} OF 3`;
 
   let countdown = 3;
   document.getElementById('countdown').textContent = countdown;
+  document.getElementById('countdown').style.fontSize = '10em';
 
   const timer = setInterval(() => {
     countdown--;
@@ -326,6 +421,7 @@ socket.on('roundStart', (data) => {
   }, 1000);
 
   activeTimers.push(timer);
+  showScreen('preRound');
 });
 
 socket.on('scenarioRevealed', (data) => {
@@ -335,11 +431,14 @@ socket.on('scenarioRevealed', (data) => {
   gameState.voteLocked = false;
 
   document.getElementById('currentRound').textContent = gameState.currentRound;
-  document.getElementById('scenarioText').textContent = `📋 BUILD A TEAM TO ${data.scenario}`;
+  document.getElementById('scenarioText').textContent = `BUILD A TEAM TO: ${data.scenario}`;
+  
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) myTeamList.innerHTML = '';
+  
   const livePicksList = document.getElementById('livePicksList');
   if (livePicksList) livePicksList.innerHTML = '';
+  
   const charInput = document.getElementById('charInput');
   if (charInput) {
     charInput.value = '';
@@ -366,9 +465,9 @@ socket.on('scenarioRevealed', (data) => {
   
   const lockBtn = document.getElementById('lockDraftBtn');
   if (lockBtn) {
-    lockBtn.style.display = 'block';
+    lockBtn.style.display = 'inline-block';
     lockBtn.disabled = true;
-    lockBtn.textContent = '🔒 LOCK IN MY TEAM (need 2)';
+    lockBtn.textContent = '🔓 LOCK IN MY TEAM (need 2)';
     lockBtn.className = 'btn btn-success';
   }
   
@@ -384,10 +483,18 @@ socket.on('scenarioRevealed', (data) => {
 
   const draftTimer = setInterval(() => {
     timeLeft--;
-    document.getElementById('draftTimer').textContent = timeLeft;
+    const timerEl = document.getElementById('draftTimer');
+    if (timerEl) {
+      timerEl.textContent = timeLeft;
+      // Color change as time runs out
+      if (timeLeft <= 10) {
+        timerEl.style.color = '#ff5252';
+        timerEl.style.fontWeight = 'bold';
+      }
+    }
     if (timeLeft <= 0) {
       clearInterval(draftTimer);
-      updateAutoFillWarning(); // Show warning about auto-fill
+      updateAutoFillWarning();
     }
   }, 1000);
 
@@ -395,7 +502,7 @@ socket.on('scenarioRevealed', (data) => {
 });
 
 // ========================
-// DRAFT PHASE - WITH DUPLICATE DETECTION
+// DRAFT PHASE - WITH DUPLICATE DETECTION & CONFIRM BUTTON
 // ========================
 document.addEventListener('DOMContentLoaded', () => {
   const charInput = document.getElementById('charInput');
@@ -427,29 +534,35 @@ function handleDraftChange(e) {
 
 function handleDraftInput(e) {
   if (e.key === 'Enter' && e.target.value.trim()) {
-    const char = e.target.value.trim();
-    
-    if (gameState.myTeam.length >= 2) {
-      showToast('⚠️ You can draft max 2 characters!', 'error');
-      return;
-    }
-
-    const charLower = char.toLowerCase();
-    const isDupOwn = gameState.myTeam.some(c => c.toLowerCase() === charLower);
-    const isDupOther = gameState.allDraftsList.some(p =>
-      p.name !== player.name && p.character.toLowerCase() === charLower
-    );
-
-    if (isDupOwn) {
-      showToast(`❌ You already drafted "${char}"! Auto-filling with random word...`, 'error', 4000);
-    } else if (isDupOther) {
-      showToast(`❌ "${char}" was picked by another player! Auto-filling with random word...`, 'error', 4000);
-    }
-
-    socket.emit('draftCharacter', char);
-    e.target.value = '';
-    updateDraftWarning('', false);
+    submitDraft(e.target.value.trim());
   }
+}
+
+function submitDraft(char) {
+  if (gameState.myTeam.length >= 2) {
+    showToast('⚠️ You can draft max 2 characters!', 'warning');
+    return;
+  }
+
+  const charLower = char.toLowerCase();
+  const isDupOwn = gameState.myTeam.some(c => c.toLowerCase() === charLower);
+  const isDupOther = gameState.allDraftsList.some(p =>
+    p.name !== player.name && p.character.toLowerCase() === charLower
+  );
+
+  if (isDupOwn) {
+    showToast(`❌ You already drafted "${char}"! Auto-filling instead...`, 'error', 4000);
+  } else if (isDupOther) {
+    showToast(`❌ "${char}" was picked by another player! Auto-filling instead...`, 'error', 4000);
+  }
+
+  socket.emit('draftCharacter', char);
+  const charInput = document.getElementById('charInput');
+  if (charInput) {
+    charInput.value = '';
+    charInput.focus();
+  }
+  updateDraftWarning('', false);
 }
 
 function updateDraftCounter() {
@@ -468,7 +581,7 @@ function updateDraftCounter() {
 
 function lockDraft() {
   if (gameState.myTeam.length < 2) {
-    alert('⚠️ You must have 2 characters to lock in!');
+    showToast('⚠️ You must have 2 characters to lock in!', 'warning');
     return;
   }
   socket.emit('lockDraft');
@@ -476,6 +589,7 @@ function lockDraft() {
   if (lockBtn) {
     lockBtn.disabled = true;
     lockBtn.textContent = '✅ TEAM LOCKED!';
+    showToast('🔒 Your team is locked in!', 'info');
   }
 }
 
@@ -492,7 +606,8 @@ socket.on('draftUpdate', (data) => {
 
   data.allDrafts.forEach((pick, idx) => {
     const li = document.createElement('li');
-    li.textContent = `${pick.name} → ${pick.character}`;
+    const autoFillBadge = pick.autoFilled ? ' 🔄 (auto-filled)' : '';
+    li.textContent = `${pick.name} → ${pick.character}${autoFillBadge}`;
     li.classList.add('live-pick');
     if (pick.autoFilled) li.classList.add('live-pick-duplicate');
     li.style.animationDelay = `${idx * 0.05}s`;
@@ -501,7 +616,7 @@ socket.on('draftUpdate', (data) => {
 
   picksList.scrollTop = picksList.scrollHeight;
 
-  // Sync my team from server list (includes auto-fill)
+  // Sync my team from server list
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) myTeamList.innerHTML = '';
 
@@ -514,7 +629,13 @@ socket.on('draftUpdate', (data) => {
     .forEach(p => {
       const li = document.createElement('li');
       li.textContent = p.character;
-      if (p.autoFilled) li.classList.add('draft-duplicate');
+      if (p.autoFilled) {
+        li.classList.add('draft-duplicate');
+        li.appendChild(document.createElement('br'));
+        const small = document.createElement('small');
+        small.textContent = '(auto-filled)';
+        li.appendChild(small);
+      }
       if (myTeamList) myTeamList.appendChild(li);
     });
 
@@ -527,7 +648,7 @@ socket.on('draftUpdate', (data) => {
       lockBtn.textContent = '🔒 LOCK IN MY TEAM';
     } else {
       lockBtn.disabled = true;
-      lockBtn.textContent = '🔒 LOCK IN MY TEAM (need 2)';
+      lockBtn.textContent = `🔓 LOCK IN MY TEAM (${gameState.myTeam.length}/2)`;
     }
   }
 });
@@ -538,7 +659,7 @@ socket.on('draftSuccess', (data) => {
 
 socket.on('playerLocked', (data) => {
   if (data.phase === 'DRAFT') {
-    showToast(`🔒 ${data.playerName} locked in their team!`, 'info', 2000);
+    showToast(`🔒 ${data.playerName} locked in!`, 'info', 2000);
   }
 });
 
@@ -548,8 +669,9 @@ socket.on('playerLocked', (data) => {
 socket.on('plotTwistRevealed', (data) => {
   clearTimers();
   gameState.currentTwist = data.twist;
-  document.getElementById('twistText').textContent = data.twist;
+  document.getElementById('twistText').textContent = `"${data.twist}"`;
   showScreen('twistScreen');
+  showToast('🌀 Plot twist incoming!', 'warning');
 });
 
 // ========================
@@ -568,8 +690,15 @@ socket.on('finalTeamRevealed', (data) => {
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) {
     myTeamList.innerHTML = '';
-    // Display existing characters from rounds 1-3 (locked, non-editable)
     const myCurrentTeam = data.playerTeams.find(t => t.name === player.name)?.teamSoFar || [];
+    
+    const lockedSection = document.createElement('div');
+    lockedSection.style.cssText = 'margin-bottom: 15px; opacity: 0.8;';
+    lockedSection.innerHTML = `
+      <small style="font-weight: bold; color: #999;">Previous Rounds (Locked):</small>
+    `;
+    myTeamList.appendChild(lockedSection);
+    
     myCurrentTeam.forEach(char => {
       const li = document.createElement('li');
       li.textContent = char;
@@ -582,17 +711,16 @@ socket.on('finalTeamRevealed', (data) => {
   const livePicksList = document.getElementById('livePicksList');
   if (livePicksList) livePicksList.innerHTML = '';
 
-  // Remove warning since round 4 is just additions
   const warningEl = document.getElementById('draftWarning');
   if (warningEl) warningEl.style.display = 'none';
 
-  document.getElementById('scenarioText').textContent = `🎯 ADD TO YOUR ULTIMATE TEAM (${gameState.myFinalTeam.length}/6)`;
+  document.getElementById('scenarioText').textContent = `🎯 ADD UP TO 6 CHARACTERS TO YOUR ULTIMATE TEAM (${gameState.myFinalTeam.length}/6)`;
 
   const lockBtn = document.getElementById('lockDraftBtn');
   if (lockBtn) {
-    lockBtn.style.display = 'block';
-    lockBtn.disabled = true;
-    lockBtn.textContent = '🔒 FINALIZE TEAM';
+    lockBtn.style.display = 'inline-block';
+    lockBtn.disabled = gameState.myFinalTeam.length === 0;
+    lockBtn.textContent = `🔒 FINALIZE TEAM (${gameState.myFinalTeam.length}/6)`;
     lockBtn.className = 'btn btn-success';
     lockBtn.onclick = lockFinalDraft;
   }
@@ -609,16 +737,18 @@ socket.on('finalTeamRevealed', (data) => {
 
   const draftTimer = setInterval(() => {
     timeLeft--;
-    document.getElementById('draftTimer').textContent = timeLeft;
+    const timerEl = document.getElementById('draftTimer');
+    if (timerEl) {
+      timerEl.textContent = timeLeft;
+      if (timeLeft <= 10) {
+        timerEl.style.color = '#ff5252';
+        timerEl.style.fontWeight = 'bold';
+      }
+    }
     if (timeLeft <= 0) clearInterval(draftTimer);
   }, 1000);
 
   activeTimers.push(draftTimer);
-});
-
-// Final round draft handler - separated to allow up to 6 total characters
-document.addEventListener('DOMContentLoaded', () => {
-  // This will be handled separately in event listener for final round
 });
 
 function handleFinalRoundInput(e) {
@@ -638,34 +768,41 @@ function handleFinalRoundInput(e) {
       return;
     }
     
-    gameState.myFinalTeam.push(char);
-    
-    const li = document.createElement('li');
-    li.textContent = char;
-    li.classList.add('new-pick');
-    const myTeamList = document.getElementById('myTeam');
-    if (myTeamList) myTeamList.appendChild(li);
-    
-    socket.emit('draftCharacter', char);
-    
-    const counter = document.getElementById('draftCounter');
-    if (counter) {
-      counter.textContent = `(${gameState.myFinalTeam.length}/6)`;
-      if (gameState.myFinalTeam.length > 0) {
-        const lockBtn = document.getElementById('lockDraftBtn');
-        if (lockBtn) {
-          lockBtn.disabled = false;
-          lockBtn.textContent = `🔒 FINALIZE TEAM (${gameState.myFinalTeam.length}/6)`;
-        }
-      }
-    }
-    
-    e.target.value = '';
+    submitFinalDraft(char);
+  }
+}
+
+function submitFinalDraft(char) {
+  gameState.myFinalTeam.push(char);
+  
+  const li = document.createElement('li');
+  li.textContent = char;
+  li.classList.add('new-pick');
+  const myTeamList = document.getElementById('myTeam');
+  if (myTeamList) myTeamList.appendChild(li);
+  
+  socket.emit('draftCharacter', char);
+  
+  const counter = document.getElementById('draftCounter');
+  if (counter) {
+    counter.textContent = `(${gameState.myFinalTeam.length}/6)`;
+  }
+  
+  const charInput = document.getElementById('charInput');
+  if (charInput) {
+    charInput.value = '';
+    charInput.focus();
+  }
+  
+  const lockBtn = document.getElementById('lockDraftBtn');
+  if (lockBtn) {
+    lockBtn.disabled = false;
+    lockBtn.textContent = `🔒 FINALIZE TEAM (${gameState.myFinalTeam.length}/6)`;
   }
 }
 
 document.addEventListener('keypress', (e) => {
-  if (e.target.id === 'charInput' && document.getElementById('scenarioScreen').classList.contains('active')) {
+  if (e.target.id === 'charInput' && document.getElementById('scenarioScreen')?.classList.contains('active')) {
     const isFinalRound = document.getElementById('scenarioText')?.textContent.includes('ULTIMATE TEAM');
     if (isFinalRound) {
       handleFinalRoundInput(e);
@@ -674,16 +811,21 @@ document.addEventListener('keypress', (e) => {
 });
 
 function lockFinalDraft() {
+  if (gameState.myFinalTeam.length === 0) {
+    showToast('⚠️ Add at least 1 character to your team!', 'warning');
+    return;
+  }
   socket.emit('lockFinalDraft');
   const lockBtn = document.getElementById('lockDraftBtn');
   if (lockBtn) {
     lockBtn.disabled = true;
     lockBtn.textContent = '✅ TEAM FINALIZED!';
+    showToast('🎉 Your ultimate team is locked in!', 'info');
   }
 }
 
 // ========================
-// VOTING PHASE - HIDE OWN TEAM
+// VOTING PHASE
 // ========================
 socket.on('votingPhaseStart', (data) => {
   clearTimers();
@@ -695,7 +837,7 @@ socket.on('votingPhaseStart', (data) => {
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
   if (scenarioDisplay) scenarioDisplay.textContent = data.scenario;
-  if (twistDisplay) twistDisplay.textContent = data.twist;
+  if (twistDisplay) twistDisplay.textContent = data.twist || 'No twist this round';
 
   const grid = document.getElementById('votingTeams');
   if (grid) grid.innerHTML = '';
@@ -706,7 +848,6 @@ socket.on('votingPhaseStart', (data) => {
       return;
     }
     
-    // SKIP OWN TEAM
     if (team.name === player.name) {
       return;
     }
@@ -715,20 +856,19 @@ socket.on('votingPhaseStart', (data) => {
     card.className = 'vote-card';
     card.style.animationDelay = `${idx * 0.1}s`;
     card.innerHTML = `
-      <h3>${team.name}</h3>
+      <h3>👤 ${team.name}</h3>
       <ul class="team-display">
         ${team.team.map(t => `<li>• ${t}</li>`).join('')}
       </ul>
-      <button class="btn btn-vote" onclick="castVote('${team.name}')">VOTE FOR THIS TEAM</button>
-      <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span></p>
+      <button class="btn btn-vote" onclick="castVote('${team.name}')">👉 VOTE FOR THIS TEAM</button>
+      <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span> votes</p>
     `;
     if (grid) grid.appendChild(card);
   });
 
-  // Show message if only one team visible (user's own team hidden)
   if (grid && grid.children.length === 0) {
     const msg = document.createElement('p');
-    msg.textContent = '(Your team is not shown—you can\'t vote for yourself!)';
+    msg.textContent = '(Your own team isn\'t shown—no voting for yourself!)';
     msg.style.cssText = 'color: #999; font-size: 1.1em; margin: 20px; font-weight: bold;';
     grid.appendChild(msg);
   }
@@ -750,13 +890,20 @@ socket.on('votingPhaseStart', (data) => {
   if (votedIndication) votedIndication.style.display = 'none';
 
   showScreen('votingScreen');
+  showToast('⚖️ Time to vote! Who will win?', 'info');
 
   let timeLeft = 30;
   document.getElementById('voteTimer').textContent = timeLeft;
 
   const voteTimer = setInterval(() => {
     timeLeft--;
-    document.getElementById('voteTimer').textContent = timeLeft;
+    const timerEl = document.getElementById('voteTimer');
+    if (timerEl) {
+      timerEl.textContent = timeLeft;
+      if (timeLeft <= 10) {
+        timerEl.style.color = '#ff5252';
+      }
+    }
     if (timeLeft <= 0) clearInterval(voteTimer);
   }, 1000);
 
@@ -770,19 +917,17 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
-  if (scenarioDisplay) scenarioDisplay.textContent = data.finalPrompt || 'FINAL ROUND';
-  if (twistDisplay) twistDisplay.textContent = 'Vote for the best drafted team!';
+  if (scenarioDisplay) scenarioDisplay.textContent = data.finalPrompt || 'Which team is the BEST?';
+  if (twistDisplay) twistDisplay.innerHTML = `<strong style="color: #ff4081;">ROUND 4: FINAL VOTING!</strong>`;
 
   const grid = document.getElementById('votingTeams');
   if (grid) grid.innerHTML = '';
 
-  // Filter out own team
   data.teams.forEach((team, idx) => {
     if (!team.team || team.team.length === 0) {
       return;
     }
     
-    // SKIP OWN TEAM
     if (team.name === player.name) {
       return;
     }
@@ -791,20 +936,19 @@ socket.on('finalVotingPhaseStart', (data) => {
     card.className = 'vote-card final-vote';
     card.style.animationDelay = `${idx * 0.1}s`;
     card.innerHTML = `
-      <h3>${team.name}</h3>
+      <h3>👤 ${team.name}</h3>
       <ul class="team-display final-team-display">
         ${team.team.map(t => `<li>• ${t}</li>`).join('')}
       </ul>
-      <button class="btn btn-vote" onclick="castVote('${team.name}')">VOTE FOR THIS TEAM</button>
-      <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span></p>
+      <button class="btn btn-vote" onclick="castVote('${team.name}')">🏆 VOTE FOR THIS TEAM</button>
+      <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span> votes</p>
     `;
     if (grid) grid.appendChild(card);
   });
 
-  // Show message if only one team visible
   if (grid && grid.children.length === 0) {
     const msg = document.createElement('p');
-    msg.textContent = '(Your team is not shown—you can\'t vote for yourself!)';
+    msg.textContent = '(Your team isn\'t shown—cast your vote for the best team!)';
     msg.style.cssText = 'color: #999; font-size: 1.1em; margin: 20px; font-weight: bold;';
     grid.appendChild(msg);
   }
@@ -830,7 +974,13 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   const voteTimer = setInterval(() => {
     timeLeft--;
-    document.getElementById('voteTimer').textContent = timeLeft;
+    const timerEl = document.getElementById('voteTimer');
+    if (timerEl) {
+      timerEl.textContent = timeLeft;
+      if (timeLeft <= 10) {
+        timerEl.style.color = '#ff5252';
+      }
+    }
     if (timeLeft <= 0) clearInterval(voteTimer);
   }, 1000);
 
@@ -842,17 +992,18 @@ function castVote(playerName) {
   gameState.voted = true;
   
   document.querySelectorAll('.vote-card').forEach(card => {
-    const cardName = card.querySelector('h3').textContent;
+    const cardName = card.querySelector('h3').textContent.replace('👤 ', '');
     const voteBtn = card.querySelector('.btn-vote');
     if (cardName === playerName) {
       card.style.borderColor = '#4caf50';
       card.style.borderWidth = '3px';
       voteBtn.textContent = '✓ VOTED';
       voteBtn.className = 'btn btn-vote btn-success';
+      voteBtn.disabled = true;
     } else {
       card.style.borderColor = '#00bcd4';
       card.style.borderWidth = '2px';
-      voteBtn.textContent = 'VOTE FOR THIS TEAM';
+      voteBtn.textContent = '👉 VOTE FOR THIS TEAM';
       voteBtn.className = 'btn btn-vote';
     }
   });
@@ -868,7 +1019,7 @@ function castVote(playerName) {
 
 function lockVote() {
   if (!gameState.voted) {
-    alert('⚠️ Please cast a vote first!');
+    showToast('⚠️ Please cast a vote first!', 'warning');
     return;
   }
   socket.emit('lockVote');
@@ -882,14 +1033,17 @@ function lockVote() {
   }
 
   const votedIndication = document.getElementById('votedIndication');
-  if (votedIndication) votedIndication.style.display = 'block';
+  if (votedIndication) {
+    votedIndication.style.display = 'block';
+    votedIndication.innerHTML = '🔒 Your vote is locked in!';
+  }
 
   showToast('🔒 Your vote is locked!', 'info', 2000);
 }
 
 socket.on('voteUpdate', (voteCount) => {
   document.querySelectorAll('.vote-card').forEach(card => {
-    const playerName = card.querySelector('h3').textContent;
+    const playerName = card.querySelector('h3').textContent.replace('👤 ', '');
     const badge = card.querySelector('.vote-badge');
     if (badge) badge.textContent = voteCount[playerName] || 0;
   });
@@ -907,7 +1061,7 @@ socket.on('voteLockUpdate', (data) => {
 });
 
 // ========================
-// RESULTS SCREEN - WAIT FOR ALL READY
+// RESULTS SCREEN
 // ========================
 socket.on('roundResults', (data) => {
   clearTimers();
@@ -977,14 +1131,15 @@ socket.on('roundResults', (data) => {
 
   if (winnerBox) winnerBox.innerHTML = resultHTML;
 
-  // Show ready button instead of auto-advance
   const readyButton = document.getElementById('nextRoundReadyBtn');
   if (readyButton) {
     readyButton.style.display = 'inline-block';
     readyButton.disabled = false;
+    readyButton.textContent = '✓ READY FOR NEXT ROUND';
   }
 
   showScreen('resultsScreen');
+  showToast('📊 Round results are in!', 'info');
 });
 
 function readyForNextRound() {
@@ -993,6 +1148,7 @@ function readyForNextRound() {
   if (readyButton) {
     readyButton.disabled = true;
     readyButton.textContent = '✓ READY';
+    showToast('Waiting for other players...', 'info');
   }
 }
 
@@ -1041,7 +1197,7 @@ socket.on('finalRoundResults', (data) => {
     </div>
 
     <div class="results-leaderboard">
-      <h3>📊 FINAL LEADERBOARD:</h3>
+      <h3>🎯 FINAL LEADERBOARD:</h3>
       <ol class="leaderboard">
   `;
 
@@ -1081,7 +1237,7 @@ socket.on('gameEnded', (data) => {
     li.className = 'leaderboard-entry final-entry';
     const medals = ['🥇', '🥈', '🥉'];
     const medal = medals[idx] || '•';
-    const emoji = idx === 0 ? '🎉' : idx === 1 ? '⭐' : '🌟';
+    const emoji = idx === 0 ? '👑 CHAMPION' : idx === 1 ? '⭐ RUNNER-UP' : '🌟 TOP 3';
     const breakdown = entry.breakdown.map((pts, round) => `R${round + 1}: ${pts}`).join(' | ');
     li.innerHTML = `
       <div class="final-entry-content">
@@ -1098,36 +1254,40 @@ socket.on('gameEnded', (data) => {
   });
 
   showScreen('finalScreen');
+  showToast('🎉 Game Over! Check the results!', 'info');
 });
 
 function sendPlayAgain() {
   socket.emit('playAgain');
+  showToast('Starting new game with same players...', 'info');
 }
 
 function goToLobby() {
-  clearTimers();
-  player = { name: '', room: '', ready: false };
-  roomState = { host: null, settings: {}, players: [], messages: [] };
-  gameState = {
-    currentRound: 0,
-    totalRounds: 4,
-    myTeam: [],
-    currentScenario: '',
-    currentTwist: '',
-    allDrafts: {},
-    allDraftsList: [],
-    votes: {},
-    voted: false,
-    voteLocked: false,
-    leaderboard: [],
-    myFinalTeam: [],
-    draftWarnings: {}
-  };
-  socket.disconnect();
-  socket.connect();
-  showScreen('join');
-  document.getElementById('name').value = '';
-  document.getElementById('room').value = '';
+  if (confirm('Are you sure? This will return to the lobby.')) {
+    clearTimers();
+    player = { name: '', room: '', ready: false };
+    roomState = { host: null, settings: {}, players: [], messages: [] };
+    gameState = {
+      currentRound: 0,
+      totalRounds: 4,
+      myTeam: [],
+      currentScenario: '',
+      currentTwist: '',
+      allDrafts: {},
+      allDraftsList: [],
+      votes: {},
+      voted: false,
+      voteLocked: false,
+      leaderboard: [],
+      myFinalTeam: [],
+      draftWarnings: {}
+    };
+    socket.disconnect();
+    socket.connect();
+    showScreen('join');
+    document.getElementById('name').value = '';
+    document.getElementById('room').value = '';
+  }
 }
 
 // ========================
@@ -1137,7 +1297,6 @@ window.addEventListener('beforeunload', () => {
   socket.disconnect();
 });
 
-// Add toast animation to CSS dynamically
 const style = document.createElement('style');
 style.textContent = `
   @keyframes slideInRight {
@@ -1160,6 +1319,12 @@ style.textContent = `
       opacity: 0;
       transform: translateX(400px);
     }
+  }
+
+  .toast {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
   }
 `;
 document.head.appendChild(style);

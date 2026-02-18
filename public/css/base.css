@@ -1,5 +1,5 @@
 /* ========================================================================
-   TEAM CHAOS - BASE STYLES
+   LobbyWARS - BASE STYLES
    ======================================================================== */
 
 :root {
@@ -143,7 +143,7 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--primary);
   color: var(--white);
   cursor: pointer;
-  transition: var(--transition-normal);
+  transition: all var(--transition-normal);
   box-shadow: var(--shadow-md);
   user-select: none;
   -webkit-user-select: none;
@@ -152,6 +152,7 @@ h1, h2, h3, h4, h5, h6 {
 .btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: var(--shadow-lg);
+  filter: brightness(1.1);
 }
 
 .btn:active:not(:disabled) {
@@ -169,6 +170,17 @@ h1, h2, h3, h4, h5, h6 {
 .btn-success { background: var(--success); }
 .btn-danger { background: var(--danger); }
 
+.btn-danger:hover:not(:disabled) {
+  background: #d32f2f;
+  box-shadow: var(--shadow-xl);
+}
+
+.btn-leave {
+  min-width: 100px;
+  background: var(--danger);
+  font-weight: 700;
+}
+
 .btn-success.pulsing-glow {
   box-shadow: 0 0 20px rgba(76, 175, 80, 0.6);
   animation: glowPulse 2s infinite;
@@ -183,6 +195,14 @@ h1, h2, h3, h4, h5, h6 {
   padding: 10px;
   font-size: 1.2rem;
   min-width: var(--touch-target);
+  background: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon svg {
+  fill: currentColor;
 }
 
 input[type="text"],
@@ -194,7 +214,7 @@ select {
   padding: 12px 16px;
   font-family: inherit;
   font-size: 1rem;
-  border: 2px solid var(--dark);
+  border: 2px solid #ddd;
   border-radius: var(--radius-md);
   background: var(--white);
   transition: var(--transition-normal);
@@ -202,13 +222,14 @@ select {
 }
 
 input:hover {
-  border-color: var(--primary);
+  border-color: var(--secondary);
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(255, 64, 129, 0.2);
+  box-shadow: 0 0 0 3px rgba(255, 64, 129, 0.15);
 }
 
 input::placeholder {
@@ -230,6 +251,22 @@ kbd {
   font-family: monospace;
   font-size: 0.9em;
   font-weight: bold;
+}
+
+.icon-inline {
+  vertical-align: middle;
+  margin-right: 4px;
+  display: inline-block;
+}
+
+.icon-btn {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.btn svg {
+  flex-shrink: 0;
 }
 
 @keyframes bounceIn {

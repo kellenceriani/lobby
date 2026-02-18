@@ -168,11 +168,10 @@ socket.on('roomData', (data) => {
     const li = document.createElement('li');
     li.className = `player-item ${p.ready ? 'ready' : 'not-ready'}`;
     li.setAttribute('role', 'listitem');
-    const badge = p.ready ? '✓ ' : '○ ';
-    const hostBadge = p.name === data.host ? '👑 ' : '';
-    const isMe = p.name === player.name ? ' (YOU)' : '';
+    const hostBadge = p.name === data.host ? '<span class="host-star">★</span> ' : '';
+    const isMe = p.name === player.name ? ' <span class="you-badge">(YOU)</span>' : '';
     li.innerHTML = `
-      <span class="ready-badge">${badge}</span>
+      <span class="ready-badge"></span>
       <span>${hostBadge}<strong>${p.name}</strong>${isMe}</span>
       <span style="margin-left: auto; font-size: 0.85em; opacity: 0.7;">#${idx + 1}</span>
     `;

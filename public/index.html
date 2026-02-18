@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#ff4081">
-  <meta name="description" content="Team Chaos - Real-time multiplayer party game for 3-6 players">
-  <title>Team Chaos - Party Game</title>
+  <meta name="description" content="LobbyWARS - Real-time multiplayer party game for 3-6 players">
+  <title>LobbyWARS - Party Game</title>
   <link rel="stylesheet" href="css/base.css">
   <link rel="stylesheet" href="css/lobby.css">
   <link rel="stylesheet" href="css/game.css">
@@ -24,25 +24,34 @@
   <!-- ==================== JOIN SCREEN ==================== -->
   <div id="join" class="screen active">
     <div class="panel">
-      <h1>⚡ TEAM CHAOS ⚡</h1>
-      <p class="subtitle">Real-Time Party Game for 3-6 Players</p>
-      <p class="tagline">Build absurd teams • Vote for chaos • Win glory</p>
+      <h1>⚡LobbyWARS</h1>
+      <p class="subtitle">A LineupWars Spin-Off • 3-6 Players</p>
+      <p class="tagline">Build absurd teams • Vote & chaos • Win glory</p>
       
       <div class="input-group">
-        <label for="name">🎭 Your Name:</label>
+        <label for="name"><svg class="icon-inline" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/></svg> Your Name:</label>
         <input id="name" placeholder="Enter your name" maxlength="20" autocomplete="off" aria-label="Player name">
       </div>
       
       <div class="input-group">
-        <label for="room">🏠 Room Code:</label>
+        <label for="room"><svg class="icon-inline" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1A1.5 1.5 0 0 0 5 2.5V3H1.5A1.5 1.5 0 0 0 0 4.5v8A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-8A1.5 1.5 0 0 0 14.5 3H11v-.5A1.5 1.5 0 0 0 9.5 1h-3zm0 1h3a.5.5 0 0 1 .5.5V3H6v-.5a.5.5 0 0 1 .5-.5zm1.886 6.914L15 7.151V12.5a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5V7.15l6.614 1.764a1.5 1.5 0 0 0 .772 0zM1.5 4h13a.5.5 0 0 1 .5.5v1.616L8.129 7.948a.5.5 0 0 1-.258 0L1 6.116V4.5a.5.5 0 0 1 .5-.5z"/></svg> Room Code:</label>
         <input id="room" placeholder="ABC123" maxlength="6" aria-label="Room code">
       </div>
       
-      <button class="btn btn-primary" onclick="joinRoom()" aria-label="Join room and start game">ENTER THE CHAOS</button>
+      <button class="btn btn-primary" onclick="joinRoom()" aria-label="Join room and start game">
+        <svg class="icon-btn" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z"/></svg>
+        ENTER THE GAME
+      </button>
       
-      <button class="btn btn-secondary" onclick="showHelp()" style="margin-top: 10px;" aria-label="View how to play">📚 HOW TO PLAY</button>
+      <button class="btn btn-secondary" onclick="showHelp()" style="margin-top: 10px;" aria-label="View how to play">
+        <svg class="icon-btn" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/></svg>
+        HOW TO PLAY
+      </button>
       
-      <p class="hint">💡 Share the room code with friends to play together</p>
+      <p class="hint">
+        <svg class="icon-inline" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>
+        Share room code w/ friends to play together
+      </p>
       <p class="hint" style="font-size: 0.85em; color: #999;">Need 3-6 players to start a game</p>
     </div>
   </div>
@@ -50,13 +59,16 @@
   <!-- ==================== TUTORIAL SCREEN (REDESIGNED) ==================== -->
   <div id="tutorial" class="screen">
     <div class="tutorial-container-modern">
-      <h1 class="tutorial-title">📚 HOW TO PLAY</h1>
+      <h1 class="tutorial-title">
+        <svg class="icon-inline" width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94c-1.514.153-3.042.672-3.994 1.105A.5.5 0 0 0 0 2.5v11a.5.5 0 0 0 .707.455c.882-.4 2.303-.881 3.68-1.02 1.409-.142 2.59.087 3.223.877a.5.5 0 0 0 .78 0c.633-.79 1.814-1.019 3.222-.877 1.378.139 2.8.62 3.681 1.02A.5.5 0 0 0 16 13.5v-11a.5.5 0 0 0-.293-.455c-.952-.433-2.48-.952-3.994-1.105C10.413.809 8.985.936 8 1.783z"/></svg>
+        HOW TO PLAY
+      </h1>
       
       <!-- Accordion Sections -->
       <div class="tutorial-accordion">
         <div class="accordion-item active">
           <button class="accordion-header" onclick="toggleAccordion(this)">
-            <span>🎯 The Goal</span>
+            <span>The Goal</span>
             <span class="accordion-icon">▼</span>
           </button>
           <div class="accordion-content">
@@ -66,7 +78,7 @@
 
         <div class="accordion-item">
           <button class="accordion-header" onclick="toggleAccordion(this)">
-            <span>🎮 Game Flow</span>
+            <span>Game Flow</span>
             <span class="accordion-icon">▶</span>
           </button>
           <div class="accordion-content" style="display: none;">
@@ -82,7 +94,7 @@
 
         <div class="accordion-item">
           <button class="accordion-header" onclick="toggleAccordion(this)">
-            <span>⚡ Pro Tips</span>
+            <span>Pro Tips</span>
             <span class="accordion-icon">▶</span>
           </button>
           <div class="accordion-content" style="display: none;">
@@ -98,7 +110,8 @@
       </div>
 
       <button class="btn btn-primary btn-tutorial-close" onclick="closeHelp()">
-        Got it! Let's Play 🚀
+        Got it! Let's Play
+        <svg class="icon-btn" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z"/></svg>
       </button>
     </div>
   </div>
@@ -108,7 +121,7 @@
     <!-- Sticky Header -->
     <div class="lobby-header-sticky">
       <div class="lobby-header-content">
-        <h1>🎮 TEAM CHAOS</h1>
+        <h1>🎮 LobbyWARS</h1>
         <div class="room-info">
           <span id="roomCode" class="room-badge">----</span>
           <span id="playerCountBadge" class="player-count-badge">0/6</span>
@@ -119,13 +132,16 @@
     <!-- Tab Navigation -->
     <div class="tab-navigation">
       <button class="tab-btn active" onclick="switchLobbyTab('players')" data-tab="players">
-        <span>👥</span> Players
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path fill-rule="evenodd" d="M5.216 14A2.238 2.238 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.325 6.325 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1h4.216z"/><path d="M4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/></svg>
+        Players
       </button>
       <button class="tab-btn" onclick="switchLobbyTab('settings')" data-tab="settings">
-        <span>⚙️</span> Settings
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/></svg>
+        Settings
       </button>
       <button class="tab-btn" onclick="switchLobbyTab('chat')" data-tab="chat">
-        <span>💬</span> Chat
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6 0-3.192-3.004-6-7-6S1 4.808 1 8c0 1.468.617 2.83 1.678 3.894zm-.493 3.905a21.682 21.682 0 0 1-.76.258.5.5 0 0 1-.616-.624c.012-.063.157-.721.33-1.557.137-.65.233-1.152.251-1.314a.5.5 0 0 1 .132-.301A9.927 9.927 0 0 1 0 8c0-3.866 3.582-7 8-7s8 3.134 8 7-3.582 7-8 7a9.06 9.06 0 0 1-2.347-.306c-.52.263-1.639.742-3.468 1.105z"/></svg>
+        Chat
       </button>
     </div>
 
@@ -141,48 +157,50 @@
       <!-- Settings Tab -->
       <div id="settingsTab" class="tab-content">
         <div id="settingsContent" class="settings-content-modern" style="display: none;">
-          <div class="setting-item">
-            <label for="difficulty">
-              <strong>📊 Difficulty</strong>
-              <select id="difficulty" onchange="updateSetting('difficulty', this.value)" aria-label="Game difficulty">
-                <option value="easy">🟢 Easy (60s draft)</option>
-                <option value="normal" selected>🟡 Normal (45s draft)</option>
-                <option value="hard">🔴 Hard (30s draft)</option>
-              </select>
-            </label>
-          </div>
-          <div class="setting-item">
-            <label for="scenarioTheme">
-              <strong>🎭 Scenario Theme</strong>
-              <select id="scenarioTheme" onchange="updateSetting('scenarioTheme', this.value)" aria-label="Scenario theme">
-                <option value="all" selected>🎲 All (Random Mix)</option>
-                <option value="food">🍳 Food & Cooking</option>
-                <option value="action">⚔️ Action & Combat</option>
-                <option value="adventure">🗺️ Adventure</option>
-                <option value="sports">🏀 Sports & Games</option>
-                <option value="performance">🎤 Performance</option>
-                <option value="absurd">🌀 Weird & Absurd</option>
-              </select>
-            </label>
+          <div class="settings-compact-row">
+            <div class="setting-item">
+              <label for="difficulty">
+                <strong>Difficulty</strong>
+                <select id="difficulty" onchange="updateSetting('difficulty', this.value)" aria-label="Game difficulty">
+                  <option value="easy">🟢 Easy (60s)</option>
+                  <option value="normal" selected>🟡 Normal (45s)</option>
+                  <option value="hard">🔴 Hard (30s)</option>
+                </select>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label for="scenarioTheme">
+                <strong>Theme</strong>
+                <select id="scenarioTheme" onchange="updateSetting('scenarioTheme', this.value)" aria-label="Scenario theme">
+                  <option value="all" selected>🎲 All (Random)</option>
+                  <option value="food">🍳 Food & Cooking</option>
+                  <option value="action">⚔️ Action & Combat</option>
+                  <option value="adventure">🗺️ Adventure</option>
+                  <option value="sports">🏀 Sports & Games</option>
+                  <option value="performance">🎭 Performance</option>
+                  <option value="absurd">🌀 Weird & Absurd</option>
+                </select>
+              </label>
+            </div>
           </div>
           <div class="setting-item">
             <label for="customScenario">
-              <strong>🎨 Custom Scenario <span style="opacity: 0.6; font-size: 0.9em;">(Optional)</span></strong>
+              <strong>Custom Scenario <span style="opacity: 0.6; font-size: 0.85em;">(Optional)</span></strong>
               <input type="text" id="customScenario" placeholder="e.g., BUILD THE PERFECT TREEHOUSE" maxlength="60" onchange="updateSetting('customScenario', this.value.trim())" aria-label="Custom scenario">
             </label>
           </div>
           <div class="setting-item">
             <label class="checkbox-label">
               <input type="checkbox" id="plotTwists" checked onchange="updateSetting('plotTwists', this.checked)">
-              <span>✨ Enable Plot Twists</span>
+              <span>Enable Plot Twists</span>
             </label>
           </div>
           <div class="host-badge">
-            <strong>👑 You are the HOST</strong>
+            <strong>You are the HOST</strong>
           </div>
         </div>
         <div id="hostNote" class="host-note-modern" style="display: none;">
-          <p>👤 <strong>Host:</strong> <span id="hostNameDisplay">Loading...</span></p>
+          <p><strong>Host:</strong> <span id="hostNameDisplay">Loading...</span></p>
         </div>
       </div>
 
@@ -198,7 +216,9 @@
         </div>
         <div class="chat-input-modern">
           <input id="chatInput" placeholder="Say something..." maxlength="50" aria-label="Chat message">
-          <button class="btn-icon" onclick="sendMessage()" aria-label="Send message">📤</button>
+          <button class="btn-icon" onclick="sendMessage()" aria-label="Send message">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -209,9 +229,13 @@
         <span class="ready-indicator">○</span> NOT READY
       </button>
       <button id="startBtn" class="btn btn-success" onclick="sendStartGame()" style="display: none;" disabled aria-label="Start game">
-        ▶️ START
+        <svg class="icon-btn" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393z"/></svg>
+        START
       </button>
-      <button class="btn btn-danger btn-leave" onclick="leaveRoom()" aria-label="Leave room">🚪</button>
+      <button class="btn btn-danger btn-leave" onclick="leaveRoom()" aria-label="Leave room">
+        <svg class="icon-btn" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v2a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0v2z"/><path fill-rule="evenodd" d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3z"/></svg>
+        LEAVE
+      </button>
       <p id="minPlayersMsg" class="warning-inline" style="display: none;" role="status"></p>
       <p id="hostWaiting" class="info-inline" style="display: none;" role="status"></p>
     </div>

@@ -471,6 +471,53 @@
     </div>
   </div>
 
+  <!-- ==================== OVR BREAKDOWN MODAL ==================== -->
+  <div id="ovrBreakdownModal" class="ovr-modal" role="dialog" aria-labelledby="modalTitle" aria-hidden="true">
+    <div class="ovr-modal-overlay" onclick="closeOVRBreakdown()"></div>
+    <div class="ovr-modal-content">
+      <div class="ovr-modal-header">
+        <h2 id="modalTitle" class="ovr-modal-title">OVR Breakdown</h2>
+        <button class="ovr-modal-close" onclick="closeOVRBreakdown()" aria-label="Close modal">✕</button>
+      </div>
+      <div class="ovr-modal-body">
+        <!-- Character Summary -->
+        <section class="ovr-breakdown-section">
+          <h3 class="ovr-section-title">📋 Character Information</h3>
+          <p id="modalCharacterSummary" class="ovr-section-text"></p>
+        </section>
+
+        <!-- Scenario Relevance -->
+        <section class="ovr-breakdown-section">
+          <h3 class="ovr-section-title">🎯 Scenario Relevance</h3>
+          <p id="modalScenarioRelevance" class="ovr-section-text"></p>
+        </section>
+
+        <!-- Twist Relevance -->
+        <section class="ovr-breakdown-section">
+          <h3 class="ovr-section-title">🌀 Twist Relevance</h3>
+          <p id="modalTwistRelevance" class="ovr-section-text"></p>
+        </section>
+
+        <!-- Score Breakdown -->
+        <section class="ovr-breakdown-section">
+          <h3 class="ovr-section-title">📊 Score Calculation (0-30)</h3>
+          <div id="modalScoreBreakdown" class="score-breakdown-list"></div>
+        </section>
+
+        <!-- OVR Breakdown -->
+        <section class="ovr-breakdown-section">
+          <h3 class="ovr-section-title">⭐ OVR Calculation (0-99)</h3>
+          <div id="modalOVRBreakdown" class="ovr-breakdown-details">
+            <div class="ovr-breakdown-chart">
+              <canvas id="ovrBreakdownChart" width="300" height="300"></canvas>
+            </div>
+            <div class="ovr-breakdown-items"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/round4Eval.js"></script>
   <script type="module" src="js/app.js"></script>

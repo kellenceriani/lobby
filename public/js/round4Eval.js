@@ -204,8 +204,17 @@ async function displayAllTeamEvaluationsSequentially() {
 function renderEvalCard(evalData, container) {
   if (!container) return;
 
-  const notes = Array.isArray(evalData.notes) ? evalData.notes.slice(0, 2) : [];
+  // Filter out "Low relevance" notes since detail is now in modal
+  const notes = Array.isArray(evalData.notes) 
+    ? evalData.notes.filter(note => !note.toLowerCase().includes('low relevance')).slice(0, 2) 
+    : [];
   const notesHtml = notes.map(note => `<li>${note}</li>`).join('');
+  
+  // Determine OVR tier and color
+  const ovrTier = evalData.ovrTier || getOVRTierFromValue(evalData.ovr);
+  const ovrClass = `ovr-${ovrTier.tier}`;
+  const rarity = evalData.rarity || 'Common';
+  const characterType = evalData.characterType || 'balanced';
   
   const card = document.createElement('div');
   card.className = `eval-card eval-card-${evalData.emotion}`;
@@ -218,13 +227,19 @@ function renderEvalCard(evalData, container) {
       </div>
     </div>
     <div class="eval-card-stats">
-      <div class="eval-score" title="Score: 0-20">
+      <div class="eval-score" title="Score: 0-30">
         <span class="eval-score-value">${evalData.score}</span>
-        <span class="eval-score-max">/20</span>
+        <span class="eval-score-max">/30</span>
       </div>
-      <div class="eval-ovr" title="Overall Rating: 0-99">
-        OVR <span class="eval-ovr-value">${evalData.ovr}</span>
+      <div class="eval-ovr ${ovrClass} eval-ovr-clickable" title="Click for detailed breakdown" role="button" tabindex="0" aria-label="View OVR breakdown for ${evalData.character}">
+        <div class="eval-ovr-label">OVR</div>
+        <div class="eval-ovr-value">${evalData.ovr}</div>
+        <div class="eval-ovr-tier">${ovrTier.label}</div>
       </div>
+    </div>
+    <div class="eval-card-meta">
+      <span class="eval-rarity" title="Rarity">${rarity}</span>
+      <span class="eval-type" title="Character Type">${characterType}</span>
     </div>
     <div class="eval-card-notes" aria-label="Evaluation notes">
       <ul>
@@ -236,7 +251,30 @@ function renderEvalCard(evalData, container) {
     </div>
   `;
   
+  // Add click handler to OVR element
+  const ovrElement = card.querySelector('.eval-ovr-clickable');
+  if (ovrElement) {
+    ovrElement.addEventListener('click', () => openOVRBreakdown(evalData));
+    ovrElement.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openOVRBreakdown(evalData);
+      }
+    });
+  }
+  
   container.appendChild(card);
+}
+
+// Helper function to get OVR tier from value (client-side fallback)
+function getOVRTierFromValue(ovr) {
+  if (ovr >= 99) return { tier: 'icon', label: 'Icon', color: '#f39c12' };
+  if (ovr >= 95) return { tier: 'legendary', label: 'Legendary', color: '#e74c3c' };
+  if (ovr >= 90) return { tier: 'epic', label: 'Epic', color: '#9b59b6' };
+  if (ovr >= 85) return { tier: 'rare', label: 'Rare', color: '#ff6b35' };
+  if (ovr >= 75) return { tier: 'gold', label: 'Gold', color: '#ffd700' };
+  if (ovr >= 65) return { tier: 'silver', label: 'Silver', color: '#c0c0c0' };
+  return { tier: 'bronze', label: 'Bronze', color: '#cd7f32' };
 }
 
 // Render team summary
@@ -365,7 +403,178 @@ function requestFinalResults() {
   window.socket.emit('requestFinalResults');
 }
 
+// Open OVR Breakdown Modal
+function openOVRBreakdown(evalData) {
+  const modal = document.getElementById('ovrBreakdownModal');
+  if (!modal) return;
+
+  // Populate character summary
+  const summaryEl = document.getElementById('modalCharacterSummary');
+  if (summaryEl && evalData.breakdown) {
+    summaryEl.textContent = evalData.breakdown.characterSummary || 'No information available.';
+  }
+
+  // Populate scenario relevance
+  const scenarioEl = document.getElementById('modalScenarioRelevance');
+  if (scenarioEl && evalData.breakdown) {
+    scenarioEl.textContent = evalData.breakdown.scenarioRelevance || 'No scenario analysis available.';
+  }
+
+  // Populate twist relevance
+  const twistEl = document.getElementById('modalTwistRelevance');
+  if (twistEl && evalData.breakdown) {
+    twistEl.textContent = evalData.breakdown.twistRelevance || 'No twist analysis available.';
+  }
+
+  // Populate score breakdown
+  const scoreBreakdownEl = document.getElementById('modalScoreBreakdown');
+  if (scoreBreakdownEl && evalData.breakdown && evalData.breakdown.scoreBreakdown) {
+    let totalScore = 0;
+    const steps = evalData.breakdown.scoreBreakdown.map(step => {
+      totalScore += step.points;
+      const pointsClass = step.points > 0 ? 'positive' : step.points < 0 ? 'negative' : 'neutral';
+      const pointsSign = step.points > 0 ? '+' : '';
+      return `
+        <div class="score-breakdown-item">
+          <div class="score-breakdown-label">${step.step}</div>
+          <div class="score-breakdown-value ${pointsClass}">${pointsSign}${step.points}</div>
+          <div class="score-breakdown-desc">${step.description}</div>
+        </div>
+      `;
+    }).join('');
+    
+    scoreBreakdownEl.innerHTML = `
+      ${steps}
+      <div class="score-breakdown-item score-breakdown-total">
+        <div class="score-breakdown-label"><strong>Final Score</strong></div>
+        <div class="score-breakdown-value"><strong>${evalData.score}/30</strong></div>
+        <div class="score-breakdown-desc"></div>
+      </div>
+    `;
+  }
+
+  // Populate OVR breakdown with percentages
+  const ovrBreakdownEl = document.querySelector('.ovr-breakdown-items');
+  if (ovrBreakdownEl && evalData.breakdown && evalData.breakdown.ovrBreakdown) {
+    const ovr = evalData.breakdown.ovrBreakdown;
+    const percentages = ovr.percentages || {};
+    
+    ovrBreakdownEl.innerHTML = `
+      <div class="ovr-breakdown-item">
+        <div class="ovr-breakdown-label">Base from Score</div>
+        <div class="ovr-breakdown-bar">
+          <div class="ovr-breakdown-fill" style="width: ${percentages.scoreContribution || 0}%; background: #00bcd4;"></div>
+        </div>
+        <div class="ovr-breakdown-value">${ovr.baseFromScore} (${percentages.scoreContribution || 0}%)</div>
+        <div class="ovr-breakdown-desc">${ovr.explanations?.base || ''}</div>
+      </div>
+      <div class="ovr-breakdown-item">
+        <div class="ovr-breakdown-label">Rarity Bonus</div>
+        <div class="ovr-breakdown-bar">
+          <div class="ovr-breakdown-fill" style="width: ${percentages.rarityContribution || 0}%; background: #ffd700;"></div>
+        </div>
+        <div class="ovr-breakdown-value">${ovr.rarityBonus} (${percentages.rarityContribution || 0}%)</div>
+        <div class="ovr-breakdown-desc">${ovr.explanations?.rarity || ''}</div>
+      </div>
+      <div class="ovr-breakdown-item">
+        <div class="ovr-breakdown-label">Attribute Bonus</div>
+        <div class="ovr-breakdown-bar">
+          <div class="ovr-breakdown-fill" style="width: ${percentages.attributeContribution || 0}%; background: #4caf50;"></div>
+        </div>
+        <div class="ovr-breakdown-value">${ovr.attributeBonus} (${percentages.attributeContribution || 0}%)</div>
+        <div class="ovr-breakdown-desc">${ovr.explanations?.attributes || ''}</div>
+      </div>
+      <div class="ovr-breakdown-item">
+        <div class="ovr-breakdown-label">Scenario Fit</div>
+        <div class="ovr-breakdown-bar">
+          <div class="ovr-breakdown-fill" style="width: ${Math.abs(percentages.scenarioEffect || 0)}%; background: ${(percentages.scenarioEffect || 0) >= 0 ? '#9b59b6' : '#ff5252'};"></div>
+        </div>
+        <div class="ovr-breakdown-value">×${ovr.scenarioMultiplier.toFixed(2)} (${percentages.scenarioEffect > 0 ? '+' : ''}${percentages.scenarioEffect || 0}%)</div>
+        <div class="ovr-breakdown-desc">${ovr.explanations?.scenario || ''}</div>
+      </div>
+      <div class="ovr-breakdown-item ovr-breakdown-total">
+        <div class="ovr-breakdown-label"><strong>Final OVR</strong></div>
+        <div class="ovr-breakdown-bar"></div>
+        <div class="ovr-breakdown-value"><strong>${ovr.finalOVR}/99</strong></div>
+        <div class="ovr-breakdown-desc"></div>
+      </div>
+    `;
+    
+    // Draw pie chart
+    drawOVRPieChart(percentages);
+  }
+
+  // Show modal
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+}
+
+// Close OVR Breakdown Modal
+function closeOVRBreakdown() {
+  const modal = document.getElementById('ovrBreakdownModal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+}
+
+// Draw simple pie chart for OVR breakdown
+function drawOVRPieChart(percentages) {
+  const canvas = document.getElementById('ovrBreakdownChart');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  const radius = 100;
+  
+  const data = [
+    { label: 'Score', value: percentages.scoreContribution || 0, color: '#00bcd4' },
+    { label: 'Rarity', value: percentages.rarityContribution || 0, color: '#ffd700' },
+    { label: 'Attributes', value: percentages.attributeContribution || 0, color: '#4caf50' },
+    { label: 'Scenario', value: Math.abs(percentages.scenarioEffect || 0), color: (percentages.scenarioEffect || 0) >= 0 ? '#9b59b6' : '#ff5252' }
+  ];
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // Draw pie slices
+  let currentAngle = -Math.PI / 2; // Start at top
+  data.forEach(segment => {
+    const sliceAngle = (segment.value / 100) * 2 * Math.PI;
+    
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + sliceAngle);
+    ctx.closePath();
+    ctx.fillStyle = segment.color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    currentAngle += sliceAngle;
+  });
+  
+  // Draw center circle for donut effect
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius * 0.5, 0, 2 * Math.PI);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+}
+
+// Close modal when clicking outside or pressing Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeOVRBreakdown();
+  }
+});
+
 // Export for module
 window.initRound4Evaluation = initRound4Evaluation;
 window.toggleEvalScenario = toggleEvalScenario;
 window.requestFinalResults = requestFinalResults;
+window.openOVRBreakdown = openOVRBreakdown;
+window.closeOVRBreakdown = closeOVRBreakdown;

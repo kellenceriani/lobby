@@ -449,8 +449,15 @@ function registerSocketHandlers(io) {
             breakdown: pointBreakdown[p.name] || []
           }));
 
+        // Detect tie in Round 4 results (using OVR scores)
+        const maxOVR = Math.max(...finalLeaderboard.map(t => t.totalOVR));
+        const tiedTeams = finalLeaderboard.filter(t => t.totalOVR === maxOVR).map(t => t.playerName);
+        const isTie = tiedTeams.length > 1;
+
         game.results[3] = {
           winner: finalLeaderboard[0] ? finalLeaderboard[0].playerName : null,
+          isTie: isTie,
+          tiedPlayers: tiedTeams,
           scenario: scenario,
           twist: twist,
           leaderboard: leaderboardData
@@ -459,7 +466,9 @@ function registerSocketHandlers(io) {
         const payload = {
           evaluationId,
           allTeamEvaluations: teamEvaluations,
-          finalLeaderboard
+          finalLeaderboard,
+          isTie: isTie,
+          tiedPlayers: tiedTeams
         };
 
         game.round4Results = {

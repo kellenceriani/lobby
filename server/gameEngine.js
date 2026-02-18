@@ -844,6 +844,24 @@ function startFinalVoting(io, roomCode) {
   voteTimeouts[roomCode] = voteTimeout;
 }
 
+// Helper function to determine round winner(s) and detect ties
+function determineRoundWinner(points) {
+  if (!points || Object.keys(points).length === 0) {
+    return { winner: null, isTie: false, tiedPlayers: [] };
+  }
+
+  const sorted = Object.entries(points).sort((a, b) => b[1] - a[1]);
+  const maxPoints = sorted[0][1];
+  const tiedPlayers = sorted.filter(([_, pts]) => pts === maxPoints).map(([name, _]) => name);
+
+  return {
+    winner: tiedPlayers[0] || null,
+    isTie: tiedPlayers.length > 1,
+    tiedPlayers: tiedPlayers,
+    maxPoints: maxPoints
+  };
+}
+
 function tallyResults(io, roomCode) {
   const game = rooms[roomCode].gameState;
   const scenario = game.scenarios[game.currentRound];
@@ -868,13 +886,20 @@ function tallyResults(io, roomCode) {
   }));
 
   if (!game.results[game.currentRound]) game.results[game.currentRound] = {};
-  game.results[game.currentRound].winner = Object.entries(points).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  
+  // Use improved winner detection with tie support
+  const winnerInfo = determineRoundWinner(points);
+  game.results[game.currentRound].winner = winnerInfo.winner;
+  game.results[game.currentRound].isTie = winnerInfo.isTie;
+  game.results[game.currentRound].tiedPlayers = winnerInfo.tiedPlayers;
   game.results[game.currentRound].scenario = scenario.scenario;
   game.results[game.currentRound].twist = game.currentTwist;
   game.results[game.currentRound].leaderboard = leaderboardData;
 
   io.to(roomCode).emit('roundResults', {
-    winner: game.results[game.currentRound].winner,
+    winner: winnerInfo.winner,
+    isTie: winnerInfo.isTie,
+    tiedPlayers: winnerInfo.tiedPlayers,
     roundPoints: points,
     voteCount,
     leaderboard: leaderboardData,
@@ -898,8 +923,13 @@ function tallyFinalResults(io, roomCode) {
     breakdown: pointBreakdown[p.name]
   }));
 
+  // Use improved winner detection with tie support
+  const winnerInfo = determineRoundWinner(points);
+
   io.to(roomCode).emit('finalRoundResults', {
-    winner: Object.entries(points).sort((a, b) => b[1] - a[1])[0]?.[0] || null,
+    winner: winnerInfo.winner,
+    isTie: winnerInfo.isTie,
+    tiedPlayers: winnerInfo.tiedPlayers,
     roundPoints: points,
     voteCount,
     leaderboard: leaderboardData,

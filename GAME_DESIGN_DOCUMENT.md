@@ -849,7 +849,7 @@ console.log('User connected:', socket.id)
 
 ## FUTURE ENHANCEMENTS
 
-### Phase 1: Polish & UX (Week 1-2)
+### Phase 1: Polish & UX (Week 1-2) <--FINISHED-->
 
 - [ ] Sound effects (draft, vote, results)
 - [ ] More animations (confetti on win)

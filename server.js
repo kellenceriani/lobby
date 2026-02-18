@@ -229,7 +229,8 @@ function createGameInstance(roomCode, players, settings) {
     currentTwist: '',
     results: [],
     settings,
-    roundStartTime: null
+    roundStartTime: null,
+    allCharactersDrafted: []
   };
 }
 
@@ -274,10 +275,15 @@ function calculateRoundBonuses(game, round) {
     points[p.name] = 0;
     pointBreakdown[p.name] = [];
 
-    // FULL TEAM BONUS
+    // FULL TEAM BONUS (only if NOT auto-filled)
     if (p.team.length === 2) {
-      points[p.name] += 30;
-      pointBreakdown[p.name].push('Full Team (2 chars): +30');
+      const hasAutoFilled = p.teamAutoFilled.some(filled => filled === true);
+      if (!hasAutoFilled) {
+        points[p.name] += 30;
+        pointBreakdown[p.name].push('Full Team (2 chars): +30');
+      } else {
+        pointBreakdown[p.name].push('Full Team (contains auto-filled): No bonus (had duplicate or empty)');
+      }
     }
   });
 
@@ -352,10 +358,15 @@ function calculateFinalRoundBonuses(game) {
     points[p.name] = 0;
     pointBreakdown[p.name] = [];
 
-    // Complete team bonus
+    // Complete team bonus (only if NOT auto-filled from any round)
     if (p.finalTeam.length === 6) {
-      points[p.name] += 40;
-      pointBreakdown[p.name].push('Complete Team (6 chars): +40');
+      const hasAutoFilled = p.teamAutoFilled.some(filled => filled === true);
+      if (!hasAutoFilled) {
+        points[p.name] += 40;
+        pointBreakdown[p.name].push('Complete Team (6 chars): +40');
+      } else {
+        pointBreakdown[p.name].push('Complete Team (contains auto-filled): No bonus (had duplicate or empty)');
+      }
     }
   });
 
@@ -496,11 +507,13 @@ function revealPlotTwist(roomCode) {
   game.players.forEach(p => {
     while (p.team.length < 2) {
       let randomWord = getRandomWord();
-      while (game.players.some(other => other.name !== p.name && other.team.some(c => c.toLowerCase() === randomWord.toLowerCase()))) {
+      while (game.players.some(other => other.name !== p.name && other.team.some(c => c.toLowerCase() === randomWord.toLowerCase())) ||
+             game.allCharactersDrafted.some(c => c.toLowerCase() === randomWord.toLowerCase())) {
         randomWord = getRandomWord();
       }
       p.team.push(randomWord);
       p.teamAutoFilled.push(true);
+      game.allCharactersDrafted.push(randomWord);
     }
   });
 
@@ -870,13 +883,15 @@ io.on('connection', (socket) => {
     const isDuplicateOther = game.players.some(p => 
       p.name !== name && p.team.some(c => c.toLowerCase() === charNormalized)
     );
+    const isDuplicateAcrossRounds = game.allCharactersDrafted.some(c => c.toLowerCase() === charNormalized);
 
     let finalCharacter = character.trim();
     let autoFilled = false;
 
-    if (isDuplicateOwn || isDuplicateOther) {
+    if (isDuplicateOwn || isDuplicateOther || isDuplicateAcrossRounds) {
       let randomWord = getRandomWord();
-      while (game.players.some(p => p.team.some(c => c.toLowerCase() === randomWord.toLowerCase()))) {
+      while (game.players.some(p => p.team.some(c => c.toLowerCase() === randomWord.toLowerCase())) ||
+             game.allCharactersDrafted.some(c => c.toLowerCase() === randomWord.toLowerCase())) {
         randomWord = getRandomWord();
       }
       finalCharacter = randomWord;
@@ -885,6 +900,7 @@ io.on('connection', (socket) => {
 
     player.team.push(finalCharacter);
     player.teamAutoFilled.push(autoFilled);
+    game.allCharactersDrafted.push(finalCharacter);
 
     const allDraftsList = [];
     game.players.forEach(p => {

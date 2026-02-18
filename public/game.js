@@ -189,24 +189,14 @@ function updateDraftWarning(character, isDuplicate = false) {
   if (!warningEl) return;
   
   if (isDuplicate) {
-    warningEl.style.display = 'flex';
-    warningEl.style.alignItems = 'center';
-    warningEl.style.gap = '10px';
-    warningEl.innerHTML = `
-      <span style="font-size: 1.2em;">⚠️</span>
-      <div style="text-align: left;">
-        <strong>"${character}" is DUPLICATE!</strong><br>
-        <small>Will auto-fill with a random word instead.</small>
-      </div>
-    `;
-    warningEl.style.background = '#fff3e0';
-    warningEl.style.borderColor = '#ff9800';
-    charInput.style.borderColor = '#ff9800';
-    charInput.style.borderWidth = '3px';
+    warningEl.className = 'draft-warning-modern warning';
+    warningEl.textContent = `⚠️ "${character}" is a DUPLICATE! Will auto-fill instead.`;
+    warningEl.style.display = 'block';
+    if (charInput) charInput.style.borderColor = '#ff9800';
   } else {
     warningEl.style.display = 'none';
-    charInput.style.borderColor = '#333';
-    charInput.style.borderWidth = '2px';
+    warningEl.className = 'draft-warning-modern';
+    if (charInput) charInput.style.borderColor = '#222';
   }
 }
 
@@ -215,18 +205,9 @@ function updateAutoFillWarning() {
   if (!warningEl) return;
   
   if (gameState.myTeam.length === 0) {
-    warningEl.style.display = 'flex';
-    warningEl.style.alignItems = 'center';
-    warningEl.style.gap = '10px';
-    warningEl.innerHTML = `
-      <span style="font-size: 1.2em;">ℹ️</span>
-      <div style="text-align: left;">
-        <strong>Time Running Out!</strong><br>
-        <small>No picks made? Random words will fill your team.</small>
-      </div>
-    `;
-    warningEl.style.background = '#e3f2fd';
-    warningEl.style.borderColor = '#2196f3';
+    warningEl.className = 'draft-warning-modern info';
+    warningEl.textContent = 'ℹ️ Time running out! No picks? Random words will fill your team.';
+    warningEl.style.display = 'block';
   }
 }
 
@@ -296,22 +277,21 @@ socket.on('roomData', (data) => {
   
   // Update color based on player count
   const badge = document.getElementById('playerCountBadge');
+  badge.classList.remove('available', 'almost-full', 'full');
   if (data.players.length >= 6) {
-    badge.style.background = '#ff5252';
+    badge.classList.add('full');
   } else if (data.players.length >= 5) {
-    badge.style.background = '#ffc107';
+    badge.classList.add('almost-full');
   } else {
-    badge.style.background = '#4caf50';
+    badge.classList.add('available');
   }
 
   const settingsContent = document.getElementById('settingsContent');
   const hostNote = document.getElementById('hostNote');
-  const settingsNote = document.getElementById('settingsNote');
   
   if (isHost) {
     settingsContent.style.display = 'block';
     hostNote.style.display = 'none';
-    settingsNote.textContent = '✓ You are the HOST - Configure the game settings below!';
     if (data.settings) {
       if (data.settings.difficulty) document.getElementById('difficulty').value = data.settings.difficulty;
       if (data.settings.plotTwists !== undefined) document.getElementById('plotTwists').checked = data.settings.plotTwists;
@@ -356,37 +336,33 @@ socket.on('roomData', (data) => {
       const allReady = readyCount === data.players.length && data.players.length >= 3;
       if (allReady) {
         startBtn.disabled = false;
-        startBtn.style.background = '#4caf50';
-        startBtn.style.boxShadow = '0 0 20px rgba(76, 175, 80, 0.6)';
+        startBtn.className = 'btn btn-success pulsing-glow';
         minPlayersMsg.style.display = 'none';
       } else {
         startBtn.disabled = true;
-        startBtn.style.background = '#ccc';
-        startBtn.style.boxShadow = 'none';
+        startBtn.className = 'btn';
         minPlayersMsg.style.display = 'block';
         minPlayersMsg.innerHTML = `
-          <strong>⏳ Waiting for Players:</strong> 
+          <strong>⏳ Waiting:</strong> 
           ${readyCount}/${data.players.length} ready 
-          ${data.players.length < 3 ? '(Need 3+ players)' : ''}
+          ${data.players.length < 3 ? '(Need 3+)' : ''}
         `;
       }
     } else {
       startBtn.style.display = 'none';
       minPlayersMsg.style.display = 'none';
       hostWaiting.style.display = 'block';
-      hostWaiting.textContent = '⏳ Waiting for ' + (data.host || 'host') + ' to start the game...';
+      hostWaiting.textContent = '⏳ Waiting for ' + (data.host || 'host') + ' to start...';
     }
 
     if (currentPlayer) {
       player.ready = currentPlayer.ready;
       if (currentPlayer.ready) {
-        readyBtn.textContent = '✓ READY';
-        readyBtn.className = 'btn btn-success';
-        readyBtn.style.boxShadow = '0 0 15px rgba(76, 175, 80, 0.5)';
+        readyBtn.innerHTML = '<span class="ready-indicator">✓</span> READY';
+        readyBtn.className = 'btn btn-success btn-ready pulsing';
       } else {
-        readyBtn.textContent = '○ NOT READY';
-        readyBtn.className = 'btn btn-secondary';
-        readyBtn.style.boxShadow = 'none';
+        readyBtn.innerHTML = '<span class="ready-indicator">○</span> NOT READY';
+        readyBtn.className = 'btn btn-ready';
       }
     }
   }
@@ -665,10 +641,9 @@ function updateDraftCounter() {
     const count = gameState.myTeam.length;
     counter.textContent = `(${count}/2)`;
     if (count >= 2) {
-      counter.style.color = '#ff4081';
-      counter.style.fontWeight = 'bold';
+      counter.classList.add('full');
     } else {
-      counter.style.color = '#666';
+      counter.classList.remove('full');
     }
   }
 }
@@ -711,6 +686,9 @@ socket.on('draftUpdate', (data) => {
   });
 
   picksList.scrollTop = picksList.scrollHeight;
+  
+  // Update live picks count badge
+  updateLivePicksCount(data.allDrafts.length);
 
   // Sync my team from server list
   const myTeamList = document.getElementById('myTeam');
@@ -726,11 +704,7 @@ socket.on('draftUpdate', (data) => {
       const li = document.createElement('li');
       li.textContent = p.character;
       if (p.autoFilled) {
-        li.classList.add('draft-duplicate');
-        li.appendChild(document.createElement('br'));
-        const small = document.createElement('small');
-        small.textContent = '(auto-filled)';
-        li.appendChild(small);
+        li.classList.add('draft-autofill');
       }
       if (myTeamList) myTeamList.appendChild(li);
     });
@@ -741,10 +715,12 @@ socket.on('draftUpdate', (data) => {
   if (lockBtn) {
     if (gameState.myTeam.length >= 2) {
       lockBtn.disabled = false;
-      lockBtn.textContent = '🔒 LOCK IN MY TEAM';
+      lockBtn.textContent = '🔒 LOCK TEAM';
+      lockBtn.style.display = 'block';
     } else {
       lockBtn.disabled = true;
-      lockBtn.textContent = `🔓 LOCK IN MY TEAM (${gameState.myTeam.length}/2)`;
+      lockBtn.textContent = `🔓 LOCK TEAM (${gameState.myTeam.length}/2)`;
+      lockBtn.style.display = gameState.myTeam.length > 0 ? 'block' : 'none';
     }
   }
 });
@@ -952,12 +928,12 @@ socket.on('votingPhaseStart', (data) => {
     const card = document.createElement('div');
     card.className = 'vote-card';
     card.style.animationDelay = `${idx * 0.1}s`;
+    card.onclick = () => castVote(team.name);
     card.innerHTML = `
       <h3>👤 ${team.name}</h3>
       <ul class="team-display">
         ${team.team.map(t => `<li>• ${t}</li>`).join('')}
       </ul>
-      <button class="btn btn-vote" onclick="castVote('${team.name}')">👉 VOTE FOR THIS TEAM</button>
       <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span> votes</p>
     `;
     if (grid) grid.appendChild(card);
@@ -972,7 +948,7 @@ socket.on('votingPhaseStart', (data) => {
 
   const lockSection = document.getElementById('voteLockSection');
   if (lockSection) {
-    lockSection.style.display = 'flex';
+    lockSection.style.display = 'none'; // Hidden until they select
   }
 
   const lockBtn = document.getElementById('lockVoteBtn');
@@ -980,7 +956,7 @@ socket.on('votingPhaseStart', (data) => {
     lockBtn.style.display = 'none';
     lockBtn.disabled = true;
     lockBtn.textContent = '🔒 LOCK MY VOTE';
-    lockBtn.className = 'btn btn-success';
+    lockBtn.className = 'btn btn-success btn-lock-vote';
   }
 
   const votedIndication = document.getElementById('votedIndication');
@@ -988,9 +964,12 @@ socket.on('votingPhaseStart', (data) => {
 
   const voteLockNotice = document.getElementById('voteLockNotice');
   if (voteLockNotice) voteLockNotice.style.display = 'block';
+  
+  // Update status badge
+  updateVoteStatusBadge('Select Team');
 
   showScreen('votingScreen');
-  showToast('⚖️ Time to vote! Remember: you can change your vote until you LOCK it!', 'info', 4000);
+  showToast('⚖️ Time to vote! Tap a team card to select it.', 'info', 4000);
 
   let timeLeft = 30;
   document.getElementById('voteTimer').textContent = timeLeft;
@@ -1036,12 +1015,12 @@ socket.on('finalVotingPhaseStart', (data) => {
     const card = document.createElement('div');
     card.className = 'vote-card final-vote';
     card.style.animationDelay = `${idx * 0.1}s`;
+    card.onclick = () => castVote(team.name);
     card.innerHTML = `
       <h3>👤 ${team.name}</h3>
       <ul class="team-display final-team-display">
         ${team.team.map(t => `<li>• ${t}</li>`).join('')}
       </ul>
-      <button class="btn btn-vote" onclick="castVote('${team.name}')">🏆 VOTE FOR THIS TEAM</button>
       <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span> votes</p>
     `;
     if (grid) grid.appendChild(card);
@@ -1056,13 +1035,14 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   const lockSection = document.getElementById('voteLockSection');
   if (lockSection) {
-    lockSection.style.display = 'flex';
+    lockSection.style.display = 'none'; // Hidden until selection
   }
 
   const lockBtn = document.getElementById('lockVoteBtn');
   if (lockBtn) {
     lockBtn.style.display = 'none';
     lockBtn.disabled = true;
+    lockBtn.className = 'btn btn-success btn-lock-vote';
   }
 
   const votedIndication = document.getElementById('votedIndication');
@@ -1070,6 +1050,9 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   const voteLockNotice = document.getElementById('voteLockNotice');
   if (voteLockNotice) voteLockNotice.style.display = 'block';
+  
+  // Update status badge
+  updateVoteStatusBadge('Final Vote');
 
   showScreen('votingScreen');
 
@@ -1097,31 +1080,29 @@ function castVote(playerName) {
   gameState.voted = true;
   gameState.currentVoteChoice = playerName;
   
+  // Update all vote cards
   document.querySelectorAll('.vote-card').forEach(card => {
     const cardName = card.querySelector('h3').textContent.replace('👤 ', '');
-    const voteBtn = card.querySelector('.btn-vote');
     if (cardName === playerName) {
-      card.style.borderColor = '#4caf50';
-      card.style.borderWidth = '3px';
-      voteBtn.textContent = '★ SELECTED';
-      voteBtn.className = 'btn btn-vote btn-success';
-      voteBtn.disabled = false;
+      card.classList.add('selected');
     } else {
-      card.style.borderColor = '#00bcd4';
-      card.style.borderWidth = '2px';
-      voteBtn.textContent = '👉 VOTE FOR THIS TEAM';
-      voteBtn.className = 'btn btn-vote';
-      voteBtn.disabled = false;
+      card.classList.remove('selected');
     }
   });
   
+  // Show lock button
   const lockBtn = document.getElementById('lockVoteBtn');
-  if (lockBtn) {
+  const lockSection = document.getElementById('voteLockSection');
+  if (lockBtn && lockSection) {
+    lockSection.style.display = 'block';
     lockBtn.style.display = 'inline-block';
     lockBtn.disabled = false;
   }
+  
+  // Update status badge
+  updateVoteStatusBadge(`Voting for ${playerName}`);
 
-  showToast(`✓ You selected ${playerName}! Click LOCK when ready.`, 'info', 2000);
+  showToast(`✓ Selected ${playerName}! Click LOCK when ready.`, 'info', 2000);
 }
 
 function lockVote() {
@@ -1141,15 +1122,7 @@ function lockVote() {
     lockBtn.className = 'btn btn-success';
   }
 
-  const votedIndication = document.getElementById('votedIndication');
-  if (votedIndication) {
-    votedIndication.style.display = 'block';
-    votedIndication.innerHTML = '🔒 Your vote is locked in!';
-  }
-
-  const voteLockNotice = document.getElementById('voteLockNotice');
-  if (voteLockNotice) voteLockNotice.style.display = 'none';
-
+  updateVoteStatusBadge();
   showToast('🔒 Your vote is locked!', 'info', 2000);
 }
 
@@ -1182,67 +1155,45 @@ socket.on('roundResults', (data) => {
 
   const winnerBox = document.getElementById('roundWinner');
   
-  let resultHTML = '<div class="results-content">';
-  
+  let winnerHTML = '';
   if (data.winner) {
-    resultHTML += `
-      <div class="round-winner-display">
-        <h2>🏆 ${data.winner} WINS! 🏆</h2>
-        <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
-      </div>
+    winnerHTML = `
+      <h2>🏆 ${data.winner} WINS! 🏆</h2>
+      <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
     `;
   }
+  
+  if (winnerBox) winnerBox.innerHTML = winnerHTML;
 
-  resultHTML += `
-    <div class="results-table">
-      <h3>💎 Point Breakdown This Round:</h3>
-      <div class="breakdown-grid">
-  `;
-
-  const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
-  sorted.forEach((player, idx) => {
-    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
-    resultHTML += `
-      <div class="player-breakdown">
-        <div class="breakdown-header">${medal} ${player.name}</div>
-        <div class="breakdown-points">+${player.roundScore} points</div>
-        <div class="breakdown-details">
-          ${player.breakdown.map(line => {
-            const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
-            return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
-          }).join('')}
+  // Build breakdown section
+  const breakdownContainer = document.getElementById('resultsBreakdown');
+  if (breakdownContainer) {
+    let breakdownHTML = '';
+    const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
+    sorted.forEach((player, idx) => {
+      const medal = ['🥇', '🥈', '🥉'][idx] || '•';
+      breakdownHTML += `
+        <div class="player-breakdown">
+          <div class="breakdown-header">${medal} ${player.name}</div>
+          <div class="breakdown-points">+${player.roundScore} points</div>
+          <div class="breakdown-details">
+            ${player.breakdown.map(line => {
+              const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
+              return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
+            }).join('')}
+          </div>
         </div>
-      </div>
-    `;
-  });
+      `;
+    });
+    breakdownContainer.innerHTML = breakdownHTML;
+  }
 
-  resultHTML += `
-      </div>
-    </div>
-
-    <div class="results-leaderboard">
-      <h3>📊 Current Leaderboard:</h3>
-      <ol class="leaderboard">
-  `;
-
-  data.leaderboard.forEach((player, idx) => {
-    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
-    resultHTML += `
-      <li class="leaderboard-entry">
-        <span class="medal">${medal}</span>
-        <span class="name">${player.name}</span>
-        <span class="score">${player.score}pts</span>
-      </li>
-    `;
-  });
-
-  resultHTML += `
-      </ol>
-    </div>
-    </div>
-  `;
-
-  if (winnerBox) winnerBox.innerHTML = resultHTML;
+  // Reset toggle state
+  resultsDetailsOpen = false;
+  const details = document.getElementById('resultsDetails');
+  const icon = document.getElementById('resultsDetailsIcon');
+  if (details) details.style.display = 'none';
+  if (icon) icon.textContent = '▼';
 
   const readyButton = document.getElementById('nextRoundReadyBtn');
   if (readyButton) {
@@ -1272,67 +1223,45 @@ socket.on('finalRoundResults', (data) => {
 
   const winnerBox = document.getElementById('roundWinner');
   
-  let resultHTML = '<div class="results-content">';
-  
+  let winnerHTML = '';
   if (data.winner) {
-    resultHTML += `
-      <div class="round-winner-display">
-        <h2>🏆 ${data.winner} WINS THE GAME! 🏆</h2>
-        <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
-      </div>
+    winnerHTML = `
+      <h2>🏆 ${data.winner} WINS THE GAME! 🏆</h2>
+      <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
     `;
   }
+  
+  if (winnerBox) winnerBox.innerHTML = winnerHTML;
 
-  resultHTML += `
-    <div class="results-table">
-      <h3>💎 Point Breakdown Final Round:</h3>
-      <div class="breakdown-grid">
-  `;
-
-  const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
-  sorted.forEach((player, idx) => {
-    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
-    resultHTML += `
-      <div class="player-breakdown">
-        <div class="breakdown-header">${medal} ${player.name}</div>
-        <div class="breakdown-points">+${player.roundScore} points</div>
-        <div class="breakdown-details">
-          ${player.breakdown.map(line => {
-            const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
-            return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
-          }).join('')}
+  // Build breakdown section
+  const breakdownContainer = document.getElementById('resultsBreakdown');
+  if (breakdownContainer) {
+    let breakdownHTML = '';
+    const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
+    sorted.forEach((player, idx) => {
+      const medal = ['🥇', '🥈', '🥉'][idx] || '•';
+      breakdownHTML += `
+        <div class="player-breakdown">
+          <div class="breakdown-header">${medal} ${player.name}</div>
+          <div class="breakdown-points">+${player.roundScore} points</div>
+          <div class="breakdown-details">
+            ${player.breakdown.map(line => {
+              const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
+              return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
+            }).join('')}
+          </div>
         </div>
-      </div>
-    `;
-  });
+      `;
+    });
+    breakdownContainer.innerHTML = breakdownHTML;
+  }
 
-  resultHTML += `
-      </div>
-    </div>
-
-    <div class="results-leaderboard">
-      <h3>🎯 FINAL LEADERBOARD:</h3>
-      <ol class="leaderboard">
-  `;
-
-  data.leaderboard.forEach((player, idx) => {
-    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
-    resultHTML += `
-      <li class="leaderboard-entry">
-        <span class="medal">${medal}</span>
-        <span class="name">${player.name}</span>
-        <span class="score">${player.score}pts</span>
-      </li>
-    `;
-  });
-
-  resultHTML += `
-      </ol>
-    </div>
-    </div>
-  `;
-
-  if (winnerBox) winnerBox.innerHTML = resultHTML;
+  // Reset toggle state
+  resultsDetailsOpen = false;
+  const details = document.getElementById('resultsDetails');
+  const icon = document.getElementById('resultsDetailsIcon');
+  if (details) details.style.display = 'none';
+  if (icon) icon.textContent = '▼';
 
   showScreen('resultsScreen');
 });
@@ -1487,3 +1416,131 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
+
+// ========================
+// NEW UI/UX FUNCTIONS
+// ========================
+
+// LOBBY TAB SWITCHING
+function switchLobbyTab(tabName) {
+  // Hide all tab contents
+  document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+  
+  // Deactivate all tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  
+  // Show selected tab content
+  const selectedTab = document.getElementById(`${tabName}Tab`);
+  if (selectedTab) selectedTab.classList.add('active');
+  
+  // Activate selected tab button
+  const selectedBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+  if (selectedBtn) selectedBtn.classList.add('active');
+}
+
+// TUTORIAL ACCORDION
+function toggleAccordion(header) {
+  const accordionItem = header.parentElement;
+  const content = accordionItem.querySelector('.accordion-content');
+  const icon = header.querySelector('.accordion-icon');
+  
+  const isActive = accordionItem.classList.contains('active');
+  
+  if (isActive) {
+    accordionItem.classList.remove('active');
+    content.style.display = 'none';
+    icon.textContent = '▶';
+  } else {
+    accordionItem.classList.add('active');
+    content.style.display = 'block';
+    icon.textContent = '▼';
+  }
+}
+
+// SCENARIO COLLAPSE TOGGLE
+let scenarioCollapsed = false;
+function toggleScenario() {
+  const scenarioBox = document.getElementById('scenarioBox');
+  const icon = document.getElementById('scenarioToggleIcon');
+  
+  if (!scenarioBox || !icon) return;
+  
+  scenarioCollapsed = !scenarioCollapsed;
+  
+  if (scenarioCollapsed) {
+    scenarioBox.classList.add('collapsed');
+    icon.textContent = '▲';
+  } else {
+    scenarioBox.classList.remove('collapsed');
+    icon.textContent = '▼';
+  }
+}
+
+// VOTING CONTEXT COLLAPSE TOGGLE
+let votingContextCollapsed = false;
+function toggleVotingContext() {
+  const context = document.getElementById('votingContext');
+  const icon = document.getElementById('votingContextIcon');
+  
+  if (!context || !icon) return;
+  
+  votingContextCollapsed = !votingContextCollapsed;
+  
+  if (votingContextCollapsed) {
+    context.classList.add('collapsed');
+    icon.textContent = '▲';
+  } else {
+    context.classList.remove('collapsed');
+    icon.textContent = '▼';
+  }
+}
+
+// LIVE PICKS DRAWER TOGGLE
+let livePicksOpen = false;
+function toggleLivePicks() {
+  const drawer = document.getElementById('livePicksDrawer');
+  const icon = document.getElementById('livePicksIcon');
+  
+  if (!drawer || !icon) return;
+  
+  livePicksOpen = !livePicksOpen;
+  
+  if (livePicksOpen) {
+    drawer.classList.add('open');
+    icon.textContent = '▼';
+  } else {
+    drawer.classList.remove('open');
+    icon.textContent = '▲';
+  }
+}
+
+// RESULTS DETAILS TOGGLE
+let resultsDetailsOpen = false;
+function toggleResultsDetails() {
+  const details = document.getElementById('resultsDetails');
+  const icon = document.getElementById('resultsDetailsIcon');
+  
+  if (!details || !icon) return;
+  
+  resultsDetailsOpen = !resultsDetailsOpen;
+  
+  if (resultsDetailsOpen) {
+    details.style.display = 'block';
+    icon.textContent = '▲';
+  } else {
+    details.style.display = 'none';
+    icon.textContent = '▼';
+  }
+}
+
+// UPDATE LIVE PICKS COUNT
+function updateLivePicksCount(count) {
+  const countEl = document.getElementById('livePicksCount');
+  if (countEl) countEl.textContent = count;
+}
+
+// UPDATE VOTE STATUS BADGE
+function updateVoteStatusBadge(status) {
+  const badge = document.getElementById('voteStatusBadge');
+  if (badge) badge.textContent = status;
+}

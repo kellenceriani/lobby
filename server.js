@@ -9,16 +9,41 @@ const io = new Server(server, { cors: { origin: '*' } });
 app.use(express.static(__dirname + '/public'));
 
 // ========================
-// RANDOM WORD POOL (for empty draft slots)
+// WORD API INTEGRATION (Random User API - fast & free)
 // ========================
-const RANDOM_WORDS = [
-  'Batman', 'Oprah', 'A Sentient Banana', 'SpongeBob', 'Sherlock Holmes',
-  'Dwayne Johnson', 'Einstein', 'Shakespeare', 'A Rubber Duck', 'Gandalf',
-  'A Confused Penguin', 'Mona Lisa', 'A Talking Potato', 'Zeus', 'Mr. Bean',
-  'Darth Vader', 'Hermione Granger', 'Gordon Ramsay', 'A Sentient Cloud',
-  'Rick Sanchez', 'Dumbledore', 'A Time-Traveling Sloth', 'Napoleon', 'A Living Meme',
-  'Elon Musk', 'A Polite Shark', 'Queen Elizabeth', 'A Disco Ball', 'Socrates'
+const FALLBACK_WORDS = [
+  'Batman', 'Oprah', 'SpongeBob', 'Sherlock Holmes', 'Dwayne Johnson',
+  'Einstein', 'Shakespeare', 'Gandalf', 'Darth Vader', 'Hermione Granger'
 ];
+
+let wordCache = [];
+
+async function fetchRandomWords() {
+  try {
+    // Using Random User API - returns random name + random words in user data
+    const response = await fetch('https://random-word-api.herokuapp.com/all');
+    if (!response.ok) throw new Error('API failed');
+    const words = await response.json();
+    wordCache = words.slice(0, 200).map(w => w.charAt(0).toUpperCase() + w.slice(1));
+    console.log('✓ Loaded', wordCache.length, 'words from API');
+  } catch (error) {
+    console.warn('⚠️ Word API failed, using fallback pool');
+    wordCache = FALLBACK_WORDS;
+  }
+}
+
+// Initialize word cache on startup
+fetchRandomWords();
+
+// Refresh every 1 hour
+setInterval(fetchRandomWords, 1 * 60 * 60 * 1000);
+
+function getRandomWord() {
+  if (wordCache.length === 0) {
+    return FALLBACK_WORDS[Math.floor(Math.random() * FALLBACK_WORDS.length)];
+  }
+  return wordCache[Math.floor(Math.random() * wordCache.length)];
+}
 
 // ========================
 // COMPREHENSIVE SCENARIOS (150+)
@@ -131,10 +156,6 @@ function createRoom(roomCode) {
   };
 }
 
-function getRandomWord() {
-  return RANDOM_WORDS[Math.floor(Math.random() * RANDOM_WORDS.length)];
-}
-
 function createGameInstance(roomCode, players, settings) {
   const shuffleArray = (arr) => arr.sort(() => Math.random() - 0.5);
   let scenarios = [...SCENARIOS];
@@ -153,7 +174,8 @@ function createGameInstance(roomCode, players, settings) {
       votes: 0,
       roundScores: [0, 0, 0, 0],
       totalScore: 0,
-      draftLocked: false
+      draftLocked: false,
+      draftLockTime: null
     })),
     currentRound: 0,
     totalRounds: 4,
@@ -166,7 +188,8 @@ function createGameInstance(roomCode, players, settings) {
     currentScenario: '',
     currentTwist: '',
     results: [],
-    settings
+    settings,
+    roundStartTime: null
   };
 }
 
@@ -179,6 +202,216 @@ function getDraftSeconds(settings) {
 
 function getVoteSeconds() {
   return 30;
+}
+
+// ========================
+// IMPROVED BONUS SYSTEM
+// ========================
+
+/**
+ * Bonus Types:
+ * 1. TEAM COMPLETION: Base + completion + full team
+ * 2. VOTE DOMINANCE: Win with most votes (scaled by total players)
+ * 3. SPEED BONUS: First to lock draft (50% of remaining time awarded)
+ * 4. UNANIMOUS VOTE: All players vote for same winner (extra bonus)
+ * 5. TIE BONUS: When votes are tied, both/all get shared bonus
+ * 6. FINAL BONUSES: Final round has highest multipliers
+ */
+
+function calculateRoundBonuses(game, round) {
+  const voteCount = {};
+  game.players.forEach(p => {
+    voteCount[p.name] = 0;
+  });
+
+  Object.values(game.votes).forEach(votedName => {
+    if (voteCount.hasOwnProperty(votedName)) {
+      voteCount[votedName]++;
+    }
+  });
+
+  const sortedVotes = Object.entries(voteCount).sort((a, b) => b[1] - a[1]);
+  const totalPlayers = game.players.length;
+  const draftSeconds = getDraftSeconds(game.settings);
+
+  const points = {};
+  const bonuses = {};
+
+  // ========================
+  // BASE POINTS (all players)
+  // ========================
+  game.players.forEach(p => {
+    points[p.name] = 10; // Base for participating
+  });
+
+  // ========================
+  // TEAM COMPLETION BONUSES
+  // ========================
+  game.players.forEach(p => {
+    if (p.team.length > 0) {
+      points[p.name] += 15; // Formed a team
+    }
+    if (p.team.length === 2) {
+      points[p.name] += 20; // Full 2-person team
+    }
+  });
+
+  // ========================
+  // VOTE-BASED BONUSES
+  // ========================
+
+  // Check for unanimous vote (all players voted for same person)
+  const totalVotes = Object.values(voteCount).reduce((a, b) => a + b, 0);
+  const isUnanimous = sortedVotes[0] && sortedVotes[0][1] === totalPlayers && totalPlayers > 1;
+
+  // Check for tie
+  const isTie = sortedVotes.length > 1 && sortedVotes[0][1] === sortedVotes[1][1] && sortedVotes[0][1] > 0;
+
+  if (!isTie && sortedVotes.length > 0 && sortedVotes[0][1] > 0) {
+    const winner = sortedVotes[0][0];
+    const votesReceived = sortedVotes[0][1];
+
+    // WIN BONUS (scales with player count)
+    const winBonus = 50 + (totalPlayers * 10);
+    points[winner] = winBonus;
+    bonuses.winBonus = winBonus;
+    bonuses.reason = `Most votes (${votesReceived}/${totalPlayers})`;
+
+    // UNANIMOUS BONUS (all players agree)
+    if (isUnanimous) {
+      points[winner] += 30;
+      bonuses.unanimousBonus = 30;
+      bonuses.reason += " + Unanimous Vote!";
+    }
+
+    // SPEED BONUS (first to lock draft)
+    const firstLockTime = Math.min(...game.players
+      .filter(p => p.draftLocked)
+      .map(p => p.draftLockTime || Infinity));
+    
+    const winnerLockTime = game.players.find(p => p.name === winner)?.draftLockTime;
+    if (winnerLockTime && winnerLockTime === firstLockTime && firstLockTime < draftSeconds * 1000) {
+      const speedPercent = (draftSeconds - (firstLockTime / 1000)) / draftSeconds;
+      const speedBonus = Math.floor(speedPercent * 30); // Max 30 points
+      if (speedBonus > 0) {
+        points[winner] += speedBonus;
+        bonuses.speedBonus = speedBonus;
+        bonuses.reason += ` + Speed Bonus (+${speedBonus})`;
+      }
+    }
+
+    // RUNNER-UP BONUS
+    if (sortedVotes.length > 1 && sortedVotes[1][1] > 0) {
+      const runnerUp = sortedVotes[1][0];
+      const runnerUpBonus = 25 + (totalPlayers * 5);
+      points[runnerUp] = runnerUpBonus;
+    }
+
+    // THIRD PLACE BONUS
+    if (sortedVotes.length > 2 && sortedVotes[2][1] > 0) {
+      const thirdPlace = sortedVotes[2][0];
+      points[thirdPlace] = Math.max(10 + 15 + 20, sortedVotes[2][1] * 5);
+    }
+  } else if (isTie) {
+    // TIE BONUS
+    const tieBonus = 35 + (totalPlayers * 5);
+    const tiedPlayers = sortedVotes.filter(v => v[1] === sortedVotes[0][1]);
+    
+    tiedPlayers.forEach(([playerName]) => {
+      points[playerName] = tieBonus;
+    });
+
+    bonuses.tieBonus = tieBonus;
+    bonuses.reason = `Tied leadership with ${tiedPlayers.length} other players`;
+  }
+
+  game.players.forEach(p => {
+    const earned = points[p.name];
+    p.roundScores[round] = earned;
+    p.totalScore += earned;
+  });
+
+  return { points, bonuses, voteCount };
+}
+
+function calculateFinalRoundBonuses(game) {
+  const voteCount = {};
+  game.players.forEach(p => {
+    voteCount[p.name] = 0;
+  });
+
+  Object.values(game.votes).forEach(votedName => {
+    if (voteCount.hasOwnProperty(votedName)) {
+      voteCount[votedName]++;
+    }
+  });
+
+  const sortedVotes = Object.entries(voteCount).sort((a, b) => b[1] - a[1]);
+  const totalPlayers = game.players.length;
+
+  const points = {};
+  const bonuses = {};
+
+  // Base participation
+  game.players.forEach(p => {
+    points[p.name] = 0;
+  });
+
+  // Check for unanimous vote
+  const isUnanimous = sortedVotes[0] && sortedVotes[0][1] === totalPlayers && totalPlayers > 1;
+
+  // Check for tie
+  const isTie = sortedVotes.length > 1 && sortedVotes[0][1] === sortedVotes[1][1] && sortedVotes[0][1] > 0;
+
+  if (!isTie && sortedVotes.length > 0 && sortedVotes[0][1] > 0) {
+    const winner = sortedVotes[0][0];
+    const votesReceived = sortedVotes[0][1];
+
+    // FINAL WIN BONUS (highest multiplier)
+    const finalWinBonus = 100 + (totalPlayers * 20);
+    points[winner] = finalWinBonus;
+    bonuses.finalWinBonus = finalWinBonus;
+
+    // COMPLETE TEAM BONUS (6 characters)
+    const winnerTeam = game.players.find(p => p.name === winner);
+    if (winnerTeam && winnerTeam.finalTeam.length === 6) {
+      points[winner] += 40;
+      bonuses.completeTeamBonus = 40;
+    }
+
+    // UNANIMOUS FINAL BONUS
+    if (isUnanimous) {
+      points[winner] += 50;
+      bonuses.finalUnanimousBonus = 50;
+    }
+
+    // RUNNER-UP & THIRD PLACE (final round)
+    if (sortedVotes.length > 1 && sortedVotes[1][1] > 0) {
+      points[sortedVotes[1][0]] = 50 + (totalPlayers * 10);
+    }
+
+    if (sortedVotes.length > 2 && sortedVotes[2][1] > 0) {
+      points[sortedVotes[2][0]] = 25 + (totalPlayers * 5);
+    }
+  } else if (isTie) {
+    // Final tie bonus
+    const finalTieBonus = 75 + (totalPlayers * 10);
+    const tiedPlayers = sortedVotes.filter(v => v[1] === sortedVotes[0][1]);
+    
+    tiedPlayers.forEach(([playerName]) => {
+      points[playerName] = finalTieBonus;
+    });
+
+    bonuses.finalTieBonus = finalTieBonus;
+  }
+
+  game.players.forEach(p => {
+    points[p.name] = points[p.name] || 0;
+    p.roundScores[3] = points[p.name];
+    p.totalScore += points[p.name];
+  });
+
+  return { points, bonuses, voteCount };
 }
 
 // ========================
@@ -230,11 +463,12 @@ function revealScenario(roomCode) {
   const room = rooms[roomCode];
   const game = room.gameState;
   game.activePhase = 'DRAFT';
-  game.phaseStartTime = Date.now();
+  game.roundStartTime = Date.now();
   game.draftEntries = {};
   game.players.forEach(p => {
     p.team = [];
     p.draftLocked = false;
+    p.draftLockTime = null;
   });
   
   room.messages = [];
@@ -341,9 +575,10 @@ function startFinalRound(roomCode) {
 function revealFinalTeam(roomCode) {
   const game = rooms[roomCode].gameState;
   game.activePhase = 'FINAL_DRAFT';
-  game.phaseStartTime = Date.now();
+  game.roundStartTime = Date.now();
   game.players.forEach(p => {
     p.draftLocked = false;
+    p.draftLockTime = null;
   });
 
   io.to(roomCode).emit('finalTeamRevealed', {
@@ -392,74 +627,8 @@ function tallyResults(roomCode) {
     game.results[game.currentRound].playerTeams[p.name] = [...p.team];
   });
 
-  const voteCount = {};
-  game.players.forEach(p => {
-    voteCount[p.name] = 0;
-  });
-
-  Object.values(game.votes).forEach(votedName => {
-    if (voteCount.hasOwnProperty(votedName)) {
-      voteCount[votedName]++;
-    }
-  });
-
-  let winner = null;
-  const sortedVotes = Object.entries(voteCount).sort((a, b) => b[1] - a[1]);
-
-  const isTie = sortedVotes.length > 1 && 
-                sortedVotes[0][1] === sortedVotes[1][1] && 
-                sortedVotes[0][1] > 0;
-
-  if (!isTie && sortedVotes.length > 0 && sortedVotes[0][1] > 0) {
-    winner = sortedVotes[0][0];
-  }
-
-  // ========================
-  // IMPROVED POINT SYSTEM (Rounds 1-3)
-  // ========================
-  const points = {};
-  const totalPlayers = game.players.length;
-  const basePoints = 10;
-  
-  game.players.forEach(p => {
-    points[p.name] = basePoints;
-  });
-
-  game.players.forEach(p => {
-    if (p.team.length > 0) {
-      points[p.name] += 15;
-    }
-    if (p.team.length === 2) {
-      points[p.name] += 20;
-    }
-  });
-
-  if (winner) {
-    const winnerBonus = 50 + (totalPlayers * 10);
-    points[winner] = winnerBonus;
-    
-    if (sortedVotes.length > 1 && sortedVotes[1][1] > 0) {
-      const runnerUpBonus = 25 + (totalPlayers * 5);
-      points[sortedVotes[1][0]] = runnerUpBonus;
-    }
-
-    if (sortedVotes.length > 2 && sortedVotes[2][1] > 0) {
-      points[sortedVotes[2][0]] = Math.max(basePoints + 15, sortedVotes[2][1] * 5);
-    }
-  } else if (isTie) {
-    const tieBonus = 35 + (totalPlayers * 5);
-    game.players.forEach(p => {
-      if (sortedVotes[0] && sortedVotes[0][0] === p.name) {
-        points[p.name] = tieBonus;
-      }
-    });
-  }
-
-  game.players.forEach(p => {
-    const earned = points[p.name];
-    p.roundScores[game.currentRound] = earned;
-    p.totalScore += earned;
-  });
+  // Calculate bonuses with detailed system
+  const { points, bonuses, voteCount } = calculateRoundBonuses(game, game.currentRound);
 
   game.activePhase = 'RESULTS';
   
@@ -469,16 +638,18 @@ function tallyResults(roomCode) {
   }));
   
   if (!game.results[game.currentRound]) game.results[game.currentRound] = {};
-  game.results[game.currentRound].winner = winner;
+  game.results[game.currentRound].winner = Object.entries(points).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
   game.results[game.currentRound].scenario = scenario.scenario;
   game.results[game.currentRound].twist = game.currentTwist;
   game.results[game.currentRound].leaderboard = leaderboardData;
+  game.results[game.currentRound].bonuses = bonuses;
 
   io.to(roomCode).emit('roundResults', {
-    winner,
-    isTie,
+    winner: game.results[game.currentRound].winner,
+    isTie: false,
     roundPoints: points,
     voteCount,
+    bonuses,
     leaderboard: leaderboardData,
     round: game.currentRound + 1
   });
@@ -497,57 +668,8 @@ function tallyResults(roomCode) {
 function tallyFinalResults(roomCode) {
   const game = rooms[roomCode].gameState;
 
-  const voteCount = {};
-  game.players.forEach(p => {
-    voteCount[p.name] = 0;
-  });
-
-  Object.values(game.votes).forEach(votedName => {
-    if (voteCount.hasOwnProperty(votedName)) {
-      voteCount[votedName]++;
-    }
-  });
-
-  let winner = null;
-  const sortedVotes = Object.entries(voteCount).sort((a, b) => b[1] - a[1]);
-
-  if (sortedVotes.length > 0 && sortedVotes[0][1] > 0) {
-    winner = sortedVotes[0][0];
-  }
-
-  // ========================
-  // FINAL ROUND POINTS (BONUS ROUND - HIGHEST POINTS)
-  // ========================
-  const points = {};
-  const totalPlayers = game.players.length;
-  
-  game.players.forEach(p => {
-    points[p.name] = 0;
-  });
-
-  if (winner) {
-    const finalWinBonus = 100 + (totalPlayers * 20);
-    points[winner] = finalWinBonus;
-    
-    if (sortedVotes.length > 1 && sortedVotes[1][1] > 0) {
-      points[sortedVotes[1][0]] = 50 + (totalPlayers * 10);
-    }
-
-    if (sortedVotes.length > 2 && sortedVotes[2][1] > 0) {
-      points[sortedVotes[2][0]] = 25 + (totalPlayers * 5);
-    }
-  }
-
-  game.players.forEach(p => {
-    if (p.finalTeam.length === 6) {
-      points[p.name] += 40;
-    }
-  });
-
-  game.players.forEach(p => {
-    p.roundScores[3] = points[p.name];
-    p.totalScore += points[p.name];
-  });
+  // Calculate final round bonuses
+  const { points, bonuses, voteCount } = calculateFinalRoundBonuses(game);
 
   const leaderboardData = [...game.players].sort((a, b) => b.totalScore - a.totalScore).map(p => ({
     name: p.name,
@@ -555,8 +677,9 @@ function tallyFinalResults(roomCode) {
   }));
 
   io.to(roomCode).emit('finalRoundResults', {
-    winner,
+    winner: Object.entries(points).sort((a, b) => b[1] - a[1])[0]?.[0] || null,
     roundPoints: points,
+    bonuses,
     voteCount,
     leaderboard: leaderboardData
   });
@@ -785,17 +908,70 @@ io.on('connection', (socket) => {
       const charNormalized = character.trim().toLowerCase();
       
       if (player.team.some(c => c.toLowerCase() === charNormalized)) {
-        socket.emit('draftError', `You already drafted "${character.trim()}"!`);
+        // DUPLICATE IN OWN TEAM - auto-fill with random word
+        let randomWord = getRandomWord();
+        while (game.players.some(p => p.team.some(c => c.toLowerCase() === randomWord.toLowerCase()))) {
+          randomWord = getRandomWord();
+        }
+        player.team.push(randomWord);
+        
+        const allDraftsList = [];
+        game.players.forEach(p => {
+          p.team.forEach(char => {
+            allDraftsList.push({ name: p.name, character: char });
+          });
+        });
+
+        io.to(room).emit('draftUpdate', {
+          player: name,
+          character: randomWord,
+          allDrafts: allDraftsList,
+          playerTeamSizes: game.players.reduce((acc, p) => {
+            acc[p.name] = p.team.length;
+            return acc;
+          }, {}),
+          autoFilled: true,
+          attemptedChar: character.trim(),
+          replacementChar: randomWord
+        });
         return;
       }
       
+      // Check other players
       for (let otherPlayer of game.players) {
         if (otherPlayer.name !== name && otherPlayer.team.some(c => c.toLowerCase() === charNormalized)) {
-          socket.emit('draftError', `"${character.trim()}" was already picked by ${otherPlayer.name}!`);
+          // DUPLICATE FROM OTHER PLAYER - auto-fill with random word
+          let randomWord = getRandomWord();
+          while (game.players.some(p => p.team.some(c => c.toLowerCase() === randomWord.toLowerCase()))) {
+            randomWord = getRandomWord();
+          }
+          player.team.push(randomWord);
+          
+          const allDraftsList = [];
+          game.players.forEach(p => {
+            p.team.forEach(char => {
+              allDraftsList.push({ name: p.name, character: char });
+            });
+          });
+
+          io.to(room).emit('draftUpdate', {
+            player: name,
+            character: randomWord,
+            allDrafts: allDraftsList,
+            playerTeamSizes: game.players.reduce((acc, p) => {
+              acc[p.name] = p.team.length;
+              return acc;
+            }, {}),
+            autoFilled: true,
+            attemptedChar: character.trim(),
+            replacementChar: randomWord,
+            takenBy: otherPlayer.name
+          });
           return;
         }
       }
       
+      // VALID PICK
       player.team.push(character.trim());
       
       const allDraftsList = [];
@@ -830,13 +1006,14 @@ io.on('connection', (socket) => {
     const player = game.players.find(p => p.name === name);
     if (!player) return;
 
-    // Validation: Must have exactly 2 characters
     if (player.team.length < 2) {
       socket.emit('draftError', 'You must have 2 characters to lock in!');
       return;
     }
 
+    // Record lock time for speed bonus
     player.draftLocked = true;
+    player.draftLockTime = Date.now() - game.roundStartTime;
 
     io.to(room).emit('playerLocked', { playerName: name, phase: 'DRAFT' });
 
@@ -862,6 +1039,7 @@ io.on('connection', (socket) => {
     if (!player) return;
 
     player.draftLocked = true;
+    player.draftLockTime = Date.now() - game.roundStartTime;
 
     io.to(room).emit('playerLocked', { playerName: name, phase: 'FINAL_DRAFT' });
 
@@ -884,7 +1062,7 @@ io.on('connection', (socket) => {
     if (!game || (game.activePhase !== 'VOTING' && game.activePhase !== 'FINAL_VOTING')) return;
 
     if (votedPlayerName === name) {
-      return;
+      return; // Can't vote for self
     }
 
     game.votes[name] = votedPlayerName;

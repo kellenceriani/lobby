@@ -14,6 +14,20 @@ let round4State = {
   finalResultsRequested: false
 };
 
+function updateEvalProgress(current, total) {
+  const progress = document.getElementById('evalProgress');
+  const bar = document.getElementById('evalProgressBar');
+  const fill = bar ? bar.querySelector('.eval-progress-fill') : null;
+  const pct = document.getElementById('evalProgressPct');
+  const safeTotal = Math.max(1, total || 0);
+  const percent = Math.max(0, Math.min(100, Math.round((current / safeTotal) * 100)));
+
+  if (progress) progress.textContent = String(current);
+  if (fill) fill.style.width = `${percent}%`;
+  if (bar) bar.setAttribute('aria-valuenow', String(percent));
+  if (pct) pct.textContent = `${percent}%`;
+}
+
 function initRound4Evaluation(data) {
   console.log('🚀 initRound4Evaluation called with data:', data);
   const { scenario, twist, finalTeams } = data;
@@ -39,11 +53,15 @@ function initRound4Evaluation(data) {
   const evalTotal = document.getElementById('evalTotal');
   if (evalTotal) evalTotal.textContent = totalCharacters;
 
-  const evalProgress = document.getElementById('evalProgress');
-  if (evalProgress) evalProgress.textContent = '0';
+  updateEvalProgress(0, totalCharacters);
 
   const loading = document.getElementById('evalLoading');
   if (loading) loading.style.display = 'flex';
+
+  const loadingTitle = document.getElementById('evalLoadingTitle');
+  const loadingSubtitle = document.getElementById('evalLoadingSubtitle');
+  if (loadingTitle) loadingTitle.textContent = 'Evaluating teams...';
+  if (loadingSubtitle) loadingSubtitle.textContent = 'Fetching details and scoring picks.';
   
   console.log(`📊 Teams: ${Object.keys(finalTeams).length}, Total characters: ${totalCharacters}`);
   
@@ -102,8 +120,10 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
         round4State.finalLeaderboard = data.finalLeaderboard;
         round4State.rendered = false;
 
-        const loading = document.getElementById('evalLoading');
-        if (loading) loading.style.display = 'none';
+        const loadingTitle = document.getElementById('evalLoadingTitle');
+        const loadingSubtitle = document.getElementById('evalLoadingSubtitle');
+        if (loadingTitle) loadingTitle.textContent = 'Rendering evaluations...';
+        if (loadingSubtitle) loadingSubtitle.textContent = 'Building cards and summaries.';
         
         displayAllTeamEvaluationsSequentially();
       });
@@ -132,7 +152,7 @@ async function displayAllTeamEvaluationsSequentially() {
   round4State.rendering = true;
 
   const loading = document.getElementById('evalLoading');
-  if (loading) loading.style.display = 'none';
+  if (loading) loading.style.display = 'flex';
   
   container.innerHTML = '';
   
@@ -158,8 +178,7 @@ async function displayAllTeamEvaluationsSequentially() {
     for (const evalData of teamData.evaluations) {
       renderEvalCard(evalData, teamCards);
       charIndex++;
-      const progress = document.getElementById('evalProgress');
-      if (progress) progress.textContent = charIndex;
+      updateEvalProgress(charIndex, round4State.totalCharacters);
       
       // 2.5s delay between characters
       await new Promise(resolve => setTimeout(resolve, 2500));
@@ -175,6 +194,8 @@ async function displayAllTeamEvaluationsSequentially() {
   // Display final leaderboard after all character evals
   await new Promise(resolve => setTimeout(resolve, 1500));
   displayFinalLeaderboard();
+  updateEvalProgress(round4State.totalCharacters, round4State.totalCharacters);
+  if (loading) loading.style.display = 'none';
   round4State.rendering = false;
   round4State.rendered = true;
 }
@@ -183,7 +204,7 @@ async function displayAllTeamEvaluationsSequentially() {
 function renderEvalCard(evalData, container) {
   if (!container) return;
 
-  const notes = Array.isArray(evalData.notes) ? evalData.notes.slice(0, 3) : [];
+  const notes = Array.isArray(evalData.notes) ? evalData.notes.slice(0, 2) : [];
   const notesHtml = notes.map(note => `<li>${note}</li>`).join('');
   
   const card = document.createElement('div');
@@ -246,7 +267,7 @@ function renderTeamSummary(playerName, summary, container) {
       </div>
       <div class="summary-stat">
         <label>Chemistry</label>
-        <span class="summary-value">+${summary.chemistryBonus}</span>
+        <span class="summary-value">${summary.chemistryBonus >= 0 ? '+' : ''}${summary.chemistryBonus}</span>
       </div>
       <div class="summary-stat">
         <label>Top Pick</label>
@@ -300,7 +321,7 @@ function displayFinalLeaderboard() {
           <td>${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '#' + (idx + 1)}</td>
           <td><strong>${team.playerName}</strong></td>
           <td><strong>${team.totalOVR}</strong></td>
-          <td>+${team.chemistryBonus}</td>
+          <td>${team.chemistryBonus >= 0 ? '+' : ''}${team.chemistryBonus}</td>
           <td>${team.topPick}</td>
         </tr>
       `).join('')}

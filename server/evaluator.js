@@ -4,14 +4,17 @@ const https = require('https');
 const FETCH_CACHE = new Map();
 const CACHE_TTL = 3600000; // 1 hour
 
+const SCORE_MIN = 0;
+const SCORE_MAX = 30;
+
 const EMOTION_TIERS = {
-  mad: { score: 0, ovrRange: [0, 20], emoji: '😠' },
-  disappointed: { score: [1, 3], ovrRange: [21, 40], emoji: '😞' },
-  confused: { score: [4, 6], ovrRange: [41, 60], emoji: '😕' },
-  neutral: { score: [7, 12], ovrRange: [61, 70], emoji: '😐' },
-  happy: { score: [13, 15], ovrRange: [71, 80], emoji: '😊' },
-  amazed: { score: [16, 18], ovrRange: [81, 90], emoji: '😲' },
-  mindBlown: { score: [19, 20], ovrRange: [91, 99], emoji: '🤯' }
+  mad: { score: 0, ovrRange: [0, 12], emoji: '😠' },
+  disappointed: { score: [1, 5], ovrRange: [13, 28], emoji: '😞' },
+  confused: { score: [6, 10], ovrRange: [29, 44], emoji: '😕' },
+  neutral: { score: [11, 18], ovrRange: [45, 64], emoji: '😐' },
+  happy: { score: [19, 23], ovrRange: [65, 78], emoji: '😊' },
+  amazed: { score: [24, 27], ovrRange: [79, 90], emoji: '😲' },
+  mindBlown: { score: [28, 30], ovrRange: [91, 99], emoji: '🤯' }
 };
 
 const OFFENSIVE_WORDS = [
@@ -53,7 +56,7 @@ function getJson(url, timeoutMs = 3500) {
   });
 }
 
-function buildNotes({ validation, info, scenario, twist, score }) {
+function buildNotes({ validation, info, scenario, twist, score, scoreMeta }) {
   const notes = [];
   const wordCount = validation.wordCount || 0;
 
@@ -81,6 +84,9 @@ function buildNotes({ validation, info, scenario, twist, score }) {
     const matchNote = matchCount >= 3 ? 'Strong match to scenario/twist.' : matchCount >= 1 ? 'Some relevance to scenario/twist.' : 'Low relevance to scenario/twist.';
     notes.push(matchNote);
     notes.push(`Name signal: ${wordCount}-word pick.`);
+    if (scoreMeta && scoreMeta.relevanceNote) {
+      notes.push(scoreMeta.relevanceNote);
+    }
     return notes;
   }
 
@@ -91,8 +97,119 @@ function buildNotes({ validation, info, scenario, twist, score }) {
   }
 
   notes.push(`Heuristic score from name length (${wordCount} words).`);
+  if (scoreMeta && scoreMeta.relevanceNote) {
+    notes.push(scoreMeta.relevanceNote);
+  }
   notes.push('Tip: well-known names score higher.');
   return notes;
+}
+
+function tokenize(text) {
+  return String(text || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(token => token.length > 2);
+}
+
+function countOverlap(tokensA, tokensB) {
+  const setB = new Set(tokensB);
+  let count = 0;
+  tokensA.forEach(token => {
+    if (setB.has(token)) count += 1;
+  });
+  return count;
+}
+
+const TITLE_KEYWORDS = ['dr', 'doctor', 'professor', 'sir', 'lady', 'captain', 'king', 'queen', 'lord', 'saint', 'detective', 'agent'];
+const ROLE_KEYWORDS = ['wizard', 'mage', 'ninja', 'samurai', 'pirate', 'soldier', 'knight', 'warrior', 'scientist', 'engineer', 'inventor', 'chef', 'pilot', 'spy', 'assassin'];
+const DOMAIN_RULES = [
+  { label: 'combat', keywords: ['fight', 'battle', 'war', 'combat', 'weapon', 'soldier', 'warrior'] },
+  { label: 'science', keywords: ['science', 'experiment', 'lab', 'engineer', 'inventor', 'quantum', 'ai'] },
+  { label: 'magic', keywords: ['magic', 'wizard', 'sorcerer', 'spell', 'witch', 'dragon'] },
+  { label: 'cooking', keywords: ['cook', 'bake', 'chef', 'food', 'kitchen', 'recipe'] },
+  { label: 'sports', keywords: ['sport', 'match', 'team', 'coach', 'athlete', 'race'] },
+  { label: 'stealth', keywords: ['stealth', 'shadow', 'spy', 'assassin', 'infiltrate'] },
+  { label: 'leadership', keywords: ['leader', 'captain', 'commander', 'chief', 'king', 'queen'] },
+  { label: 'animals', keywords: ['animal', 'beast', 'dragon', 'wolf', 'horse', 'rider', 'trainer'] },
+  { label: 'space', keywords: ['space', 'astronaut', 'galaxy', 'planet', 'alien', 'ship'] }
+];
+
+function getDomainMatches(scenario, twist, description) {
+  const scenarioTokens = tokenize(`${scenario} ${twist}`);
+  const descriptionTokens = tokenize(description);
+  const scenarioText = scenarioTokens.join(' ');
+  const descriptionText = descriptionTokens.join(' ');
+  return DOMAIN_RULES.filter(rule =>
+    rule.keywords.some(kw => scenarioText.includes(kw)) &&
+    rule.keywords.some(kw => descriptionText.includes(kw))
+  ).map(rule => rule.label);
+}
+
+function scoreRelevance(info, scenario, twist) {
+  if (!info) return { points: 0, note: null };
+  const description = `${info.description || ''} ${info.title || ''}`.toLowerCase();
+  const scenarioTokens = tokenize(scenario);
+  const twistTokens = tokenize(twist);
+  const descriptionTokens = tokenize(description);
+  const overlap = countOverlap(descriptionTokens, scenarioTokens.concat(twistTokens));
+  const overlapPoints = overlap >= 8 ? 8 : overlap >= 5 ? 6 : overlap >= 3 ? 4 : overlap >= 1 ? 2 : 0;
+  const domains = getDomainMatches(scenario, twist, description);
+  const domainPoints = Math.min(6, domains.length * 2);
+  const total = overlapPoints + domainPoints;
+  const note = domains.length
+    ? `Relevance boost: ${domains.join(', ')} themes.`
+    : overlap > 0
+      ? 'Some direct overlap with scenario/twist.'
+      : 'Limited direct overlap with scenario/twist.';
+  return { points: total, note };
+}
+
+function scoreNameSignals(character, validation, scenario, twist) {
+  const signals = [];
+  let points = 0;
+  const wordCount = validation.wordCount || 0;
+  const trimmed = character.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (wordCount === 2) { points += 3; signals.push('two-word name'); }
+  else if (wordCount === 3) { points += 2; signals.push('three-word name'); }
+  else if (wordCount >= 4) { points -= 2; signals.push('long name'); }
+
+  if (TITLE_KEYWORDS.some(title => lower.includes(`${title} `) || lower.endsWith(` ${title}`))) {
+    points += 2;
+    signals.push('title/honorific');
+  }
+
+  if (ROLE_KEYWORDS.some(role => lower.includes(role))) {
+    points += 2;
+    signals.push('role keyword');
+  }
+
+  if (/\d/.test(lower)) {
+    points -= 3;
+    signals.push('numeric token');
+  }
+
+  if (trimmed.length <= 3) {
+    points -= 2;
+    signals.push('very short name');
+  }
+
+  if (/-|\'/.test(trimmed)) {
+    points += 1;
+    signals.push('distinct formatting');
+  }
+
+  const scenarioTokens = tokenize(`${scenario} ${twist}`);
+  const nameTokens = tokenize(trimmed);
+  const nameOverlap = countOverlap(nameTokens, scenarioTokens);
+  if (nameOverlap > 0) {
+    points += 3;
+    signals.push('name matches scenario/twist');
+  }
+
+  const note = signals.length ? `Name signals: ${signals.join(', ')}.` : 'Name signals: minimal.';
+  return { points, note };
 }
 
 // ========== STEP 1: INPUT VALIDATION ==========
@@ -342,7 +459,7 @@ async function scoreCharacter(character, scenario, twist) {
         character,
         emotion: 'mad',
         score: 0,
-        ovr: 10,
+        ovr: mapScoreToOVR(0),
         reason: 'Invalid input',
         notes: buildNotes({ validation, info: null, scenario, twist, score: 0 })
       };
@@ -351,10 +468,10 @@ async function scoreCharacter(character, scenario, twist) {
       return {
         character,
         emotion: 'disappointed',
-        score: 2,
-        ovr: 30,
+        score: 4,
+        ovr: mapScoreToOVR(4),
         reason: 'Offensive content',
-        notes: buildNotes({ validation, info: null, scenario, twist, score: 2 })
+        notes: buildNotes({ validation, info: null, scenario, twist, score: 4 })
       };
     }
   }
@@ -369,37 +486,26 @@ async function scoreCharacter(character, scenario, twist) {
   }
   
   // Score Logic
-  let score = 10; // Base neutral
-  
-  if (info) {
-    // Scored with info
-    const description = (info.description + (info.title || '')).toLowerCase();
-    const scenarioLower = scenario.toLowerCase();
-    const twistLower = twist.toLowerCase();
-    
-    // Bonus: keyword matches
-    const keywords = description.split(/\s+/);
-    if (keywords.some(kw => scenarioLower.includes(kw) || twistLower.includes(kw))) {
-      score += 3; // Relevant to scenario
-    }
-    
-    // Complexity bonus: multi-word name shows intent
-    if (validation.wordCount > 1) {
-      score += 2;
-    }
-  } else {
-    // Scored without info
-    if (validation.wordCount === 1) {
-      score = 9; // Single-word, likely real
-    } else if (validation.wordCount === 2) {
-      score = 10; // Two-word, likely real
-    } else {
-      score = 5; // Three-word, obscure
-    }
+  let score = info ? 14 : 10;
+  const nameSignals = scoreNameSignals(character, validation, scenario, twist);
+  score += nameSignals.points;
+  const relevance = scoreRelevance(info, scenario, twist);
+  score += relevance.points;
+
+  if (info && validation.wordCount > 1) {
+    score += 2;
   }
-  
-  // Clamp to 0-20
-  score = Math.max(0, Math.min(20, score));
+
+  if (info && info.source === 'wikipedia') {
+    score += 2;
+  }
+
+  if (!info && validation.wordCount >= 3) {
+    score -= 2;
+  }
+
+  // Clamp to 0-30
+  score = Math.max(SCORE_MIN, Math.min(SCORE_MAX, score));
   
   const result = {
     character,
@@ -407,7 +513,14 @@ async function scoreCharacter(character, scenario, twist) {
     score: Math.round(score),
     ovr: mapScoreToOVR(score),
     reason: info ? 'Evaluated' : 'Unknown character',
-    notes: buildNotes({ validation, info, scenario, twist, score })
+    notes: buildNotes({
+      validation,
+      info,
+      scenario,
+      twist,
+      score,
+      scoreMeta: { relevanceNote: relevance.note || nameSignals.note }
+    })
   };
   
   console.log(`📊 "${character}" → Score: ${result.score}/20, OVR: ${result.ovr}, Emotion: ${result.emotion}`);
@@ -418,17 +531,17 @@ async function scoreCharacter(character, scenario, twist) {
 // ========== STEP 6: EMOTION MAPPING ==========
 function mapScoreToEmotion(score) {
   if (score === 0) return 'mad';
-  if (score <= 3) return 'disappointed';
-  if (score <= 6) return 'confused';
-  if (score <= 12) return 'neutral';
-  if (score <= 15) return 'happy';
-  if (score <= 18) return 'amazed';
+  if (score <= 5) return 'disappointed';
+  if (score <= 10) return 'confused';
+  if (score <= 18) return 'neutral';
+  if (score <= 23) return 'happy';
+  if (score <= 27) return 'amazed';
   return 'mindBlown';
 }
 
 function mapScoreToOVR(score) {
-  // Linear mapping: 0-20 score → 0-99 OVR
-  return Math.round((score / 20) * 99);
+  // Linear mapping: 0-30 score → 0-99 OVR
+  return Math.round((score / SCORE_MAX) * 99);
 }
 
 // ========== EXPORTS ==========

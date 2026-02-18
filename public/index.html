@@ -425,8 +425,21 @@
     <div id="evalLoading" class="eval-loading" aria-live="polite">
       <div class="eval-loading-spinner" aria-hidden="true"></div>
       <div class="eval-loading-text">
-        <strong>Evaluating teams...</strong>
-        <span>Fetching details and scoring picks.</span>
+        <strong id="evalLoadingTitle">Evaluating teams...</strong>
+        <span id="evalLoadingSubtitle">Fetching details and scoring picks.</span>
+        <div class="eval-progress-row">
+          <div
+            id="evalProgressBar"
+            class="eval-progress-bar"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <span class="eval-progress-fill" style="width: 0%;"></span>
+          </div>
+          <span id="evalProgressPct" class="eval-progress-pct">0%</span>
+        </div>
       </div>
     </div>
     

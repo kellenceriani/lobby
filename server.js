@@ -20,7 +20,6 @@ let wordCache = [];
 
 async function fetchRandomWords() {
   try {
-    // Using Random User API - returns random name + random words in user data
     const response = await fetch('https://random-word-api.herokuapp.com/all');
     if (!response.ok) throw new Error('API failed');
     const words = await response.json();
@@ -32,10 +31,7 @@ async function fetchRandomWords() {
   }
 }
 
-// Initialize word cache on startup
 fetchRandomWords();
-
-// Refresh every 1 hour
 setInterval(fetchRandomWords, 1 * 60 * 60 * 1000);
 
 function getRandomWord() {
@@ -133,6 +129,48 @@ const SCENARIOS = [
 ];
 
 // ========================
+// FINAL ROUND PROMPTS (30-40 VARIANTS)
+// ========================
+const FINAL_VOTING_PROMPTS = [
+  'Now which drafted team has made the best..... BASKETBALL TEAM!!??!!',
+  'Now which drafted team has made the best..... BASEBALL TEAM!!??!!',
+  'Now which drafted team has made the best..... HEIST TEAM!!??!!',
+  'Now which drafted team has made the best..... BOWLING TEAM!!??!!',
+  'Now which drafted team has made the best..... SPACE CREW!!??!!',
+  'Now which drafted team has made the best..... ZOMBIE SURVIVAL TEAM!!??!!',
+  'Now which drafted team has made the best..... SUPERHERO SQUAD!!??!!',
+  'Now which drafted team has made the best..... VILLAIN LEAGUE!!??!!',
+  'Now which drafted team has made the best..... DETECTIVE UNIT!!??!!',
+  'Now which drafted team has made the best..... ROCK BAND!!??!!',
+  'Now which drafted team has made the best..... POP IDOL GROUP!!??!!',
+  'Now which drafted team has made the best..... GAME SHOW TEAM!!??!!',
+  'Now which drafted team has made the best..... COOKING CREW!!??!!',
+  'Now which drafted team has made the best..... WIZARD COUNCIL!!??!!',
+  'Now which drafted team has made the best..... PIRATE CREW!!??!!',
+  'Now which drafted team has made the best..... NINJA SQUAD!!??!!',
+  'Now which drafted team has made the best..... SPACE MARINES!!??!!',
+  'Now which drafted team has made the best..... RACING TEAM!!??!!',
+  'Now which drafted team has made the best..... SCIENCE TEAM!!??!!',
+  'Now which drafted team has made the best..... TIME TRAVEL CREW!!??!!',
+  'Now which drafted team has made the best..... ESCAPE ROOM TEAM!!??!!',
+  'Now which drafted team has made the best..... MYSTERY SOLVERS!!??!!',
+  'Now which drafted team has made the best..... DRAGON SLAYERS!!??!!',
+  'Now which drafted team has made the best..... UNDERWATER CREW!!??!!',
+  'Now which drafted team has made the best..... MARS COLONY TEAM!!??!!',
+  'Now which drafted team has made the best..... AIRSHIP CREW!!??!!',
+  'Now which drafted team has made the best..... MONSTER HUNTERS!!??!!',
+  'Now which drafted team has made the best..... DREAM TEAM!!??!!',
+  'Now which drafted team has made the best..... SNEAKY SPY TEAM!!??!!',
+  'Now which drafted team has made the best..... SURVIVAL ISLAND TEAM!!??!!',
+  'Now which drafted team has made the best..... ROBOT SQUAD!!??!!',
+  'Now which drafted team has made the best..... MAGIC SHOW CREW!!??!!',
+  'Now which drafted team has made the best..... STREET DANCE CREW!!??!!',
+  'Now which drafted team has made the best..... SPACE RANGERS!!??!!',
+  'Now which drafted team has made the best..... FANTASY RAID PARTY!!??!!',
+  'Now which drafted team has made the best..... HOLIDAY RESCUE TEAM!!??!!'
+];
+
+// ========================
 // IN-MEMORY STATE
 // ========================
 const rooms = {};
@@ -170,15 +208,17 @@ function createGameInstance(roomCode, players, settings) {
       name: p.name,
       isBot: false,
       team: [],
+      teamAutoFilled: [],
       finalTeam: [],
       votes: 0,
       roundScores: [0, 0, 0, 0],
       totalScore: 0,
       draftLocked: false,
-      draftLockTime: null
+      draftLockTime: null,
+      voteLocked: false
     })),
     currentRound: 0,
-    totalRounds: 4,
+    totalRounds: 3,
     scenarios,
     activePhase: 'PRE_ROUND',
     phaseStartTime: Date.now(),
@@ -205,18 +245,8 @@ function getVoteSeconds() {
 }
 
 // ========================
-// IMPROVED BONUS SYSTEM
+// SIMPLIFIED BONUS SYSTEM (Clear & Understandable)
 // ========================
-
-/**
- * Bonus Types:
- * 1. TEAM COMPLETION: Base + completion + full team
- * 2. VOTE DOMINANCE: Win with most votes (scaled by total players)
- * 3. SPEED BONUS: First to lock draft (50% of remaining time awarded)
- * 4. UNANIMOUS VOTE: All players vote for same winner (extra bonus)
- * 5. TIE BONUS: When votes are tied, both/all get shared bonus
- * 6. FINAL BONUSES: Final round has highest multipliers
- */
 
 function calculateRoundBonuses(game, round) {
   const voteCount = {};
@@ -232,106 +262,71 @@ function calculateRoundBonuses(game, round) {
 
   const sortedVotes = Object.entries(voteCount).sort((a, b) => b[1] - a[1]);
   const totalPlayers = game.players.length;
-  const draftSeconds = getDraftSeconds(game.settings);
 
   const points = {};
   const bonuses = {};
+  const pointBreakdown = {};
 
   // ========================
-  // BASE POINTS (all players)
+  // CLEAR POINT BREAKDOWN
   // ========================
   game.players.forEach(p => {
-    points[p.name] = 10; // Base for participating
-  });
+    points[p.name] = 0;
+    pointBreakdown[p.name] = [];
 
-  // ========================
-  // TEAM COMPLETION BONUSES
-  // ========================
-  game.players.forEach(p => {
-    if (p.team.length > 0) {
-      points[p.name] += 15; // Formed a team
-    }
+    // FULL TEAM BONUS
     if (p.team.length === 2) {
-      points[p.name] += 20; // Full 2-person team
+      points[p.name] += 30;
+      pointBreakdown[p.name].push('Full Team (2 chars): +30');
     }
   });
 
-  // ========================
-  // VOTE-BASED BONUSES
-  // ========================
-
-  // Check for unanimous vote (all players voted for same person)
-  const totalVotes = Object.values(voteCount).reduce((a, b) => a + b, 0);
-  const isUnanimous = sortedVotes[0] && sortedVotes[0][1] === totalPlayers && totalPlayers > 1;
-
-  // Check for tie
+  // VOTING WINNER
   const isTie = sortedVotes.length > 1 && sortedVotes[0][1] === sortedVotes[1][1] && sortedVotes[0][1] > 0;
 
   if (!isTie && sortedVotes.length > 0 && sortedVotes[0][1] > 0) {
     const winner = sortedVotes[0][0];
     const votesReceived = sortedVotes[0][1];
 
-    // WIN BONUS (scales with player count)
-    const winBonus = 50 + (totalPlayers * 10);
-    points[winner] = winBonus;
-    bonuses.winBonus = winBonus;
-    bonuses.reason = `Most votes (${votesReceived}/${totalPlayers})`;
+    const winBonus = 50 + (totalPlayers * 5);
+    points[winner] += winBonus;
+    pointBreakdown[winner].push(`Most Votes (${votesReceived}): +${winBonus}`);
 
-    // UNANIMOUS BONUS (all players agree)
-    if (isUnanimous) {
-      points[winner] += 30;
-      bonuses.unanimousBonus = 30;
-      bonuses.reason += " + Unanimous Vote!";
-    }
-
-    // SPEED BONUS (first to lock draft)
-    const firstLockTime = Math.min(...game.players
-      .filter(p => p.draftLocked)
-      .map(p => p.draftLockTime || Infinity));
-    
-    const winnerLockTime = game.players.find(p => p.name === winner)?.draftLockTime;
-    if (winnerLockTime && winnerLockTime === firstLockTime && firstLockTime < draftSeconds * 1000) {
-      const speedPercent = (draftSeconds - (firstLockTime / 1000)) / draftSeconds;
-      const speedBonus = Math.floor(speedPercent * 30); // Max 30 points
-      if (speedBonus > 0) {
-        points[winner] += speedBonus;
-        bonuses.speedBonus = speedBonus;
-        bonuses.reason += ` + Speed Bonus (+${speedBonus})`;
-      }
-    }
-
-    // RUNNER-UP BONUS
+    // RUNNER-UP
     if (sortedVotes.length > 1 && sortedVotes[1][1] > 0) {
-      const runnerUp = sortedVotes[1][0];
-      const runnerUpBonus = 25 + (totalPlayers * 5);
-      points[runnerUp] = runnerUpBonus;
-    }
-
-    // THIRD PLACE BONUS
-    if (sortedVotes.length > 2 && sortedVotes[2][1] > 0) {
-      const thirdPlace = sortedVotes[2][0];
-      points[thirdPlace] = Math.max(10 + 15 + 20, sortedVotes[2][1] * 5);
+      const runnerUpBonus = 20;
+      points[sortedVotes[1][0]] += runnerUpBonus;
+      pointBreakdown[sortedVotes[1][0]].push(`Runner-Up: +${runnerUpBonus}`);
     }
   } else if (isTie) {
     // TIE BONUS
-    const tieBonus = 35 + (totalPlayers * 5);
+    const tieBonus = 35 + (totalPlayers * 3);
     const tiedPlayers = sortedVotes.filter(v => v[1] === sortedVotes[0][1]);
     
     tiedPlayers.forEach(([playerName]) => {
-      points[playerName] = tieBonus;
+      points[playerName] += tieBonus;
+      pointBreakdown[playerName].push(`Tied for Most Votes: +${tieBonus}`);
     });
-
-    bonuses.tieBonus = tieBonus;
-    bonuses.reason = `Tied leadership with ${tiedPlayers.length} other players`;
   }
 
+  // NON-VOTING PENALTY
+  const votingPlayers = new Set(Object.keys(game.votes));
   game.players.forEach(p => {
-    const earned = points[p.name];
+    if (!votingPlayers.has(p.name)) {
+      const penalty = 15;
+      points[p.name] -= penalty;
+      if (!pointBreakdown[p.name]) pointBreakdown[p.name] = [];
+      pointBreakdown[p.name].push(`Didn't Vote: -${penalty}`);
+    }
+  });
+
+  game.players.forEach(p => {
+    const earned = Math.max(0, points[p.name]); // Floor at 0
     p.roundScores[round] = earned;
     p.totalScore += earned;
   });
 
-  return { points, bonuses, voteCount };
+  return { points, bonuses, voteCount, pointBreakdown };
 }
 
 function calculateFinalRoundBonuses(game) {
@@ -351,67 +346,63 @@ function calculateFinalRoundBonuses(game) {
 
   const points = {};
   const bonuses = {};
+  const pointBreakdown = {};
 
-  // Base participation
   game.players.forEach(p => {
     points[p.name] = 0;
+    pointBreakdown[p.name] = [];
+
+    // Complete team bonus
+    if (p.finalTeam.length === 6) {
+      points[p.name] += 40;
+      pointBreakdown[p.name].push('Complete Team (6 chars): +40');
+    }
   });
 
-  // Check for unanimous vote
-  const isUnanimous = sortedVotes[0] && sortedVotes[0][1] === totalPlayers && totalPlayers > 1;
-
-  // Check for tie
+  // FINAL VOTING WINNER
   const isTie = sortedVotes.length > 1 && sortedVotes[0][1] === sortedVotes[1][1] && sortedVotes[0][1] > 0;
 
   if (!isTie && sortedVotes.length > 0 && sortedVotes[0][1] > 0) {
     const winner = sortedVotes[0][0];
     const votesReceived = sortedVotes[0][1];
 
-    // FINAL WIN BONUS (highest multiplier)
-    const finalWinBonus = 100 + (totalPlayers * 20);
-    points[winner] = finalWinBonus;
-    bonuses.finalWinBonus = finalWinBonus;
+    const finalWinBonus = 100 + (totalPlayers * 10);
+    points[winner] += finalWinBonus;
+    pointBreakdown[winner].push(`Most Votes (${votesReceived}): +${finalWinBonus}`);
 
-    // COMPLETE TEAM BONUS (6 characters)
-    const winnerTeam = game.players.find(p => p.name === winner);
-    if (winnerTeam && winnerTeam.finalTeam.length === 6) {
-      points[winner] += 40;
-      bonuses.completeTeamBonus = 40;
-    }
-
-    // UNANIMOUS FINAL BONUS
-    if (isUnanimous) {
-      points[winner] += 50;
-      bonuses.finalUnanimousBonus = 50;
-    }
-
-    // RUNNER-UP & THIRD PLACE (final round)
     if (sortedVotes.length > 1 && sortedVotes[1][1] > 0) {
-      points[sortedVotes[1][0]] = 50 + (totalPlayers * 10);
-    }
-
-    if (sortedVotes.length > 2 && sortedVotes[2][1] > 0) {
-      points[sortedVotes[2][0]] = 25 + (totalPlayers * 5);
+      const runnerUpBonus = 40;
+      points[sortedVotes[1][0]] += runnerUpBonus;
+      pointBreakdown[sortedVotes[1][0]].push(`Runner-Up: +${runnerUpBonus}`);
     }
   } else if (isTie) {
-    // Final tie bonus
-    const finalTieBonus = 75 + (totalPlayers * 10);
+    const finalTieBonus = 75 + (totalPlayers * 8);
     const tiedPlayers = sortedVotes.filter(v => v[1] === sortedVotes[0][1]);
     
     tiedPlayers.forEach(([playerName]) => {
-      points[playerName] = finalTieBonus;
+      points[playerName] += finalTieBonus;
+      pointBreakdown[playerName].push(`Tied for Most Votes: +${finalTieBonus}`);
     });
-
-    bonuses.finalTieBonus = finalTieBonus;
   }
 
+  // NON-VOTING PENALTY
+  const votingPlayers = new Set(Object.keys(game.votes));
   game.players.forEach(p => {
-    points[p.name] = points[p.name] || 0;
-    p.roundScores[3] = points[p.name];
-    p.totalScore += points[p.name];
+    if (!votingPlayers.has(p.name)) {
+      const penalty = 25;
+      points[p.name] -= penalty;
+      if (!pointBreakdown[p.name]) pointBreakdown[p.name] = [];
+      pointBreakdown[p.name].push(`Didn't Vote: -${penalty}`);
+    }
   });
 
-  return { points, bonuses, voteCount };
+  game.players.forEach(p => {
+    const earned = Math.max(0, points[p.name]);
+    p.roundScores[3] = earned;
+    p.totalScore += earned;
+  });
+
+  return { points, bonuses, voteCount, pointBreakdown };
 }
 
 // ========================
@@ -428,7 +419,7 @@ function startGame(roomCode) {
   room.gameState = createGameInstance(roomCode, room.players, room.settings);
 
   io.to(roomCode).emit('gameStarting', {
-    totalRounds: 4,
+    totalRounds: 3,
     players: room.gameState.players.map(p => p.name),
     settings: room.settings
   });
@@ -439,11 +430,6 @@ function startGame(roomCode) {
 function startRound(roomCode) {
   const game = rooms[roomCode].gameState;
   if (!game || game.currentRound >= game.totalRounds) {
-    endGame(roomCode);
-    return;
-  }
-
-  if (game.currentRound === 3) {
     startFinalRound(roomCode);
     return;
   }
@@ -465,10 +451,14 @@ function revealScenario(roomCode) {
   game.activePhase = 'DRAFT';
   game.roundStartTime = Date.now();
   game.draftEntries = {};
+  game.votes = {};
+  game.voteLocks = {};
   game.players.forEach(p => {
     p.team = [];
+    p.teamAutoFilled = [];
     p.draftLocked = false;
     p.draftLockTime = null;
+    p.voteLocked = false;
   });
   
   room.messages = [];
@@ -502,7 +492,7 @@ function revealPlotTwist(roomCode) {
 
   game.activePhase = 'TWIST';
 
-  // Fill empty slots with random words
+  // Fill empty slots with random words (counts toward the 2 required)
   game.players.forEach(p => {
     while (p.team.length < 2) {
       let randomWord = getRandomWord();
@@ -510,6 +500,7 @@ function revealPlotTwist(roomCode) {
         randomWord = getRandomWord();
       }
       p.team.push(randomWord);
+      p.teamAutoFilled.push(true);
     }
   });
 
@@ -556,11 +547,14 @@ function startFinalRound(roomCode) {
   game.activePhase = 'PRE_FINAL';
   game.phaseStartTime = Date.now();
 
+  // Collect teams from rounds 1-3
   game.players.forEach(p => {
     p.finalTeam = [];
-    if (game.results[0]) p.finalTeam.push(...(game.results[0].playerTeams?.[p.name] || []));
-    if (game.results[1]) p.finalTeam.push(...(game.results[1].playerTeams?.[p.name] || []));
-    if (game.results[2]) p.finalTeam.push(...(game.results[2].playerTeams?.[p.name] || []));
+    for (let i = 0; i < 3; i++) {
+      if (game.results[i] && game.results[i].playerTeams && game.results[i].playerTeams[p.name]) {
+        p.finalTeam.push(...game.results[i].playerTeams[p.name]);
+      }
+    }
   });
 
   io.to(roomCode).emit('roundStart', {
@@ -569,27 +563,7 @@ function startFinalRound(roomCode) {
     isFinalRound: true
   });
 
-  setTimeout(() => revealFinalTeam(roomCode), 3000);
-}
-
-function revealFinalTeam(roomCode) {
-  const game = rooms[roomCode].gameState;
-  game.activePhase = 'FINAL_DRAFT';
-  game.roundStartTime = Date.now();
-  game.players.forEach(p => {
-    p.draftLocked = false;
-    p.draftLockTime = null;
-  });
-
-  io.to(roomCode).emit('finalTeamRevealed', {
-    draftTimeRemaining: 60,
-    playerTeams: game.players.map(p => ({
-      name: p.name,
-      teamSoFar: p.finalTeam
-    }))
-  });
-
-  game.draftTimeout = setTimeout(() => startFinalVoting(roomCode), 60 * 1000);
+  setTimeout(() => startFinalVoting(roomCode), 3000);
 }
 
 function startFinalVoting(roomCode) {
@@ -598,6 +572,10 @@ function startFinalVoting(roomCode) {
   game.phaseStartTime = Date.now();
   game.votes = {};
   game.voteLocks = {};
+
+  const finalPrompt = FINAL_VOTING_PROMPTS[Math.floor(Math.random() * FINAL_VOTING_PROMPTS.length)];
+  const finalScenario = game.scenarios[Math.floor(Math.random() * game.scenarios.length)];
+  game.currentScenario = finalScenario.scenario;
 
   const teamsDisplay = game.players.map(p => ({
     name: p.name,
@@ -608,7 +586,9 @@ function startFinalVoting(roomCode) {
   io.to(roomCode).emit('finalVotingPhaseStart', {
     teams: teamsDisplay,
     votingTimeRemaining: getVoteSeconds(),
-    totalPlayers: game.players.length
+    totalPlayers: game.players.length,
+    scenario: game.currentScenario,
+    finalPrompt
   });
 
   const voteTimeout = setTimeout(() => tallyFinalResults(roomCode), getVoteSeconds() * 1000);
@@ -627,14 +607,15 @@ function tallyResults(roomCode) {
     game.results[game.currentRound].playerTeams[p.name] = [...p.team];
   });
 
-  // Calculate bonuses with detailed system
-  const { points, bonuses, voteCount } = calculateRoundBonuses(game, game.currentRound);
+  const { points, bonuses, voteCount, pointBreakdown } = calculateRoundBonuses(game, game.currentRound);
 
   game.activePhase = 'RESULTS';
   
   const leaderboardData = [...game.players].sort((a, b) => b.totalScore - a.totalScore).map(p => ({
     name: p.name,
-    score: p.totalScore
+    score: p.totalScore,
+    roundScore: points[p.name],
+    breakdown: pointBreakdown[p.name]
   }));
   
   if (!game.results[game.currentRound]) game.results[game.currentRound] = {};
@@ -642,51 +623,43 @@ function tallyResults(roomCode) {
   game.results[game.currentRound].scenario = scenario.scenario;
   game.results[game.currentRound].twist = game.currentTwist;
   game.results[game.currentRound].leaderboard = leaderboardData;
-  game.results[game.currentRound].bonuses = bonuses;
 
   io.to(roomCode).emit('roundResults', {
     winner: game.results[game.currentRound].winner,
-    isTie: false,
     roundPoints: points,
     voteCount,
-    bonuses,
     leaderboard: leaderboardData,
+    pointBreakdown,
     round: game.currentRound + 1
   });
 
-  game.currentRound++;
-
-  setTimeout(() => {
-    if (game.currentRound < game.totalRounds) {
-      startRound(roomCode);
-    } else {
-      endGame(roomCode);
-    }
-  }, 5000);
+  // Reset ready states for results screen
+  game.players.forEach(p => p.voteLocked = false);
+  game.resultsReady = {};
 }
 
 function tallyFinalResults(roomCode) {
   const game = rooms[roomCode].gameState;
 
-  // Calculate final round bonuses
-  const { points, bonuses, voteCount } = calculateFinalRoundBonuses(game);
+  const { points, bonuses, voteCount, pointBreakdown } = calculateFinalRoundBonuses(game);
 
   const leaderboardData = [...game.players].sort((a, b) => b.totalScore - a.totalScore).map(p => ({
     name: p.name,
-    score: p.totalScore
+    score: p.totalScore,
+    roundScore: points[p.name],
+    breakdown: pointBreakdown[p.name]
   }));
 
   io.to(roomCode).emit('finalRoundResults', {
     winner: Object.entries(points).sort((a, b) => b[1] - a[1])[0]?.[0] || null,
     roundPoints: points,
-    bonuses,
     voteCount,
-    leaderboard: leaderboardData
+    leaderboard: leaderboardData,
+    pointBreakdown
   });
 
-  game.currentRound++;
-
-  setTimeout(() => endGame(roomCode), 5000);
+  // After final results, go straight to end game
+  setTimeout(() => endGame(roomCode), 3000);
 }
 
 function endGame(roomCode) {
@@ -800,6 +773,29 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('readyForNextRound', () => {
+    const room = socket.data.room;
+    const name = socket.data.name;
+    if (!room || !name) return;
+
+    const game = rooms[room].gameState;
+    if (!game) return;
+
+    game.resultsReady = game.resultsReady || {};
+    game.resultsReady[name] = true;
+
+    const allReady = game.players.every(p => game.resultsReady[p.name] === true);
+    
+    if (allReady) {
+      game.currentRound++;
+      if (game.currentRound < game.totalRounds) {
+        startRound(room);
+      } else {
+        startFinalRound(room);
+      }
+    }
+  });
+
   socket.on('sendMessage', (message) => {
     const room = socket.data.room;
     const name = socket.data.name;
@@ -857,142 +853,65 @@ io.on('connection', (socket) => {
     if (!room || !name) return;
 
     const game = rooms[room].gameState;
-    if (!game || (game.activePhase !== 'DRAFT' && game.activePhase !== 'FINAL_DRAFT')) return;
+    if (!game || game.activePhase !== 'DRAFT') return;
 
     const player = game.players.find(p => p.name === name);
     if (!player) return;
 
-    // Handle final draft
-    if (game.activePhase === 'FINAL_DRAFT') {
-      if (player.draftLocked) {
-        socket.emit('draftError', 'You have already locked in your team!');
-        return;
-      }
-      
-      const charNormalized = character.trim().toLowerCase();
-      if (player.finalTeam.some(c => c.toLowerCase() === charNormalized)) {
-        socket.emit('draftError', `"${character.trim()}" is already in your team!`);
-        return;
-      }
-      
-      player.finalTeam.push(character.trim());
-      
-      const allDraftsList = [];
-      game.players.forEach(p => {
-        p.finalTeam.forEach(char => {
-          allDraftsList.push({ name: p.name, character: char });
-        });
-      });
-
-      socket.emit('draftSuccess', { character: character.trim(), teamSize: player.finalTeam.length });
-
-      io.to(room).emit('draftUpdate', {
-        player: name,
-        character: character.trim(),
-        allDrafts: allDraftsList,
-        playerTeamSizes: game.players.reduce((acc, p) => {
-          acc[p.name] = p.finalTeam.length;
-          return acc;
-        }, {})
-      });
+    if (player.draftLocked) {
+      socket.emit('draftError', 'You have already locked in your team!');
       return;
     }
 
-    // Regular draft (rounds 1-3)
-    if (character.trim()) {
-      if (player.team.length >= 2) {
-        socket.emit('draftError', 'You can draft a maximum of 2 characters per round!');
-        return;
+    if (!character.trim()) return;
+
+    const charNormalized = character.trim().toLowerCase();
+    const isDuplicateOwn = player.team.some(c => c.toLowerCase() === charNormalized);
+    const isDuplicateOther = game.players.some(p => 
+      p.name !== name && p.team.some(c => c.toLowerCase() === charNormalized)
+    );
+
+    let finalCharacter = character.trim();
+    let autoFilled = false;
+
+    if (isDuplicateOwn || isDuplicateOther) {
+      let randomWord = getRandomWord();
+      while (game.players.some(p => p.team.some(c => c.toLowerCase() === randomWord.toLowerCase()))) {
+        randomWord = getRandomWord();
       }
-      
-      const charNormalized = character.trim().toLowerCase();
-      
-      if (player.team.some(c => c.toLowerCase() === charNormalized)) {
-        // DUPLICATE IN OWN TEAM - auto-fill with random word
-        let randomWord = getRandomWord();
-        while (game.players.some(p => p.team.some(c => c.toLowerCase() === randomWord.toLowerCase()))) {
-          randomWord = getRandomWord();
-        }
-        player.team.push(randomWord);
-        
-        const allDraftsList = [];
-        game.players.forEach(p => {
-          p.team.forEach(char => {
-            allDraftsList.push({ name: p.name, character: char });
-          });
-        });
-
-        io.to(room).emit('draftUpdate', {
-          player: name,
-          character: randomWord,
-          allDrafts: allDraftsList,
-          playerTeamSizes: game.players.reduce((acc, p) => {
-            acc[p.name] = p.team.length;
-            return acc;
-          }, {}),
-          autoFilled: true,
-          attemptedChar: character.trim(),
-          replacementChar: randomWord
-        });
-        return;
-      }
-      
-      // Check other players
-      for (let otherPlayer of game.players) {
-        if (otherPlayer.name !== name && otherPlayer.team.some(c => c.toLowerCase() === charNormalized)) {
-          // DUPLICATE FROM OTHER PLAYER - auto-fill with random word
-          let randomWord = getRandomWord();
-          while (game.players.some(p => p.team.some(c => c.toLowerCase() === randomWord.toLowerCase()))) {
-            randomWord = getRandomWord();
-          }
-          player.team.push(randomWord);
-          
-          const allDraftsList = [];
-          game.players.forEach(p => {
-            p.team.forEach(char => {
-              allDraftsList.push({ name: p.name, character: char });
-            });
-          });
-
-          io.to(room).emit('draftUpdate', {
-            player: name,
-            character: randomWord,
-            allDrafts: allDraftsList,
-            playerTeamSizes: game.players.reduce((acc, p) => {
-              acc[p.name] = p.team.length;
-              return acc;
-            }, {}),
-            autoFilled: true,
-            attemptedChar: character.trim(),
-            replacementChar: randomWord,
-            takenBy: otherPlayer.name
-          });
-          return;
-        }
-      }
-      
-      // VALID PICK
-      player.team.push(character.trim());
-      
-      const allDraftsList = [];
-      game.players.forEach(p => {
-        p.team.forEach(char => {
-          allDraftsList.push({ name: p.name, character: char });
-        });
-      });
-
-      socket.emit('draftSuccess', { character: character.trim(), teamSize: player.team.length });
-
-      io.to(room).emit('draftUpdate', {
-        player: name,
-        character: character.trim(),
-        allDrafts: allDraftsList,
-        playerTeamSizes: game.players.reduce((acc, p) => {
-          acc[p.name] = p.team.length;
-          return acc;
-        }, {})
-      });
+      finalCharacter = randomWord;
+      autoFilled = true;
     }
+
+    player.team.push(finalCharacter);
+    player.teamAutoFilled.push(autoFilled);
+
+    const allDraftsList = [];
+    game.players.forEach(p => {
+      p.team.forEach((char, idx) => {
+        allDraftsList.push({ 
+          name: p.name, 
+          character: char,
+          autoFilled: p.teamAutoFilled[idx] === true
+        });
+      });
+    });
+
+    socket.emit('draftSuccess', { 
+      character: finalCharacter, 
+      teamSize: player.team.length,
+      autoFilled 
+    });
+
+    io.to(room).emit('draftUpdate', {
+      player: name,
+      character: finalCharacter,
+      allDrafts: allDraftsList,
+      playerTeamSizes: game.players.reduce((acc, p) => {
+        acc[p.name] = p.team.length;
+        return acc;
+      }, {})
+    });
   });
 
   socket.on('lockDraft', () => {
@@ -1011,7 +930,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Record lock time for speed bonus
     player.draftLocked = true;
     player.draftLockTime = Date.now() - game.roundStartTime;
 
@@ -1024,32 +942,6 @@ io.on('connection', (socket) => {
     if (allLocked) {
       clearTimeout(game.draftTimeout);
       revealPlotTwist(room);
-    }
-  });
-
-  socket.on('lockFinalDraft', () => {
-    const room = socket.data.room;
-    const name = socket.data.name;
-    if (!room || !name) return;
-
-    const game = rooms[room].gameState;
-    if (!game || game.activePhase !== 'FINAL_DRAFT') return;
-
-    const player = game.players.find(p => p.name === name);
-    if (!player) return;
-
-    player.draftLocked = true;
-    player.draftLockTime = Date.now() - game.roundStartTime;
-
-    io.to(room).emit('playerLocked', { playerName: name, phase: 'FINAL_DRAFT' });
-
-    const allLocked = game.players
-      .filter(p => !p.isBot)
-      .every(p => p.draftLocked === true);
-    
-    if (allLocked) {
-      clearTimeout(game.draftTimeout);
-      startFinalVoting(room);
     }
   });
 

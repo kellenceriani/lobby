@@ -12,6 +12,7 @@ let gameState = {
   currentScenario: '',
   currentTwist: '',
   allDrafts: {},
+  allDraftsList: [],
   votes: {},
   voted: false,
   voteLocked: false,
@@ -412,12 +413,10 @@ function handleDraftChange(e) {
   }
   
   const charLower = char.toLowerCase();
-  
-  // Check for duplicates in own team
   const isDuplicate = gameState.myTeam.some(c => c.toLowerCase() === charLower);
-  
-  // Check for duplicates in other players' teams
-  const otherPlayersHave = Object.values(gameState.allDrafts).some(c => c.toLowerCase() === charLower);
+  const otherPlayersHave = gameState.allDraftsList.some(p => 
+    p.name !== player.name && p.character.toLowerCase() === charLower
+  );
   
   if (isDuplicate || otherPlayersHave) {
     updateDraftWarning(char, true);
@@ -434,44 +433,20 @@ function handleDraftInput(e) {
       showToast('⚠️ You can draft max 2 characters!', 'error');
       return;
     }
-    
+
     const charLower = char.toLowerCase();
-    
-    // Check own team
-    if (gameState.myTeam.some(c => c.toLowerCase() === charLower)) {
+    const isDupOwn = gameState.myTeam.some(c => c.toLowerCase() === charLower);
+    const isDupOther = gameState.allDraftsList.some(p =>
+      p.name !== player.name && p.character.toLowerCase() === charLower
+    );
+
+    if (isDupOwn) {
       showToast(`❌ You already drafted "${char}"! Auto-filling with random word...`, 'error', 4000);
-      socket.emit('draftCharacter', char);
-      e.target.value = '';
-      updateDraftWarning('', false);
-      return;
-    }
-    
-    // Check other players
-    if (Object.values(gameState.allDrafts).some(c => c.toLowerCase() === charLower)) {
+    } else if (isDupOther) {
       showToast(`❌ "${char}" was picked by another player! Auto-filling with random word...`, 'error', 4000);
-      socket.emit('draftCharacter', char);
-      e.target.value = '';
-      updateDraftWarning('', false);
-      return;
-    }
-    
-    // Valid pick
-    gameState.myTeam.push(char);
-    const li = document.createElement('li');
-    li.textContent = char;
-    li.classList.add('new-pick');
-    const myTeamList = document.getElementById('myTeam');
-    if (myTeamList) myTeamList.appendChild(li);
-    
-    updateDraftCounter();
-    socket.emit('draftCharacter', char);
-    
-    const lockBtn = document.getElementById('lockDraftBtn');
-    if (lockBtn && gameState.myTeam.length === 2) {
-      lockBtn.disabled = false;
-      lockBtn.textContent = '🔒 LOCK IN MY TEAM';
     }
 
+    socket.emit('draftCharacter', char);
     e.target.value = '';
     updateDraftWarning('', false);
   }
@@ -509,22 +484,52 @@ socket.on('draftError', (message) => {
 });
 
 socket.on('draftUpdate', (data) => {
-  gameState.allDrafts = {};
+  gameState.allDraftsList = data.allDrafts || [];
+
   const picksList = document.getElementById('livePicksList');
   if (!picksList) return;
   picksList.innerHTML = '';
 
   data.allDrafts.forEach((pick, idx) => {
-    gameState.allDrafts[pick.name] = pick.character;
-
     const li = document.createElement('li');
     li.textContent = `${pick.name} → ${pick.character}`;
     li.classList.add('live-pick');
+    if (pick.autoFilled) li.classList.add('live-pick-duplicate');
     li.style.animationDelay = `${idx * 0.05}s`;
     picksList.appendChild(li);
   });
-  
+
   picksList.scrollTop = picksList.scrollHeight;
+
+  // Sync my team from server list (includes auto-fill)
+  const myTeamList = document.getElementById('myTeam');
+  if (myTeamList) myTeamList.innerHTML = '';
+
+  gameState.myTeam = data.allDrafts
+    .filter(p => p.name === player.name)
+    .map(p => p.character);
+
+  data.allDrafts
+    .filter(p => p.name === player.name)
+    .forEach(p => {
+      const li = document.createElement('li');
+      li.textContent = p.character;
+      if (p.autoFilled) li.classList.add('draft-duplicate');
+      if (myTeamList) myTeamList.appendChild(li);
+    });
+
+  updateDraftCounter();
+
+  const lockBtn = document.getElementById('lockDraftBtn');
+  if (lockBtn) {
+    if (gameState.myTeam.length >= 2) {
+      lockBtn.disabled = false;
+      lockBtn.textContent = '🔒 LOCK IN MY TEAM';
+    } else {
+      lockBtn.disabled = true;
+      lockBtn.textContent = '🔒 LOCK IN MY TEAM (need 2)';
+    }
+  }
 });
 
 socket.on('draftSuccess', (data) => {
@@ -765,8 +770,8 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
-  if (scenarioDisplay) scenarioDisplay.textContent = '🌟 FINAL TEAM MATCHUP 🌟';
-  if (twistDisplay) twistDisplay.textContent = 'Whose ultimate team is the best?';
+  if (scenarioDisplay) scenarioDisplay.textContent = data.finalPrompt || 'FINAL ROUND';
+  if (twistDisplay) twistDisplay.textContent = 'Vote for the best drafted team!';
 
   const grid = document.getElementById('votingTeams');
   if (grid) grid.innerHTML = '';
@@ -902,7 +907,7 @@ socket.on('voteLockUpdate', (data) => {
 });
 
 // ========================
-// RESULTS WITH BONUS BREAKDOWN
+// RESULTS SCREEN - WAIT FOR ALL READY
 // ========================
 socket.on('roundResults', (data) => {
   clearTimers();
@@ -910,74 +915,86 @@ socket.on('roundResults', (data) => {
 
   const winnerBox = document.getElementById('roundWinner');
   
-  // Build detailed bonus breakdown
-  let bonusHTML = '<div class="bonus-breakdown">';
+  let resultHTML = '<div class="results-content">';
   
   if (data.winner) {
-    const winnerPoints = data.roundPoints[data.winner];
-    const votesReceived = data.voteCount[data.winner];
-    
-    bonusHTML += `
-      <div class="winner-announcement">
-        <p>🏆 <span class="winner-name">${data.winner}</span> WINS THIS ROUND!</p>
-        <p class="winner-points">+${winnerPoints} POINTS</p>
-      </div>
-      
-      <div class="bonus-details">
-        <h4>💰 Point Breakdown:</h4>
-        <ul>
-          <li><strong>Base Points:</strong> +10</li>
-          <li><strong>Team Formed:</strong> +15</li>
-          <li><strong>Full Team (2):</strong> +20</li>
-          <li><strong>Most Votes (${votesReceived}):</strong> +${data.bonuses?.winBonus || 50}</li>
-          ${data.bonuses?.speedBonus ? `<li><strong>Speed Bonus:</strong> +${data.bonuses.speedBonus} (first to lock!)</li>` : ''}
-          ${data.bonuses?.unanimousBonus ? `<li><strong>Unanimous Vote Bonus:</strong> +${data.bonuses.unanimousBonus} (all players voted same!)</li>` : ''}
-        </ul>
-      </div>
-    `;
-  } else if (data.isTie) {
-    bonusHTML += `
-      <p>🤝 It's a TIE! Bonus points distributed to tied players.</p>
-      <div class="bonus-details">
-        <h4>💰 Tie Bonus Breakdown:</h4>
-        <ul>
-          <li><strong>Base Points:</strong> +10</li>
-          <li><strong>Team Formed:</strong> +15</li>
-          <li><strong>Full Team (2):</strong> +20</li>
-          <li><strong>Tie Bonus:</strong> +${data.bonuses?.tieBonus || 35} (shared leadership!)</li>
-        </ul>
+    resultHTML += `
+      <div class="round-winner-display">
+        <h2>🏆 ${data.winner} WINS! 🏆</h2>
+        <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
       </div>
     `;
   }
-  
-  bonusHTML += '</div>';
-  if (winnerBox) winnerBox.innerHTML = bonusHTML;
 
-  const breakdown = document.getElementById('voteBreakdown');
-  breakdown.innerHTML = '';
-  Object.entries(data.voteCount).forEach(([player, count]) => {
-    const li = document.createElement('li');
-    li.textContent = `${player}: ${count} vote${count !== 1 ? 's' : ''}`;
-    breakdown.appendChild(li);
-  });
+  resultHTML += `
+    <div class="results-table">
+      <h3>💎 Point Breakdown This Round:</h3>
+      <div class="breakdown-grid">
+  `;
 
-  const leaderboard = document.getElementById('leaderboardResults');
-  leaderboard.innerHTML = '';
-  data.leaderboard.forEach((entry, idx) => {
-    const li = document.createElement('li');
-    li.className = 'leaderboard-entry';
-    const medals = ['🥇', '🥈', '🥉'];
-    const medal = medals[idx] || '•';
-    li.innerHTML = `
-      <span class="medal">${medal}</span>
-      <span class="name">${entry.name}</span>
-      <span class="score">${entry.score}pts</span>
+  const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
+  sorted.forEach((player, idx) => {
+    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
+    resultHTML += `
+      <div class="player-breakdown">
+        <div class="breakdown-header">${medal} ${player.name}</div>
+        <div class="breakdown-points">+${player.roundScore} points</div>
+        <div class="breakdown-details">
+          ${player.breakdown.map(line => {
+            const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
+            return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
+          }).join('')}
+        </div>
+      </div>
     `;
-    leaderboard.appendChild(li);
   });
+
+  resultHTML += `
+      </div>
+    </div>
+
+    <div class="results-leaderboard">
+      <h3>📊 Current Leaderboard:</h3>
+      <ol class="leaderboard">
+  `;
+
+  data.leaderboard.forEach((player, idx) => {
+    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
+    resultHTML += `
+      <li class="leaderboard-entry">
+        <span class="medal">${medal}</span>
+        <span class="name">${player.name}</span>
+        <span class="score">${player.score}pts</span>
+      </li>
+    `;
+  });
+
+  resultHTML += `
+      </ol>
+    </div>
+    </div>
+  `;
+
+  if (winnerBox) winnerBox.innerHTML = resultHTML;
+
+  // Show ready button instead of auto-advance
+  const readyButton = document.getElementById('nextRoundReadyBtn');
+  if (readyButton) {
+    readyButton.style.display = 'inline-block';
+    readyButton.disabled = false;
+  }
 
   showScreen('resultsScreen');
 });
+
+function readyForNextRound() {
+  socket.emit('readyForNextRound');
+  const readyButton = document.getElementById('nextRoundReadyBtn');
+  if (readyButton) {
+    readyButton.disabled = true;
+    readyButton.textContent = '✓ READY';
+  }
+}
 
 socket.on('finalRoundResults', (data) => {
   clearTimers();
@@ -985,56 +1002,67 @@ socket.on('finalRoundResults', (data) => {
 
   const winnerBox = document.getElementById('roundWinner');
   
-  let bonusHTML = '<div class="bonus-breakdown">';
+  let resultHTML = '<div class="results-content">';
   
   if (data.winner) {
-    const winnerPoints = data.roundPoints[data.winner];
-    const votesReceived = data.voteCount[data.winner];
-    
-    bonusHTML += `
-      <div class="winner-announcement">
-        <p>🏆 <span class="winner-name">${data.winner}</span> WINS THE FINAL ROUND!</p>
-        <p class="winner-points">+${winnerPoints} POINTS (FINAL BONUS)</p>
-      </div>
-      
-      <div class="bonus-details">
-        <h4>💰 Final Round Point Breakdown:</h4>
-        <ul>
-          <li><strong>Most Votes (${votesReceived}):</strong> +${data.bonuses?.finalWinBonus || 100}</li>
-          ${data.bonuses?.completeTeamBonus ? `<li><strong>Full Team (6):</strong> +${data.bonuses.completeTeamBonus}</li>` : ''}
-          ${data.bonuses?.finalSpeedBonus ? `<li><strong>Final Flash Bonus:</strong> +${data.bonuses.finalSpeedBonus}</li>` : ''}
-        </ul>
+    resultHTML += `
+      <div class="round-winner-display">
+        <h2>🏆 ${data.winner} WINS THE GAME! 🏆</h2>
+        <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
       </div>
     `;
-  } else {
-    bonusHTML += '<p>🤝 Final Round Tie! Highest vote-getters split the final bonus.</p>';
   }
-  
-  bonusHTML += '</div>';
-  if (winnerBox) winnerBox.innerHTML = bonusHTML;
 
-  const breakdown = document.getElementById('voteBreakdown');
-  breakdown.innerHTML = '';
-  Object.entries(data.voteCount).forEach(([player, count]) => {
-    const li = document.createElement('li');
-    li.textContent = `${player}: ${count} vote${count !== 1 ? 's' : ''}`;
-    breakdown.appendChild(li);
-  });
+  resultHTML += `
+    <div class="results-table">
+      <h3>💎 Point Breakdown Final Round:</h3>
+      <div class="breakdown-grid">
+  `;
 
-  const leaderboard = document.getElementById('leaderboardResults');
-  leaderboard.innerHTML = '';
-  data.leaderboard.forEach((entry, idx) => {
-    const li = document.createElement('li');
-    li.className = 'leaderboard-entry';
-    const medals = ['🥇', '🥈', '🥉'];
-    const medal = medals[idx] || '•';
-    li.innerHTML = `
-      <span class="medal">${medal}</span>
-      <span class="name">${entry.name}</span>
-      <span class="score">${entry.score}pts</span>
+  const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
+  sorted.forEach((player, idx) => {
+    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
+    resultHTML += `
+      <div class="player-breakdown">
+        <div class="breakdown-header">${medal} ${player.name}</div>
+        <div class="breakdown-points">+${player.roundScore} points</div>
+        <div class="breakdown-details">
+          ${player.breakdown.map(line => {
+            const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
+            return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
+          }).join('')}
+        </div>
+      </div>
     `;
-    leaderboard.appendChild(li);
   });
+
+  resultHTML += `
+      </div>
+    </div>
+
+    <div class="results-leaderboard">
+      <h3>📊 FINAL LEADERBOARD:</h3>
+      <ol class="leaderboard">
+  `;
+
+  data.leaderboard.forEach((player, idx) => {
+    const medal = ['🥇', '🥈', '🥉'][idx] || '•';
+    resultHTML += `
+      <li class="leaderboard-entry">
+        <span class="medal">${medal}</span>
+        <span class="name">${player.name}</span>
+        <span class="score">${player.score}pts</span>
+      </li>
+    `;
+  });
+
+  resultHTML += `
+      </ol>
+    </div>
+    </div>
+  `;
+
+  if (winnerBox) winnerBox.innerHTML = resultHTML;
 
   showScreen('resultsScreen');
 });
@@ -1087,6 +1115,7 @@ function goToLobby() {
     currentScenario: '',
     currentTwist: '',
     allDrafts: {},
+    allDraftsList: [],
     votes: {},
     voted: false,
     voteLocked: false,

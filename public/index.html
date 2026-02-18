@@ -400,6 +400,48 @@
     </div>
   </div>
 
+  <!-- ==================== ROUND 4 AI EVALUATION SCREEN (NEW) ==================== -->
+  <div id="round4EvalScreen" class="screen">
+    <div class="eval-header-sticky">
+      <div class="eval-header-content">
+        <h2 class="eval-title">⚡ Round 4: AI Evaluation</h2>
+        <div class="eval-round-info">
+          <span class="round-label">FINAL ROUND</span>
+          <span class="eval-progress"><span id="evalProgress">0</span> / <span id="evalTotal">0</span></span>
+        </div>
+      </div>
+    </div>
+    
+    <div id="evalScenarioBox" class="eval-scenario-box">
+      <button class="btn-collapse" onclick="toggleEvalScenario()" aria-label="Toggle scenario visibility">
+        <span id="evalScenarioIcon">▼</span> Scenario & Twist
+      </button>
+      <div id="evalScenarioContent" class="eval-scenario-content">
+        <p id="evalScenarioText"></p>
+        <p id="evalTwistText" class="eval-twist-highlight"></p>
+      </div>
+    </div>
+
+    <div id="evalLoading" class="eval-loading" aria-live="polite">
+      <div class="eval-loading-spinner" aria-hidden="true"></div>
+      <div class="eval-loading-text">
+        <strong>Evaluating teams...</strong>
+        <span>Fetching details and scoring picks.</span>
+      </div>
+    </div>
+    
+    <div class="eval-container">
+      <div id="evalCardsContainer" class="eval-cards-container"></div>
+    </div>
+
+    <div class="eval-actions">
+      <button id="evalContinueBtn" class="btn btn-success" onclick="requestFinalResults()" disabled>
+        Continue to Final Results
+      </button>
+      <div id="evalFinalStatus" class="eval-final-status" aria-live="polite"></div>
+    </div>
+  </div>
+
   <!-- ==================== FINAL LEADERBOARD (REDESIGNED) ==================== -->
   <div id="finalScreen" class="screen">
     <div class="final-container-modern">
@@ -417,6 +459,8 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="js/round4Eval.js"></script>
   <script type="module" src="js/app.js"></script>
+  <link rel="stylesheet" href="css/round4Eval.css">
 </body>
 </html>

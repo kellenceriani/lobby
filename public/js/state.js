@@ -20,6 +20,18 @@ export const player = { name: '', room: '', ready: false };
 export const roomState = { host: null, settings: {}, players: [], messages: [] };
 export const gameState = createDefaultGameState();
 
+export const round4State = {
+  scenario: '',
+  twist: '',
+  allTeamEvaluations: {},
+  finalLeaderboard: [],
+  currentCharIndex: 0,
+  totalTeams: 0,
+  totalCharacters: 0,
+  isEvaluating: false,
+  scenarioVisible: true
+};
+
 export const activeTimers = [];
 export let toastQueue = [];
 export let devMode = false;
@@ -53,6 +65,18 @@ export function resetRoomState() {
 
 export function resetGameState() {
   Object.assign(gameState, createDefaultGameState());
+}
+
+export function resetRound4State() {
+  round4State.scenario = '';
+  round4State.twist = '';
+  round4State.allTeamEvaluations = {};
+  round4State.finalLeaderboard = [];
+  round4State.currentCharIndex = 0;
+  round4State.totalTeams = 0;
+  round4State.totalCharacters = 0;
+  round4State.isEvaluating = false;
+  round4State.scenarioVisible = true;
 }
 
 export function resetAllState() {

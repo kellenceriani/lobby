@@ -28,6 +28,7 @@ import {
 } from './ui.js';
 
 const socket = io();
+window.socket = socket; // Expose to window for round4Eval.js
 
 // ========================
 // SOUND SYSTEM
@@ -323,9 +324,14 @@ socket.on('roundStart', (data) => {
   clearTimers();
 
   const isFinal = data.isFinalRound;
-  document.getElementById('roundLabel').textContent = isFinal
-    ? '🏆 FINAL ROUND - ASSEMBLE YOUR ULTIMATE TEAM! 🏆'
-    : `📍 ROUND ${data.roundNumber} OF 3`;
+  
+  // Skip preRound screen for Round 4 (goes straight to transition message)
+  if (isFinal) {
+    console.log('Round 4 starting - skipping preRound countdown');
+    return; // Don't show preRound for Round 4, wait for round4Start event
+  }
+  
+  document.getElementById('roundLabel').textContent = `📍 ROUND ${data.roundNumber} OF 3`;
 
   let countdown = 3;
   document.getElementById('countdown').textContent = countdown;
@@ -832,6 +838,53 @@ socket.on('votingPhaseStart', (data) => {
   addTimer(voteTimer);
 });
 
+// ========================
+// ROUND 4: AI EVALUATION (NEW)
+// ========================
+socket.on('round4Start', (data) => {
+  console.log('🎮 Round 4 Start event received:', data);
+  clearTimers();
+  
+  // Show transition message modal
+  showScreen('preRound');
+  const roundLabel = document.getElementById('roundLabel');
+  const countdown = document.querySelector('#preRound .countdown');
+  
+  if (roundLabel) {
+    roundLabel.innerHTML = `
+      <div style="text-align: center; padding: 20px;">
+        <div style="font-size: 3rem; margin-bottom: 20px;">🌪️</div>
+        <h2 style="margin-bottom: 15px;">THE ARENA TRANSFORMS</h2>
+        <p style="margin: 10px 0;">Your rosters are locked.</p>
+        <p style="margin: 10px 0;">Your picks are final.</p>
+        <p style="margin: 10px 0;">The voting stage dissolves away.</p>
+        <div style="height: 2px; background: linear-gradient(90deg, transparent, #ff4081, transparent); margin: 20px 0;"></div>
+        <p style="margin: 15px 0; font-size: 1.2rem; color: #ff4081;">
+          <strong>Now enters: 🤖 THE EVALUATOR</strong>
+        </p>
+        <p style="margin: 10px 0;">One machine. ${Object.keys(data.finalTeams).length * 6} characters. Unlimited takes.</p>
+        <p style="margin: 10px 0;">Your teams face the algorithm.</p>
+        <p style="margin: 15px 0; font-size: 1.1rem; font-weight: bold; color: #f7931e;">
+          Who cooked? Who got cooked? Find out.
+        </p>
+      </div>
+    `;
+  }
+  
+  if (countdown) countdown.style.display = 'none';
+  
+  // Auto-transition to evaluation screen after 5 seconds
+  setTimeout(() => {
+    console.log('⏰ Transition timeout complete, starting evaluation...');
+    if (typeof window.initRound4Evaluation === 'function') {
+      window.initRound4Evaluation(data);
+    } else {
+      console.error('❌ Round 4 evaluation function not found');
+    }
+  }, 5000);
+});
+
+/* COMMENTED OUT - Old Round 4 voting system, replaced by AI evaluation
 socket.on('finalVotingPhaseStart', (data) => {
   clearTimers();
   gameState.voted = false;
@@ -915,6 +968,7 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   addTimer(voteTimer);
 });
+END OF COMMENTED OUT CODE */
 
 function castVote(playerName) {
   playVoteSound();
@@ -1089,6 +1143,11 @@ socket.on('finalRoundResults', (data) => {
   }
 
   resetResultsDetails();
+
+  const readyButton = document.getElementById('nextRoundReadyBtn');
+  if (readyButton) {
+    readyButton.style.display = 'none';
+  }
 
   showScreen('resultsScreen');
 });

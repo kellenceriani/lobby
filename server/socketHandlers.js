@@ -8,8 +8,13 @@ const {
   revealPlotTwist,
   tallyResults,
   tallyFinalResults,
-  getRandomWord
+  getRandomWord,
+  endGame
 } = require('./gameEngine');
+
+const { scoreCharacter } = require('./evaluator');
+const { getRandomPhrase } = require('./phraseGenerator');
+const { calculateChemistryBonus, calculateChemistryDetails } = require('./chemistryCalculator');
 
 function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
@@ -323,6 +328,196 @@ function registerSocketHandlers(io) {
           totalPlayers: game.players.length
         });
       }
+    });
+
+    // NEW: Round 4 AI Evaluation Handler
+    socket.on('evaluateRound4', async (data) => {
+      const room = socket.data.room;
+      const name = socket.data.name;
+      if (!room || !name) return;
+
+      console.log(`🎮 Round 4 evaluation request from ${name} in room ${room}`);
+
+      const roomData = rooms[room];
+      const game = roomData ? roomData.gameState : null;
+      if (!game) return;
+
+      if (game.round4Results && game.round4Results.payload) {
+        console.log(`↩️ Re-sending cached Round 4 results to ${name}`);
+        socket.emit('round4Evaluated', game.round4Results.payload);
+        return;
+      }
+
+      if (game.round4InProgress) {
+        console.log(`⏳ Round 4 evaluation already in progress for room ${room}`);
+        return;
+      }
+
+      const { scenario, twist, finalTeams } = data;
+      // finalTeams = { 'Player1': ['Batman', 'Superman', ...], 'Player2': [...], ... }
+
+      console.log(`📊 Evaluating ${Object.keys(finalTeams).length} teams with ${Object.values(finalTeams).reduce((sum, team) => sum + team.length, 0)} total characters`);
+
+      try {
+        game.round4InProgress = true;
+        const evaluationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const teamEvaluations = {};
+        const roundPoints = {};
+        const pointBreakdown = {};
+
+        // Evaluate each team's roster
+        for (const [playerName, roster] of Object.entries(finalTeams)) {
+          console.log(`⚙️ Evaluating ${playerName}'s team: ${roster.join(', ')}`);
+          
+          // Score all characters in this roster (up to 6)
+          const evaluations = await Promise.all(
+            roster.map(char => scoreCharacter(char, scenario, twist))
+          );
+
+          console.log(`✅ ${playerName} evaluations complete`);
+
+          // Add phrases to each character eval
+          evaluations.forEach(evalData => {
+            evalData.phrase = getRandomPhrase(evalData.emotion);
+          });
+
+          // Calculate chemistry bonus for this team
+          const chemistryInfo = calculateChemistryDetails(roster);
+          const chemistryBonus = chemistryInfo.bonus;
+          const averageOVR = Math.round(
+            evaluations.reduce((sum, e) => sum + e.ovr, 0) / evaluations.length
+          );
+          const teamOVR = Math.round(averageOVR + chemistryBonus);
+          const topPickEval = evaluations.reduce((best, current) => {
+            if (!best || current.ovr > best.ovr) return current;
+            return best;
+          }, null);
+          const highestOVR = topPickEval ? topPickEval.ovr : 0;
+
+          console.log(`📈 ${playerName}: Avg OVR=${averageOVR}, Chemistry=${chemistryBonus}, Total=${teamOVR}`);
+
+          roundPoints[playerName] = teamOVR;
+          pointBreakdown[playerName] = [
+            `Team OVR: ${teamOVR}`,
+            `Average OVR: ${averageOVR}`,
+            `Chemistry Bonus: +${chemistryBonus}`,
+            `Top Pick: ${topPickEval ? topPickEval.character : 'N/A'}`
+          ];
+
+          // Store this team's results
+          teamEvaluations[playerName] = {
+            evaluations,
+            teamSummary: {
+              totalOVR: teamOVR,
+              chemistryBonus,
+              chemistryDetails: chemistryInfo.details,
+              averageOVR,
+              topPick: topPickEval ? topPickEval.character : 'N/A',
+              highestOVR,
+              evaluationCount: evaluations.length
+            }
+          };
+        }
+
+        // Rank teams by totalOVR
+        const finalLeaderboard = Object.entries(teamEvaluations)
+          .map(([playerName, teamData]) => ({
+            playerName,
+            totalOVR: teamData.teamSummary.totalOVR,
+            chemistryBonus: teamData.teamSummary.chemistryBonus,
+            topPick: teamData.teamSummary.topPick
+          }))
+          .sort((a, b) => b.totalOVR - a.totalOVR);
+
+        console.log(`🏆 Final leaderboard:`, finalLeaderboard.map(t => `${t.playerName}: ${t.totalOVR}`).join(', '));
+
+        if (!game.round4Applied) {
+          game.players.forEach(p => {
+            const earned = roundPoints[p.name] || 0;
+            p.roundScores[3] = earned;
+            p.totalScore += earned;
+          });
+          game.round4Applied = true;
+        }
+
+        const leaderboardData = [...game.players]
+          .sort((a, b) => b.totalScore - a.totalScore)
+          .map(p => ({
+            name: p.name,
+            score: p.totalScore,
+            roundScore: roundPoints[p.name] || 0,
+            breakdown: pointBreakdown[p.name] || []
+          }));
+
+        game.results[3] = {
+          winner: finalLeaderboard[0] ? finalLeaderboard[0].playerName : null,
+          scenario: scenario,
+          twist: twist,
+          leaderboard: leaderboardData
+        };
+
+        const payload = {
+          evaluationId,
+          allTeamEvaluations: teamEvaluations,
+          finalLeaderboard
+        };
+
+        game.round4Results = {
+          evaluationId,
+          payload,
+          roundPoints,
+          pointBreakdown,
+          leaderboardData
+        };
+
+        // Emit all teams' results back to ALL players in the room
+        io.to(room).emit('round4Evaluated', payload);
+
+        console.log(`✅ Round 4 evaluation completed for room ${room}`);
+        game.round4InProgress = false;
+      } catch (error) {
+        console.error('❌ Round 4 evaluation error:', error);
+        game.round4InProgress = false;
+        socket.emit('round4EvaluationError', { message: error.message });
+      }
+    });
+
+    socket.on('requestFinalResults', () => {
+      const room = socket.data.room;
+      const name = socket.data.name;
+      if (!room || !name) return;
+
+      const roomData = rooms[room];
+      const game = roomData ? roomData.gameState : null;
+      if (!game || !game.round4Results) return;
+
+      game.finalResultsReady = game.finalResultsReady || {};
+      game.finalResultsReady[name] = true;
+
+      const allReady = game.players.every(p => game.finalResultsReady[p.name] === true);
+
+      if (!allReady) {
+        io.to(room).emit('finalResultsWaiting', {
+          readyCount: Object.keys(game.finalResultsReady).length,
+          totalPlayers: game.players.length
+        });
+        return;
+      }
+
+      if (game.finalResultsEmitted) return;
+      game.finalResultsEmitted = true;
+
+      io.to(room).emit('finalRoundResults', {
+        winner: game.round4Results.leaderboardData[0]
+          ? game.round4Results.leaderboardData[0].name
+          : null,
+        roundPoints: game.round4Results.roundPoints,
+        voteCount: {},
+        leaderboard: game.round4Results.leaderboardData,
+        pointBreakdown: game.round4Results.pointBreakdown
+      });
+
+      setTimeout(() => endGame(io, room), 3000);
     });
 
     socket.on('playAgain', () => {

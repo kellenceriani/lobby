@@ -710,8 +710,8 @@ function revealPlotTwist(io, roomCode) {
     return;
   }
 
-  const twist = scenario.twists[Math.floor(Math.random() * scenario.twists.length)];
-  game.currentTwist = twist;
+  const finalTwists = generateTwists('normal', 4);
+  game.currentTwist = finalTwists[Math.floor(Math.random() * finalTwists.length)];
 
   game.activePhase = 'TWIST';
 
@@ -729,7 +729,7 @@ function revealPlotTwist(io, roomCode) {
   });
 
   io.to(roomCode).emit('plotTwistRevealed', {
-    twist: twist,
+    twist: game.currentTwist,
     scenario: game.currentScenario,
     currentTeams: game.players.map(p => ({
       name: p.name,
@@ -767,10 +767,12 @@ function startVoting(io, roomCode) {
 }
 
 function startFinalRound(io, roomCode) {
+  console.log(`🏁 Starting Round 4 for room ${roomCode}`);
   const game = rooms[roomCode].gameState;
-  game.activePhase = 'PRE_FINAL';
+  game.activePhase = 'AI_EVALUATION';
   game.phaseStartTime = Date.now();
 
+  // Collect each player's final team (from rounds 1-3)
   game.players.forEach(p => {
     p.finalTeam = [];
     for (let i = 0; i < 3; i++) {
@@ -778,7 +780,17 @@ function startFinalRound(io, roomCode) {
         p.finalTeam.push(...game.results[i].playerTeams[p.name]);
       }
     }
+    console.log(`👤 ${p.name}'s final team (${p.finalTeam.length} chars): ${p.finalTeam.join(', ')}`);
   });
+
+  // Generate a final scenario and twist for the AI evaluation
+  const finalScenarioData = generateScenario('all');
+  const finalTwists = generateTwists('normal', 4);
+  game.currentScenario = finalScenarioData.scenario;
+  game.currentTwist = finalTwists[Math.floor(Math.random() * finalTwists.length)];
+
+  console.log(`🎯 Scenario: ${game.currentScenario}`);
+  console.log(`🔄 Twist: ${game.currentTwist}`);
 
   io.to(roomCode).emit('roundStart', {
     roundNumber: 4,
@@ -786,7 +798,21 @@ function startFinalRound(io, roomCode) {
     isFinalRound: true
   });
 
-  setTimeout(() => startFinalVoting(io, roomCode), 3000);
+  // Create finalTeams object with all players' rosters
+  const finalTeams = {};
+  game.players.forEach(p => {
+    finalTeams[p.name] = p.finalTeam;
+  });
+
+  // Emit Round 4 start event with all data needed for AI evaluation
+  setTimeout(() => {
+    console.log(`📡 Emitting round4Start event to room ${roomCode}`);
+    io.to(roomCode).emit('round4Start', {
+      scenario: game.currentScenario,
+      twist: game.currentTwist,
+      finalTeams
+    });
+  }, 3000);
 }
 
 function startFinalVoting(io, roomCode) {

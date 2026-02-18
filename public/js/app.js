@@ -1,3 +1,32 @@
+import {
+  player,
+  roomState,
+  gameState,
+  clearTimers,
+  addTimer,
+  resetAllState
+} from './state.js';
+import {
+  showScreen,
+  showHelp,
+  closeHelp,
+  showToast,
+  showLoading,
+  createConfetti,
+  updateDraftWarning,
+  updateAutoFillWarning,
+  updateDraftCounter,
+  updateLivePicksCount,
+  updateVoteStatusBadge,
+  resetResultsDetails,
+  switchLobbyTab,
+  toggleAccordion,
+  toggleScenario,
+  toggleVotingContext,
+  toggleLivePicks,
+  toggleResultsDetails
+} from './ui.js';
+
 const socket = io();
 
 // ========================
@@ -44,174 +73,6 @@ function playErrorSound() {
 }
 
 // ========================
-// STATE
-// ========================
-let player = { name: '', room: '', ready: false };
-let roomState = { host: null, settings: {}, players: [], messages: [] };
-let gameState = {
-  currentRound: 0,
-  totalRounds: 4,
-  myTeam: [],
-  currentScenario: '',
-  currentTwist: '',
-  allDrafts: {},
-  allDraftsList: [],
-  allCharactersDrafted: [],
-  votes: {},
-  voted: false,
-  voteLocked: false,
-  currentVoteChoice: null,
-  leaderboard: [],
-  myFinalTeam: [],
-  draftWarnings: {}
-};
-
-let activeTimers = [];
-let toastQueue = [];
-let devMode = false; // Hidden dev mode for testing
-let isLoading = false; // Loading state tracker
-
-// ========================
-// UI UTILITIES
-// ========================
-function showScreen(screenId) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const screen = document.getElementById(screenId);
-  if (screen) {
-    screen.classList.add('active');
-    // Auto-focus first focusable element for accessibility
-    const firstFocusable = screen.querySelector('input, button, [tabindex]:not([tabindex="-1"])');
-    if (firstFocusable && !document.activeElement.matches('input[type="text"]')) {
-      setTimeout(() => firstFocusable.focus(), 100);
-    }
-  }
-}
-
-function showHelp() {
-  showScreen('tutorial');
-}
-
-function closeHelp() {
-  showScreen('join');
-}
-
-function clearTimers() {
-  activeTimers.forEach(t => clearInterval(t));
-  activeTimers = [];
-}
-
-function showLoading(show = true) {
-  isLoading = show;
-  const loader = document.getElementById('loadingOverlay');
-  if (loader) {
-    loader.style.display = show ? 'flex' : 'none';
-  }
-}
-
-function createConfetti() {
-  for (let i = 0; i < 50; i++) {
-    const confetti = document.createElement('div');
-    confetti.style.cssText = `
-      position: fixed;
-      width: 10px;
-      height: 10px;
-      background: ${['#ff4081', '#00bcd4', '#4caf50', '#ffc107', '#ff9800'][Math.floor(Math.random() * 5)]};
-      left: ${Math.random() * 100}%;
-      top: -10px;
-      z-index: 9999;
-      border-radius: 50%;
-      pointer-events: none;
-      animation: confettiFall ${2 + Math.random() * 1}s linear forwards;
-    `;
-    document.body.appendChild(confetti);
-    setTimeout(() => confetti.remove(), 3000);
-  }
-}
-
-// ========================
-// TOAST NOTIFICATION SYSTEM (IMPROVED)
-// ========================
-function showToast(message, type = 'info', duration = 3000) {
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  toast.setAttribute('role', 'alert');
-  toast.setAttribute('aria-live', 'polite');
-  toast.textContent = message;
-  toast.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: ${type === 'error' ? '#ff5252' : type === 'warning' ? '#ffc107' : '#00bcd4'};
-    color: white;
-    padding: 15px 20px;
-    border-radius: 8px;
-    z-index: 9999;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    animation: slideInRight 0.3s ease;
-    max-width: 300px;
-    word-wrap: break-word;
-    font-weight: bold;
-  `;
-  
-  // Add close button for accessibility
-  const closeBtn = document.createElement('button');
-  closeBtn.innerHTML = '✕';
-  closeBtn.style.cssText = `
-    background: none;
-    border: none;
-    color: white;
-    cursor: pointer;
-    font-size: 1.2em;
-    margin-left: 10px;
-    padding: 0;
-  `;
-  closeBtn.onclick = () => {
-    toast.style.animation = 'slideOutRight 0.3s ease';
-    setTimeout(() => toast.remove(), 300);
-  };
-  
-  toast.appendChild(closeBtn);
-  document.body.appendChild(toast);
-  
-  const timeout = setTimeout(() => {
-    toast.style.animation = 'slideOutRight 0.3s ease';
-    setTimeout(() => toast.remove(), 300);
-  }, duration);
-}
-
-// ========================
-// INLINE WARNING SYSTEM (IMPROVED WITH VISUAL FEEDBACK)
-// ========================
-function updateDraftWarning(character, isDuplicate = false) {
-  const warningEl = document.getElementById('draftWarning');
-  const charInput = document.getElementById('charInput');
-  
-  if (!warningEl) return;
-  
-  if (isDuplicate) {
-    warningEl.className = 'draft-warning-modern warning';
-    warningEl.textContent = `⚠️ "${character}" is a DUPLICATE! Will auto-fill instead.`;
-    warningEl.style.display = 'block';
-    if (charInput) charInput.style.borderColor = '#ff9800';
-  } else {
-    warningEl.style.display = 'none';
-    warningEl.className = 'draft-warning-modern';
-    if (charInput) charInput.style.borderColor = '#222';
-  }
-}
-
-function updateAutoFillWarning() {
-  const warningEl = document.getElementById('draftWarning');
-  if (!warningEl) return;
-  
-  if (gameState.myTeam.length === 0) {
-    warningEl.className = 'draft-warning-modern info';
-    warningEl.textContent = 'ℹ️ Time running out! No picks? Random words will fill your team.';
-    warningEl.style.display = 'block';
-  }
-}
-
-// ========================
 // JOIN & LOBBY
 // ========================
 function joinRoom() {
@@ -251,7 +112,7 @@ function leaveRoom() {
     showScreen('join');
     document.getElementById('name').value = '';
     document.getElementById('room').value = '';
-    player = { name: '', room: '', ready: false };
+    resetAllState();
   }
 }
 
@@ -269,13 +130,12 @@ socket.on('gameError', (msg) => {
 
 socket.on('roomData', (data) => {
   console.log('📍 Received roomData:', data);
-  roomState = data;
+  Object.assign(roomState, data);
   const isHost = data.host === player.name;
 
   document.getElementById('roomCode').textContent = player.room;
   document.getElementById('playerCountBadge').textContent = `${data.players.length}/6`;
-  
-  // Update color based on player count
+
   const badge = document.getElementById('playerCountBadge');
   badge.classList.remove('available', 'almost-full', 'full');
   if (data.players.length >= 6) {
@@ -288,7 +148,7 @@ socket.on('roomData', (data) => {
 
   const settingsContent = document.getElementById('settingsContent');
   const hostNote = document.getElementById('hostNote');
-  
+
   if (isHost) {
     settingsContent.style.display = 'block';
     hostNote.style.display = 'none';
@@ -343,8 +203,8 @@ socket.on('roomData', (data) => {
         startBtn.className = 'btn';
         minPlayersMsg.style.display = 'block';
         minPlayersMsg.innerHTML = `
-          <strong>⏳ Waiting:</strong> 
-          ${readyCount}/${data.players.length} ready 
+          <strong>⏳ Waiting:</strong>
+          ${readyCount}/${data.players.length} ready
           ${data.players.length < 3 ? '(Need 3+)' : ''}
         `;
       }
@@ -419,7 +279,7 @@ function sendReaction(emoji) {
 socket.on('newMessage', (msg) => {
   const chatContainer = document.getElementById('chatMessages');
   if (!chatContainer) return;
-  
+
   const div = document.createElement('div');
   div.className = msg.isReaction ? 'chat-reaction' : 'chat-message';
   if (msg.isReaction) {
@@ -428,12 +288,11 @@ socket.on('newMessage', (msg) => {
     div.innerHTML = `<strong>${msg.player}:</strong> ${msg.text}`;
   }
   chatContainer.appendChild(div);
-  
-  // Keep only last 10 messages
+
   while (chatContainer.children.length > 10) {
     chatContainer.firstChild.remove();
   }
-  
+
   chatContainer.scrollTop = chatContainer.scrollHeight;
 });
 
@@ -465,8 +324,8 @@ socket.on('roundStart', (data) => {
   clearTimers();
 
   const isFinal = data.isFinalRound;
-  document.getElementById('roundLabel').textContent = isFinal 
-    ? `🏆 FINAL ROUND - ASSEMBLE YOUR ULTIMATE TEAM! 🏆`
+  document.getElementById('roundLabel').textContent = isFinal
+    ? '🏆 FINAL ROUND - ASSEMBLE YOUR ULTIMATE TEAM! 🏆'
     : `📍 ROUND ${data.roundNumber} OF 3`;
 
   let countdown = 3;
@@ -482,7 +341,7 @@ socket.on('roundStart', (data) => {
     }
   }, 1000);
 
-  activeTimers.push(timer);
+  addTimer(timer);
   showScreen('preRound');
 });
 
@@ -495,20 +354,19 @@ socket.on('scenarioRevealed', (data) => {
 
   document.getElementById('currentRound').textContent = gameState.currentRound;
   document.getElementById('scenarioText').textContent = `BUILD A TEAM TO: ${data.scenario}`;
-  
+
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) myTeamList.innerHTML = '';
-  
+
   const livePicksList = document.getElementById('livePicksList');
   if (livePicksList) livePicksList.innerHTML = '';
-  
+
   const charInput = document.getElementById('charInput');
   if (charInput) {
     charInput.value = '';
     charInput.focus();
   }
-  
-  // Create warning element if it doesn't exist
+
   let warningEl = document.getElementById('draftWarning');
   if (!warningEl) {
     warningEl = document.createElement('div');
@@ -525,7 +383,7 @@ socket.on('scenarioRevealed', (data) => {
     `;
     charInput.parentElement.insertBefore(warningEl, charInput.nextSibling);
   }
-  
+
   const lockBtn = document.getElementById('lockDraftBtn');
   if (lockBtn) {
     lockBtn.style.display = 'inline-block';
@@ -533,7 +391,7 @@ socket.on('scenarioRevealed', (data) => {
     lockBtn.textContent = '🔓 LOCK IN MY TEAM (need 2)';
     lockBtn.className = 'btn btn-success';
   }
-  
+
   if (document.getElementById('draftCounter')) {
     document.getElementById('draftCounter').textContent = '(0/2)';
     document.getElementById('draftCounter').style.color = '#666';
@@ -549,7 +407,6 @@ socket.on('scenarioRevealed', (data) => {
     const timerEl = document.getElementById('draftTimer');
     if (timerEl) {
       timerEl.textContent = timeLeft;
-      // Color change as time runs out
       if (timeLeft <= 10) {
         timerEl.style.color = '#ff5252';
         timerEl.style.fontWeight = 'bold';
@@ -561,11 +418,11 @@ socket.on('scenarioRevealed', (data) => {
     }
   }, 1000);
 
-  activeTimers.push(draftTimer);
+  addTimer(draftTimer);
 });
 
 // ========================
-// DRAFT PHASE - WITH DUPLICATE DETECTION & CONFIRM BUTTON
+// DRAFT PHASE
 // ========================
 document.addEventListener('DOMContentLoaded', () => {
   const charInput = document.getElementById('charInput');
@@ -581,13 +438,13 @@ function handleDraftChange(e) {
     updateDraftWarning('', false);
     return;
   }
-  
+
   const charLower = char.toLowerCase();
   const isDuplicate = gameState.myTeam.some(c => c.toLowerCase() === charLower);
-  const otherPlayersHave = gameState.allDraftsList.some(p => 
+  const otherPlayersHave = gameState.allDraftsList.some(p =>
     p.name !== player.name && p.character.toLowerCase() === charLower
   );
-  
+
   if (isDuplicate || otherPlayersHave) {
     updateDraftWarning(char, true);
   } else {
@@ -639,19 +496,6 @@ function submitDraft(char) {
   updateDraftWarning('', false);
 }
 
-function updateDraftCounter() {
-  const counter = document.getElementById('draftCounter');
-  if (counter) {
-    const count = gameState.myTeam.length;
-    counter.textContent = `(${count}/2)`;
-    if (count >= 2) {
-      counter.classList.add('full');
-    } else {
-      counter.classList.remove('full');
-    }
-  }
-}
-
 function lockDraft() {
   if (gameState.myTeam.length < 2) {
     playErrorSound();
@@ -690,11 +534,9 @@ socket.on('draftUpdate', (data) => {
   });
 
   picksList.scrollTop = picksList.scrollHeight;
-  
-  // Update live picks count badge
+
   updateLivePicksCount(data.allDrafts.length);
 
-  // Sync my team from server list
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) myTeamList.innerHTML = '';
 
@@ -767,14 +609,14 @@ socket.on('finalTeamRevealed', (data) => {
   if (myTeamList) {
     myTeamList.innerHTML = '';
     const myCurrentTeam = data.playerTeams.find(t => t.name === player.name)?.teamSoFar || [];
-    
+
     const lockedSection = document.createElement('div');
     lockedSection.style.cssText = 'margin-bottom: 15px; opacity: 0.8;';
     lockedSection.innerHTML = `
       <small style="font-weight: bold; color: #999;">Previous Rounds (Locked):</small>
     `;
     myTeamList.appendChild(lockedSection);
-    
+
     myCurrentTeam.forEach(char => {
       const li = document.createElement('li');
       li.textContent = char;
@@ -824,52 +666,52 @@ socket.on('finalTeamRevealed', (data) => {
     if (timeLeft <= 0) clearInterval(draftTimer);
   }, 1000);
 
-  activeTimers.push(draftTimer);
+  addTimer(draftTimer);
 });
 
 function handleFinalRoundInput(e) {
   if (e.key === 'Enter' && e.target.value.trim()) {
     const char = e.target.value.trim();
-    
+
     const isFinalRound = document.getElementById('scenarioText')?.textContent.includes('ULTIMATE TEAM');
     if (!isFinalRound) return;
-    
+
     if (gameState.myFinalTeam.length >= 6) {
       showToast('⚠️ Your team is full (6 characters max)!', 'error');
       return;
     }
-    
+
     if (gameState.myFinalTeam.some(c => c.toLowerCase() === char.toLowerCase())) {
       showToast(`❌ "${char}" is already in your team!`, 'error', 3000);
       return;
     }
-    
+
     submitFinalDraft(char);
   }
 }
 
 function submitFinalDraft(char) {
   gameState.myFinalTeam.push(char);
-  
+
   const li = document.createElement('li');
   li.textContent = char;
   li.classList.add('new-pick');
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) myTeamList.appendChild(li);
-  
+
   socket.emit('draftCharacter', char);
-  
+
   const counter = document.getElementById('draftCounter');
   if (counter) {
     counter.textContent = `(${gameState.myFinalTeam.length}/6)`;
   }
-  
+
   const charInput = document.getElementById('charInput');
   if (charInput) {
     charInput.value = '';
     charInput.focus();
   }
-  
+
   const lockBtn = document.getElementById('lockDraftBtn');
   if (lockBtn) {
     lockBtn.disabled = false;
@@ -919,16 +761,15 @@ socket.on('votingPhaseStart', (data) => {
   const grid = document.getElementById('votingTeams');
   if (grid) grid.innerHTML = '';
 
-  // Filter out own team
   data.teams.forEach((team, idx) => {
     if (!team.team || team.team.length === 0) {
       return;
     }
-    
+
     if (team.name === player.name) {
       return;
     }
-    
+
     const card = document.createElement('div');
     card.className = 'vote-card';
     card.style.animationDelay = `${idx * 0.1}s`;
@@ -952,7 +793,7 @@ socket.on('votingPhaseStart', (data) => {
 
   const lockSection = document.getElementById('voteLockSection');
   if (lockSection) {
-    lockSection.style.display = 'none'; // Hidden until they select
+    lockSection.style.display = 'none';
   }
 
   const lockBtn = document.getElementById('lockVoteBtn');
@@ -968,8 +809,7 @@ socket.on('votingPhaseStart', (data) => {
 
   const voteLockNotice = document.getElementById('voteLockNotice');
   if (voteLockNotice) voteLockNotice.style.display = 'block';
-  
-  // Update status badge
+
   updateVoteStatusBadge('Select Team');
 
   showScreen('votingScreen');
@@ -990,7 +830,7 @@ socket.on('votingPhaseStart', (data) => {
     if (timeLeft <= 0) clearInterval(voteTimer);
   }, 1000);
 
-  activeTimers.push(voteTimer);
+  addTimer(voteTimer);
 });
 
 socket.on('finalVotingPhaseStart', (data) => {
@@ -1002,7 +842,7 @@ socket.on('finalVotingPhaseStart', (data) => {
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
   if (scenarioDisplay) scenarioDisplay.textContent = data.finalPrompt || 'Which team is the BEST?';
-  if (twistDisplay) twistDisplay.innerHTML = `<strong style="color: #ff4081;">ROUND 4: FINAL VOTING!</strong>`;
+  if (twistDisplay) twistDisplay.innerHTML = '<strong style="color: #ff4081;">ROUND 4: FINAL VOTING!</strong>';
 
   const grid = document.getElementById('votingTeams');
   if (grid) grid.innerHTML = '';
@@ -1011,11 +851,11 @@ socket.on('finalVotingPhaseStart', (data) => {
     if (!team.team || team.team.length === 0) {
       return;
     }
-    
+
     if (team.name === player.name) {
       return;
     }
-    
+
     const card = document.createElement('div');
     card.className = 'vote-card final-vote';
     card.style.animationDelay = `${idx * 0.1}s`;
@@ -1039,7 +879,7 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   const lockSection = document.getElementById('voteLockSection');
   if (lockSection) {
-    lockSection.style.display = 'none'; // Hidden until selection
+    lockSection.style.display = 'none';
   }
 
   const lockBtn = document.getElementById('lockVoteBtn');
@@ -1054,8 +894,7 @@ socket.on('finalVotingPhaseStart', (data) => {
 
   const voteLockNotice = document.getElementById('voteLockNotice');
   if (voteLockNotice) voteLockNotice.style.display = 'block';
-  
-  // Update status badge
+
   updateVoteStatusBadge('Final Vote');
 
   showScreen('votingScreen');
@@ -1075,7 +914,7 @@ socket.on('finalVotingPhaseStart', (data) => {
     if (timeLeft <= 0) clearInterval(voteTimer);
   }, 1000);
 
-  activeTimers.push(voteTimer);
+  addTimer(voteTimer);
 });
 
 function castVote(playerName) {
@@ -1083,8 +922,7 @@ function castVote(playerName) {
   socket.emit('castVote', playerName);
   gameState.voted = true;
   gameState.currentVoteChoice = playerName;
-  
-  // Update all vote cards
+
   document.querySelectorAll('.vote-card').forEach(card => {
     const cardName = card.querySelector('h3').textContent.replace('👤 ', '');
     if (cardName === playerName) {
@@ -1093,8 +931,7 @@ function castVote(playerName) {
       card.classList.remove('selected');
     }
   });
-  
-  // Show lock button
+
   const lockBtn = document.getElementById('lockVoteBtn');
   const lockSection = document.getElementById('voteLockSection');
   if (lockBtn && lockSection) {
@@ -1102,8 +939,7 @@ function castVote(playerName) {
     lockBtn.style.display = 'inline-block';
     lockBtn.disabled = false;
   }
-  
-  // Update status badge
+
   updateVoteStatusBadge(`Voting for ${playerName}`);
 
   showToast(`✓ Selected ${playerName}! Click LOCK when ready.`, 'info', 2000);
@@ -1118,7 +954,7 @@ function lockVote() {
   playDraftSound();
   socket.emit('lockVote');
   gameState.voteLocked = true;
-  
+
   const lockBtn = document.getElementById('lockVoteBtn');
   if (lockBtn) {
     lockBtn.disabled = true;
@@ -1158,7 +994,7 @@ socket.on('roundResults', (data) => {
   document.getElementById('resultRound').textContent = data.round;
 
   const winnerBox = document.getElementById('roundWinner');
-  
+
   let winnerHTML = '';
   if (data.winner) {
     winnerHTML = `
@@ -1166,22 +1002,21 @@ socket.on('roundResults', (data) => {
       <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
     `;
   }
-  
+
   if (winnerBox) winnerBox.innerHTML = winnerHTML;
 
-  // Build breakdown section
   const breakdownContainer = document.getElementById('resultsBreakdown');
   if (breakdownContainer) {
     let breakdownHTML = '';
     const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
-    sorted.forEach((player, idx) => {
+    sorted.forEach((playerEntry, idx) => {
       const medal = ['🥇', '🥈', '🥉'][idx] || '•';
       breakdownHTML += `
         <div class="player-breakdown">
-          <div class="breakdown-header">${medal} ${player.name}</div>
-          <div class="breakdown-points">+${player.roundScore} points</div>
+          <div class="breakdown-header">${medal} ${playerEntry.name}</div>
+          <div class="breakdown-points">+${playerEntry.roundScore} points</div>
           <div class="breakdown-details">
-            ${player.breakdown.map(line => {
+            ${playerEntry.breakdown.map(line => {
               const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
               return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
             }).join('')}
@@ -1192,12 +1027,7 @@ socket.on('roundResults', (data) => {
     breakdownContainer.innerHTML = breakdownHTML;
   }
 
-  // Reset toggle state
-  resultsDetailsOpen = false;
-  const details = document.getElementById('resultsDetails');
-  const icon = document.getElementById('resultsDetailsIcon');
-  if (details) details.style.display = 'none';
-  if (icon) icon.textContent = '▼';
+  resetResultsDetails();
 
   const readyButton = document.getElementById('nextRoundReadyBtn');
   if (readyButton) {
@@ -1226,7 +1056,7 @@ socket.on('finalRoundResults', (data) => {
   document.getElementById('resultRound').textContent = '4 (FINAL)';
 
   const winnerBox = document.getElementById('roundWinner');
-  
+
   let winnerHTML = '';
   if (data.winner) {
     winnerHTML = `
@@ -1234,22 +1064,21 @@ socket.on('finalRoundResults', (data) => {
       <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
     `;
   }
-  
+
   if (winnerBox) winnerBox.innerHTML = winnerHTML;
 
-  // Build breakdown section
   const breakdownContainer = document.getElementById('resultsBreakdown');
   if (breakdownContainer) {
     let breakdownHTML = '';
     const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
-    sorted.forEach((player, idx) => {
+    sorted.forEach((playerEntry, idx) => {
       const medal = ['🥇', '🥈', '🥉'][idx] || '•';
       breakdownHTML += `
         <div class="player-breakdown">
-          <div class="breakdown-header">${medal} ${player.name}</div>
-          <div class="breakdown-points">+${player.roundScore} points</div>
+          <div class="breakdown-header">${medal} ${playerEntry.name}</div>
+          <div class="breakdown-points">+${playerEntry.roundScore} points</div>
           <div class="breakdown-details">
-            ${player.breakdown.map(line => {
+            ${playerEntry.breakdown.map(line => {
               const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
               return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
             }).join('')}
@@ -1260,12 +1089,7 @@ socket.on('finalRoundResults', (data) => {
     breakdownContainer.innerHTML = breakdownHTML;
   }
 
-  // Reset toggle state
-  resultsDetailsOpen = false;
-  const details = document.getElementById('resultsDetails');
-  const icon = document.getElementById('resultsDetailsIcon');
-  if (details) details.style.display = 'none';
-  if (icon) icon.textContent = '▼';
+  resetResultsDetails();
 
   showScreen('resultsScreen');
 });
@@ -1314,24 +1138,7 @@ function sendPlayAgain() {
 function goToLobby() {
   if (confirm('Are you sure? This will return to the lobby.')) {
     clearTimers();
-    player = { name: '', room: '', ready: false };
-    roomState = { host: null, settings: {}, players: [], messages: [] };
-    gameState = {
-      currentRound: 0,
-      totalRounds: 4,
-      myTeam: [],
-      currentScenario: '',
-      currentTwist: '',
-      allDrafts: {},
-      allDraftsList: [],
-      allCharactersDrafted: [],
-      votes: {},
-      voted: false,
-      voteLocked: false,
-      leaderboard: [],
-      myFinalTeam: [],
-      draftWarnings: {}
-    };
+    resetAllState();
     socket.disconnect();
     socket.connect();
     showScreen('join');
@@ -1347,204 +1154,28 @@ window.addEventListener('beforeunload', () => {
   socket.disconnect();
 });
 
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes slideInRight {
-    from {
-      opacity: 0;
-      transform: translateX(400px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-  
-  @keyframes slideOutRight {
-    from {
-      opacity: 1;
-      transform: translateX(0);
-    }
-    to {
-      opacity: 0;
-      transform: translateX(400px);
-    }
-  }
+// Expose UI actions used by inline handlers
+window.joinRoom = joinRoom;
+window.leaveRoom = leaveRoom;
+window.showHelp = showHelp;
+window.closeHelp = closeHelp;
+window.switchLobbyTab = switchLobbyTab;
+window.toggleAccordion = toggleAccordion;
+window.toggleScenario = toggleScenario;
+window.toggleVotingContext = toggleVotingContext;
+window.toggleLivePicks = toggleLivePicks;
+window.toggleResultsDetails = toggleResultsDetails;
+window.toggleReady = toggleReady;
+window.updateSetting = updateSetting;
+window.sendMessage = sendMessage;
+window.sendReaction = sendReaction;
+window.sendStartGame = sendStartGame;
+window.submitDraft = submitDraft;
+window.lockDraft = lockDraft;
+window.lockVote = lockVote;
+window.readyForNextRound = readyForNextRound;
+window.sendPlayAgain = sendPlayAgain;
+window.goToLobby = goToLobby;
 
-  @keyframes confettiFall {
-    to {
-      transform: translateY(100vh) rotate(360deg);
-      opacity: 0;
-    }
-  }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  .toast {
-    display: flex !important;
-    align-items: center !important;
-    gap: 10px !important;
-  }
-
-  #loadingOverlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.5);
-    z-index: 10000;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(2px);
-  }
-
-  .spinner {
-    width: 50px;
-    height: 50px;
-    border: 5px solid #f0f0f0;
-    border-top: 5px solid #ff4081;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  .spinner-text {
-    color: white;
-    margin-top: 20px;
-    font-weight: bold;
-    font-size: 1.2em;
-  }
-`;
-document.head.appendChild(style);
-
-// ========================
-// NEW UI/UX FUNCTIONS
-// ========================
-
-// LOBBY TAB SWITCHING
-function switchLobbyTab(tabName) {
-  // Hide all tab contents
-  document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-  
-  // Deactivate all tab buttons
-  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-  
-  // Show selected tab content
-  const selectedTab = document.getElementById(`${tabName}Tab`);
-  if (selectedTab) selectedTab.classList.add('active');
-  
-  // Activate selected tab button
-  const selectedBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
-  if (selectedBtn) selectedBtn.classList.add('active');
-}
-
-// TUTORIAL ACCORDION
-function toggleAccordion(header) {
-  const accordionItem = header.parentElement;
-  const content = accordionItem.querySelector('.accordion-content');
-  const icon = header.querySelector('.accordion-icon');
-  
-  const isActive = accordionItem.classList.contains('active');
-  
-  if (isActive) {
-    accordionItem.classList.remove('active');
-    content.style.display = 'none';
-    icon.textContent = '▶';
-  } else {
-    accordionItem.classList.add('active');
-    content.style.display = 'block';
-    icon.textContent = '▼';
-  }
-}
-
-// SCENARIO COLLAPSE TOGGLE
-let scenarioCollapsed = false;
-function toggleScenario() {
-  const scenarioBox = document.getElementById('scenarioBox');
-  const icon = document.getElementById('scenarioToggleIcon');
-  
-  if (!scenarioBox || !icon) return;
-  
-  scenarioCollapsed = !scenarioCollapsed;
-  
-  if (scenarioCollapsed) {
-    scenarioBox.classList.add('collapsed');
-    icon.textContent = '▲';
-  } else {
-    scenarioBox.classList.remove('collapsed');
-    icon.textContent = '▼';
-  }
-}
-
-// VOTING CONTEXT COLLAPSE TOGGLE
-let votingContextCollapsed = false;
-function toggleVotingContext() {
-  const context = document.getElementById('votingContext');
-  const icon = document.getElementById('votingContextIcon');
-  
-  if (!context || !icon) return;
-  
-  votingContextCollapsed = !votingContextCollapsed;
-  
-  if (votingContextCollapsed) {
-    context.classList.add('collapsed');
-    icon.textContent = '▲';
-  } else {
-    context.classList.remove('collapsed');
-    icon.textContent = '▼';
-  }
-}
-
-// LIVE PICKS DRAWER TOGGLE
-let livePicksOpen = false;
-function toggleLivePicks() {
-  const drawer = document.getElementById('livePicksDrawer');
-  const icon = document.getElementById('livePicksIcon');
-  
-  if (!drawer || !icon) return;
-  
-  livePicksOpen = !livePicksOpen;
-  
-  if (livePicksOpen) {
-    drawer.classList.add('open');
-    icon.textContent = '▼';
-  } else {
-    drawer.classList.remove('open');
-    icon.textContent = '▲';
-  }
-}
-
-// RESULTS DETAILS TOGGLE
-let resultsDetailsOpen = false;
-function toggleResultsDetails() {
-  const details = document.getElementById('resultsDetails');
-  const icon = document.getElementById('resultsDetailsIcon');
-  
-  if (!details || !icon) return;
-  
-  resultsDetailsOpen = !resultsDetailsOpen;
-  
-  if (resultsDetailsOpen) {
-    details.style.display = 'block';
-    icon.textContent = '▲';
-  } else {
-    details.style.display = 'none';
-    icon.textContent = '▼';
-  }
-}
-
-// UPDATE LIVE PICKS COUNT
-function updateLivePicksCount(count) {
-  const countEl = document.getElementById('livePicksCount');
-  if (countEl) countEl.textContent = count;
-}
-
-// UPDATE VOTE STATUS BADGE
-function updateVoteStatusBadge(status) {
-  const badge = document.getElementById('voteStatusBadge');
-  if (badge) badge.textContent = status;
-}
+// Keep for future usage
+window.showLoading = showLoading;

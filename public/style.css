@@ -1169,6 +1169,57 @@ select:focus {
   min-width: 150px;
 }
 
+/* ======================== TUTORIAL STYLES ======================== */
+.tutorial-section {
+  text-align: left;
+  background: linear-gradient(135deg, #f5f5f5, #f9f9f9);
+  padding: 20px;
+  margin: 15px auto;
+  border-radius: 10px;
+  border-left: 5px solid var(--secondary-color);
+  max-width: 550px;
+}
+
+.tutorial-section h2 {
+  color: var(--primary-color);
+  margin-bottom: 12px;
+  font-size: 1.3em;
+}
+
+.tutorial-section h3 {
+  color: var(--secondary-color);
+  margin-bottom: 10px;
+}
+
+.tutorial-section ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+.tutorial-section li {
+  padding: 8px 0;
+  line-height: 1.5;
+}
+
+.tutorial-section li strong {
+  color: var(--primary-color);
+}
+
+.tutorial-section p {
+  margin: 10px 0;
+  font-size: 1em;
+}
+
+kbd {
+  background: #333;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.9em;
+  font-weight: bold;
+}
+
 /* ======================== RESPONSIVE DESIGN ======================== */
 @media (max-width: 600px) {
   .panel {

@@ -1,6 +1,49 @@
 const socket = io();
 
 // ========================
+// SOUND SYSTEM
+// ========================
+const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+function playSound(frequency = 800, duration = 100, type = 'sine', volume = 0.3) {
+  try {
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    osc.frequency.value = frequency;
+    osc.type = type;
+    gain.gain.setValueAtTime(volume, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration / 1000);
+    osc.start(audioContext.currentTime);
+    osc.stop(audioContext.currentTime + duration / 1000);
+  } catch (e) {
+    console.log('Sound not available');
+  }
+}
+
+function playDraftSound() {
+  playSound(600, 150, 'sine', 0.2);
+  setTimeout(() => playSound(800, 100, 'sine', 0.2), 75);
+}
+
+function playVoteSound() {
+  playSound(440, 100, 'sine', 0.25);
+  setTimeout(() => playSound(880, 100, 'sine', 0.25), 100);
+}
+
+function playWinSound() {
+  playSound(523, 200, 'sine', 0.3);
+  setTimeout(() => playSound(659, 200, 'sine', 0.3), 200);
+  setTimeout(() => playSound(784, 400, 'sine', 0.3), 400);
+}
+
+function playErrorSound() {
+  playSound(300, 100, 'sine', 0.2);
+  setTimeout(() => playSound(250, 100, 'sine', 0.2), 100);
+}
+
+// ========================
 // STATE
 // ========================
 let player = { name: '', room: '', ready: false };
@@ -13,9 +56,11 @@ let gameState = {
   currentTwist: '',
   allDrafts: {},
   allDraftsList: [],
+  allCharactersDrafted: [],
   votes: {},
   voted: false,
   voteLocked: false,
+  currentVoteChoice: null,
   leaderboard: [],
   myFinalTeam: [],
   draftWarnings: {}
@@ -24,6 +69,7 @@ let gameState = {
 let activeTimers = [];
 let toastQueue = [];
 let devMode = false; // Hidden dev mode for testing
+let isLoading = false; // Loading state tracker
 
 // ========================
 // UI UTILITIES
@@ -41,9 +87,45 @@ function showScreen(screenId) {
   }
 }
 
+function showHelp() {
+  showScreen('tutorial');
+}
+
+function closeHelp() {
+  showScreen('join');
+}
+
 function clearTimers() {
   activeTimers.forEach(t => clearInterval(t));
   activeTimers = [];
+}
+
+function showLoading(show = true) {
+  isLoading = show;
+  const loader = document.getElementById('loadingOverlay');
+  if (loader) {
+    loader.style.display = show ? 'flex' : 'none';
+  }
+}
+
+function createConfetti() {
+  for (let i = 0; i < 50; i++) {
+    const confetti = document.createElement('div');
+    confetti.style.cssText = `
+      position: fixed;
+      width: 10px;
+      height: 10px;
+      background: ${['#ff4081', '#00bcd4', '#4caf50', '#ffc107', '#ff9800'][Math.floor(Math.random() * 5)]};
+      left: ${Math.random() * 100}%;
+      top: -10px;
+      z-index: 9999;
+      border-radius: 50%;
+      pointer-events: none;
+      animation: confettiFall ${2 + Math.random() * 1}s linear forwards;
+    `;
+    document.body.appendChild(confetti);
+    setTimeout(() => confetti.remove(), 3000);
+  }
 }
 
 // ========================
@@ -429,6 +511,7 @@ socket.on('scenarioRevealed', (data) => {
   gameState.currentScenario = data.scenario;
   gameState.myTeam = [];
   gameState.voteLocked = false;
+  gameState.currentVoteChoice = null;
 
   document.getElementById('currentRound').textContent = gameState.currentRound;
   document.getElementById('scenarioText').textContent = `BUILD A TEAM TO: ${data.scenario}`;
@@ -549,13 +632,24 @@ function submitDraft(char) {
   const isDupOther = gameState.allDraftsList.some(p =>
     p.name !== player.name && p.character.toLowerCase() === charLower
   );
+  const isDupAcrossRounds = gameState.allCharactersDrafted.includes(charLower);
 
   if (isDupOwn) {
-    showToast(`❌ You already drafted "${char}"! Auto-filling instead...`, 'error', 4000);
+    playErrorSound();
+    showToast(`❌ You already drafted "${char}" this round! Auto-filling instead...`, 'error', 4000);
+  } else if (isDupAcrossRounds) {
+    playErrorSound();
+    showToast(`❌ You already drafted "${char}" in a previous round! Auto-filling instead...`, 'error', 4000);
   } else if (isDupOther) {
+    playErrorSound();
     showToast(`❌ "${char}" was picked by another player! Auto-filling instead...`, 'error', 4000);
+  } else {
+    playDraftSound();
   }
 
+  if (!isDupOwn && !isDupOther && !isDupAcrossRounds) {
+    gameState.allCharactersDrafted.push(charLower);
+  }
   socket.emit('draftCharacter', char);
   const charInput = document.getElementById('charInput');
   if (charInput) {
@@ -581,9 +675,11 @@ function updateDraftCounter() {
 
 function lockDraft() {
   if (gameState.myTeam.length < 2) {
+    playErrorSound();
     showToast('⚠️ You must have 2 characters to lock in!', 'warning');
     return;
   }
+  playDraftSound();
   socket.emit('lockDraft');
   const lockBtn = document.getElementById('lockDraftBtn');
   if (lockBtn) {
@@ -833,6 +929,7 @@ socket.on('votingPhaseStart', (data) => {
   if (charInput) charInput.value = '';
   gameState.voted = false;
   gameState.voteLocked = false;
+  gameState.currentVoteChoice = null;
 
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
@@ -889,8 +986,11 @@ socket.on('votingPhaseStart', (data) => {
   const votedIndication = document.getElementById('votedIndication');
   if (votedIndication) votedIndication.style.display = 'none';
 
+  const voteLockNotice = document.getElementById('voteLockNotice');
+  if (voteLockNotice) voteLockNotice.style.display = 'block';
+
   showScreen('votingScreen');
-  showToast('⚖️ Time to vote! Who will win?', 'info');
+  showToast('⚖️ Time to vote! Remember: you can change your vote until you LOCK it!', 'info', 4000);
 
   let timeLeft = 30;
   document.getElementById('voteTimer').textContent = timeLeft;
@@ -914,6 +1014,7 @@ socket.on('finalVotingPhaseStart', (data) => {
   clearTimers();
   gameState.voted = false;
   gameState.voteLocked = false;
+  gameState.currentVoteChoice = null;
 
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
@@ -967,6 +1068,9 @@ socket.on('finalVotingPhaseStart', (data) => {
   const votedIndication = document.getElementById('votedIndication');
   if (votedIndication) votedIndication.style.display = 'none';
 
+  const voteLockNotice = document.getElementById('voteLockNotice');
+  if (voteLockNotice) voteLockNotice.style.display = 'block';
+
   showScreen('votingScreen');
 
   let timeLeft = 30;
@@ -988,8 +1092,10 @@ socket.on('finalVotingPhaseStart', (data) => {
 });
 
 function castVote(playerName) {
+  playVoteSound();
   socket.emit('castVote', playerName);
   gameState.voted = true;
+  gameState.currentVoteChoice = playerName;
   
   document.querySelectorAll('.vote-card').forEach(card => {
     const cardName = card.querySelector('h3').textContent.replace('👤 ', '');
@@ -997,14 +1103,15 @@ function castVote(playerName) {
     if (cardName === playerName) {
       card.style.borderColor = '#4caf50';
       card.style.borderWidth = '3px';
-      voteBtn.textContent = '✓ VOTED';
+      voteBtn.textContent = '★ SELECTED';
       voteBtn.className = 'btn btn-vote btn-success';
-      voteBtn.disabled = true;
+      voteBtn.disabled = false;
     } else {
       card.style.borderColor = '#00bcd4';
       card.style.borderWidth = '2px';
       voteBtn.textContent = '👉 VOTE FOR THIS TEAM';
       voteBtn.className = 'btn btn-vote';
+      voteBtn.disabled = false;
     }
   });
   
@@ -1014,14 +1121,16 @@ function castVote(playerName) {
     lockBtn.disabled = false;
   }
 
-  showToast(`✓ You voted for ${playerName}!`, 'info', 2000);
+  showToast(`✓ You selected ${playerName}! Click LOCK when ready.`, 'info', 2000);
 }
 
 function lockVote() {
   if (!gameState.voted) {
-    showToast('⚠️ Please cast a vote first!', 'warning');
+    playErrorSound();
+    showToast('⚠️ Please select a team first!', 'warning');
     return;
   }
+  playDraftSound();
   socket.emit('lockVote');
   gameState.voteLocked = true;
   
@@ -1037,6 +1146,9 @@ function lockVote() {
     votedIndication.style.display = 'block';
     votedIndication.innerHTML = '🔒 Your vote is locked in!';
   }
+
+  const voteLockNotice = document.getElementById('voteLockNotice');
+  if (voteLockNotice) voteLockNotice.style.display = 'none';
 
   showToast('🔒 Your vote is locked!', 'info', 2000);
 }
@@ -1065,6 +1177,7 @@ socket.on('voteLockUpdate', (data) => {
 // ========================
 socket.on('roundResults', (data) => {
   clearTimers();
+  playWinSound();
   document.getElementById('resultRound').textContent = data.round;
 
   const winnerBox = document.getElementById('roundWinner');
@@ -1154,6 +1267,7 @@ function readyForNextRound() {
 
 socket.on('finalRoundResults', (data) => {
   clearTimers();
+  playWinSound();
   document.getElementById('resultRound').textContent = '4 (FINAL)';
 
   const winnerBox = document.getElementById('roundWinner');
@@ -1228,6 +1342,8 @@ socket.on('finalRoundResults', (data) => {
 // ========================
 socket.on('gameEnded', (data) => {
   clearTimers();
+  playWinSound();
+  setTimeout(() => createConfetti(), 300);
 
   const final = document.getElementById('finalLeaderboard');
   final.innerHTML = '';
@@ -1275,6 +1391,7 @@ function goToLobby() {
       currentTwist: '',
       allDrafts: {},
       allDraftsList: [],
+      allCharactersDrafted: [],
       votes: {},
       voted: false,
       voteLocked: false,
@@ -1321,10 +1438,52 @@ style.textContent = `
     }
   }
 
+  @keyframes confettiFall {
+    to {
+      transform: translateY(100vh) rotate(360deg);
+      opacity: 0;
+    }
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
   .toast {
     display: flex !important;
     align-items: center !important;
     gap: 10px !important;
+  }
+
+  #loadingOverlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+  }
+
+  .spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #f0f0f0;
+    border-top: 5px solid #ff4081;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  .spinner-text {
+    color: white;
+    margin-top: 20px;
+    font-weight: bold;
+    font-size: 1.2em;
   }
 `;
 document.head.appendChild(style);

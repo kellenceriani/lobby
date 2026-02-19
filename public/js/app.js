@@ -229,6 +229,7 @@ function startPreRoundLoadingSequence({
 function joinRoom() {
   const name = document.getElementById('name').value.trim();
   const room = document.getElementById('room').value.trim().toUpperCase();
+  const joinAsHost = document.getElementById('joinAsHost')?.checked === true;
 
   if (!name) {
     showToast('Please enter your name!', 'warning');
@@ -252,8 +253,8 @@ function joinRoom() {
   player.name = name;
   player.room = room;
 
-  console.log(`Attempting to join room ${room} as ${name}`);
-  socket.emit('joinRoom', { name, room });
+  console.log(`Attempting to join room ${room} as ${name}${joinAsHost ? ' (host)' : ''}`);
+  socket.emit('joinRoom', { name, room, joinAsHost });
 }
 
 function leaveRoom() {
@@ -263,6 +264,8 @@ function leaveRoom() {
     showScreen('join');
     document.getElementById('name').value = '';
     document.getElementById('room').value = '';
+    const joinAsHost = document.getElementById('joinAsHost');
+    if (joinAsHost) joinAsHost.checked = false;
     resetAllState();
   }
 }
@@ -310,7 +313,7 @@ socket.on('roomData', (data) => {
   } else {
     settingsContent.style.display = 'none';
     hostNote.style.display = 'block';
-    document.getElementById('hostNameDisplay').textContent = data.host || 'Unknown';
+    document.getElementById('hostNameDisplay').textContent = data.host || 'No host selected yet (a player must join as host)';
   }
 
   const ul = document.getElementById('playerList');
@@ -389,7 +392,9 @@ socket.on('roomData', (data) => {
       startBtn.style.display = 'none';
       minPlayersMsg.style.display = 'none';
       hostWaiting.style.display = 'block';
-      hostWaiting.textContent = '⏳ Waiting for ' + (data.host || 'host') + ' to start...';
+      hostWaiting.textContent = data.host
+        ? `⏳ Waiting for ${data.host} to start...`
+        : '⏳ Waiting for someone to join as host...';
     }
 
     if (currentPlayer) {
@@ -1165,35 +1170,162 @@ function summarizeBreakdown(lines = []) {
   };
 }
 
-function buildBreakdownGroupMarkup({
-  title,
-  helper,
-  lines,
-  emptyLabel = 'No entries for this section.'
-}) {
+function compactBreakdownLine(line, maxLength = 64) {
+  const cleaned = String(line || '')
+    .replace(/\s*[+-]\d+\s*$/, '')
+    .replace(/^\s*(full team|vote share|round intel bonus|avg relevance|trusted intel)\s*[:|-]?\s*/i, '')
+    .trim();
+
+  if (!cleaned) return 'No scoring note.';
+  if (cleaned.length <= maxLength) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function buildRadialSliceData(lines = [], emptyLabel = 'No scoring notes.') {
   const safeLines = dedupeBreakdownLines(lines);
-  const rows = safeLines.length
-    ? safeLines.map((line) => {
-      const points = extractLinePoints(line);
-      const lowered = String(line || '').toLowerCase();
-      const rowClass = points < 0 || lowered.includes("didn't vote") ? 'negative'
-        : points > 0 ? 'positive'
-          : 'neutral';
-      return `<div class="breakdown-note ${rowClass}">${line}</div>`;
-    }).join('')
-    : `<div class="breakdown-note muted">${emptyLabel}</div>`;
+  const topLine = safeLines[0] || '';
+  const topPoints = extractLinePoints(topLine);
+  return {
+    note: compactBreakdownLine(topLine || emptyLabel),
+    notePoints: topLine ? formatSignedNumber(topPoints) : '±0',
+    rawTopPoints: topPoints,
+    moreCount: Math.max(0, safeLines.length - 1)
+  };
+}
+
+function getImpactDescriptor(points = 0) {
+  if (points > 0) return 'Boost';
+  if (points < 0) return 'Drag';
+  return 'Neutral';
+}
+
+function getRadialShares(summary) {
+  const voteAbs = Math.abs(Number(summary.votePoints) || 0);
+  const intelAbs = Math.abs(Number(summary.intelPoints) || 0);
+  const coreAbs = Math.abs(Number(summary.corePoints) || 0);
+  const total = voteAbs + intelAbs + coreAbs;
+
+  if (!total) {
+    return { vote: 34, intel: 33, core: 33 };
+  }
+
+  const vote = Math.round((voteAbs / total) * 100);
+  const intel = Math.round((intelAbs / total) * 100);
+  let core = 100 - vote - intel;
+  if (core < 0) core = 0;
+
+  const delta = 100 - (vote + intel + core);
+  core += delta;
+
+  return { vote, intel, core };
+}
+
+function getRoundTier(roundScore = 0) {
+  const score = Number(roundScore) || 0;
+  if (score >= 80) return 'elite';
+  if (score >= 60) return 'diamond';
+  if (score >= 45) return 'high';
+  if (score >= 20) return 'mid';
+  if (score >= 0) return 'low';
+  return 'black';
+}
+
+function getRoundTierLabel(roundTier = 'low') {
+  if (roundTier === 'elite') return 'ELITE TIER';
+  if (roundTier === 'diamond') return 'DIAMOND TIER';
+  if (roundTier === 'high') return 'GOLD TIER';
+  if (roundTier === 'mid') return 'SILVER TIER';
+  if (roundTier === 'low') return 'BRONZE TIER';
+  return 'BLACK TIER';
+}
+
+function polarToCartesian(cx, cy, radius, angleDeg) {
+  const angleRad = (angleDeg - 90) * (Math.PI / 180);
+  return {
+    x: Number((cx + (radius * Math.cos(angleRad))).toFixed(2)),
+    y: Number((cy + (radius * Math.sin(angleRad))).toFixed(2))
+  };
+}
+
+function buildDonutSlicePath(cx, cy, innerRadius, outerRadius, startDeg, endDeg) {
+  const sweep = Math.max(0.2, endDeg - startDeg);
+  const safeEnd = startDeg + Math.min(359.8, sweep);
+  const largeArc = safeEnd - startDeg > 180 ? 1 : 0;
+
+  const outerStart = polarToCartesian(cx, cy, outerRadius, startDeg);
+  const outerEnd = polarToCartesian(cx, cy, outerRadius, safeEnd);
+  const innerEnd = polarToCartesian(cx, cy, innerRadius, safeEnd);
+  const innerStart = polarToCartesian(cx, cy, innerRadius, startDeg);
+
+  return `M ${outerStart.x} ${outerStart.y} A ${outerRadius} ${outerRadius} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y} L ${innerEnd.x} ${innerEnd.y} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y} Z`;
+}
+
+function buildInteractiveRingMarkup(shares, labels) {
+  const start = -90;
+  const voteEnd = start + ((shares.vote / 100) * 360);
+  const intelEnd = voteEnd + ((shares.intel / 100) * 360);
+  const coreEnd = start + 360;
+
+  const votePath = buildDonutSlicePath(90, 90, 42, 68, start, voteEnd);
+  const intelPath = buildDonutSlicePath(90, 90, 42, 68, voteEnd, intelEnd);
+  const corePath = buildDonutSlicePath(90, 90, 42, 68, intelEnd, coreEnd);
 
   return `
-    <section class="breakdown-section-group">
-      <div class="breakdown-section-head">
-        <h5>${title}</h5>
-        <p>${helper}</p>
-      </div>
-      <div class="breakdown-notes-inline">
-        ${rows}
-      </div>
-    </section>
+    <svg class="radial-ring-svg" viewBox="0 0 180 180" aria-label="Score contribution ring">
+      <circle class="radial-ring-track" cx="90" cy="90" r="68"></circle>
+      <path class="ring-segment vote" role="button" tabindex="0" data-tone="vote" aria-pressed="false" aria-label="${labels.vote}" d="${votePath}"></path>
+      <path class="ring-segment intel" role="button" tabindex="0" data-tone="intel" aria-pressed="false" aria-label="${labels.intel}" d="${intelPath}"></path>
+      <path class="ring-segment core" role="button" tabindex="0" data-tone="core" aria-pressed="false" aria-label="${labels.core}" d="${corePath}"></path>
+    </svg>
   `;
+}
+
+function initializeRadialMaps(root) {
+  if (!root) return;
+  const maps = root.querySelectorAll('.breakdown-radial-map');
+  maps.forEach((map) => {
+    const segments = Array.from(map.querySelectorAll('.ring-segment'));
+    if (!segments.length) return;
+    const keyToggle = map.querySelector('.radial-key-toggle');
+
+    const activateTone = (tone) => {
+      map.setAttribute('data-active-tone', tone || 'none');
+      segments.forEach((segment) => {
+        segment.setAttribute('aria-pressed', segment.dataset.tone === tone ? 'true' : 'false');
+      });
+    };
+
+    const setKeyOpen = (isOpen) => {
+      map.setAttribute('data-key-open', isOpen ? 'true' : 'false');
+      if (keyToggle) keyToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    };
+
+    segments.forEach((segment) => {
+      segment.addEventListener('click', () => {
+        const tone = segment.dataset.tone;
+        const current = map.getAttribute('data-active-tone') || 'none';
+        activateTone(current === tone ? null : tone);
+      });
+
+      segment.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        const tone = segment.dataset.tone;
+        const current = map.getAttribute('data-active-tone') || 'none';
+        activateTone(current === tone ? null : tone);
+      });
+    });
+
+    if (keyToggle) {
+      keyToggle.addEventListener('click', () => {
+        const isOpen = map.getAttribute('data-key-open') === 'true';
+        setKeyOpen(!isOpen);
+      });
+    }
+
+    activateTone(null);
+    setKeyOpen(true);
+  });
 }
 
 function buildRoundWinnerHTML(data, isFinalRound = false) {
@@ -1268,47 +1400,83 @@ socket.on('roundResults', (data) => {
       const intelLines = dedupeBreakdownLines(grouped.intel || []);
       const modifierLines = dedupeBreakdownLines(grouped.core || []);
 
-      const voteMarkup = buildBreakdownGroupMarkup({
-        title: 'Community Votes',
-        helper: 'Points earned from how players voted.',
-        lines: voteLines,
-        emptyLabel: 'No vote-based changes.'
-      });
-      const intelMarkup = buildBreakdownGroupMarkup({
-        title: 'Intel Fit',
-        helper: 'How well the team matched scenario/twist context.',
-        lines: intelLines,
-        emptyLabel: 'No intel-fit changes.'
-      });
-      const modifierMarkup = buildBreakdownGroupMarkup({
-        title: 'Other Modifiers',
-        helper: 'Rule-based adjustments outside votes and intel (formerly “Core”).',
-        lines: modifierLines,
-        emptyLabel: 'No extra modifiers applied.'
+      const voteSlice = buildRadialSliceData(voteLines, 'No vote-based changes.');
+      const intelSlice = buildRadialSliceData(intelLines, 'No intel-fit changes.');
+      const coreSlice = buildRadialSliceData(modifierLines, 'No extra modifiers applied.');
+      const voteImpact = getImpactDescriptor(summary.votePoints);
+      const intelImpact = getImpactDescriptor(summary.intelPoints);
+      const coreImpact = getImpactDescriptor(summary.corePoints);
+      const shares = getRadialShares(summary);
+      const roundTier = getRoundTier(playerEntry.roundScore);
+      const roundTierLabel = getRoundTierLabel(roundTier);
+      const ringMarkup = buildInteractiveRingMarkup(shares, {
+        vote: `Votes ${formatSignedNumber(summary.votePoints)} points, ${shares.vote}% of swing`,
+        intel: `Intel ${formatSignedNumber(summary.intelPoints)} points, ${shares.intel}% of swing`,
+        core: `Other ${formatSignedNumber(summary.corePoints)} points, ${shares.core}% of swing`
       });
 
       breakdownHTML += `
         <div class="player-breakdown ${playerEntry.roundScore === topRoundScore ? 'top-score' : ''}" style="--result-index:${idx};">
           <details class="player-breakdown-dropdown">
             <summary class="breakdown-summary-row" aria-label="Open detailed score breakdown for ${playerEntry.name}">
-              <span class="breakdown-points">${formatSignedNumber(playerEntry.roundScore)} pts</span>
+              <span class="breakdown-toggle-arrow" aria-hidden="true"></span>
               <span class="breakdown-header">${playerEntry.name}</span>
+              <span class="breakdown-points">${formatSignedNumber(playerEntry.roundScore)} pts</span>
             </summary>
             <div class="breakdown-details" aria-label="Detailed score notes">
-              <div class="breakdown-impact-row" aria-label="Score contribution split">
-                <div class="impact-chip vote">Votes ${formatSignedNumber(summary.votePoints)}</div>
-                <div class="impact-chip intel">Intel ${formatSignedNumber(summary.intelPoints)}</div>
-                <div class="impact-chip core">Other ${formatSignedNumber(summary.corePoints)}</div>
+              <div
+                class="breakdown-radial-map tier-${roundTier}"
+                data-active-tone="none"
+                data-key-open="true"
+                aria-label="Radial score map with votes, intel fit, and other modifiers"
+              >
+                <button type="button" class="radial-key-toggle" aria-expanded="true" aria-label="Toggle chart key">Key</button>
+                <aside class="radial-key-panel" aria-label="Chart legend">
+                  <h6>Chart Key</h6>
+                  <div class="key-item vote"><span></span> Votes = community picks</div>
+                  <div class="key-item intel"><span></span> Intel = scenario/twist fit</div>
+                  <div class="key-item core"><span></span> Other = rule modifiers</div>
+                </aside>
+                <div class="radial-ring-wrap">
+                  ${ringMarkup}
+                </div>
+                <div class="radial-center">
+                  <b class="radial-tier-label">${roundTierLabel}</b>
+                  <span>Momentum</span>
+                  <strong>${formatSignedNumber(playerEntry.roundScore)}</strong>
+                </div>
+
+                <article
+                  class="radial-bubble vote"
+                >
+                  <h5>Votes ${formatSignedNumber(summary.votePoints)} • ${shares.vote}%</h5>
+                  <p><b>${voteImpact}:</b> ${escapeHtml(voteSlice.note)}</p>
+                  <small>${voteSlice.moreCount ? `+${voteSlice.moreCount} hidden vote notes` : 'No hidden vote notes'}</small>
+                </article>
+
+                <article
+                  class="radial-bubble intel"
+                >
+                  <h5>Intel ${formatSignedNumber(summary.intelPoints)} • ${shares.intel}%</h5>
+                  <p><b>${intelImpact}:</b> ${escapeHtml(intelSlice.note)}</p>
+                  <small>${intelSlice.moreCount ? `+${intelSlice.moreCount} hidden intel notes` : 'No hidden intel notes'}</small>
+                </article>
+
+                <article
+                  class="radial-bubble core"
+                >
+                  <h5>Other ${formatSignedNumber(summary.corePoints)} • ${shares.core}%</h5>
+                  <p><b>${coreImpact}:</b> ${escapeHtml(coreSlice.note)}</p>
+                  <small>${coreSlice.moreCount ? `+${coreSlice.moreCount} hidden modifier notes` : 'No hidden modifier notes'}</small>
+                </article>
               </div>
-              ${voteMarkup}
-              ${intelMarkup}
-              ${modifierMarkup}
             </div>
           </details>
         </div>
       `;
     });
     breakdownContainer.innerHTML = breakdownHTML;
+    initializeRadialMaps(breakdownContainer);
   }
 
   const scoringMeta = document.getElementById('roundScoringMeta');

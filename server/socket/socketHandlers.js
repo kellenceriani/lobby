@@ -109,6 +109,7 @@ function registerSocketHandlers(io) {
 
       const name = sanitizeName(payload && payload.name);
       const room = sanitizeRoomCode(payload && payload.room);
+      const joinAsHost = payload && payload.joinAsHost === true;
 
       if (!name || !room) {
         socket.emit('joinError', 'Invalid name or room code format.');
@@ -117,10 +118,21 @@ function registerSocketHandlers(io) {
 
       if (!rooms[room]) {
         rooms[room] = createRoom(room);
-        rooms[room].host = name;
       }
 
       const roomData = rooms[room];
+
+      const hostStillInRoom = roomData.host
+        && Array.isArray(roomData.players)
+        && roomData.players.some((player) => player.name === roomData.host);
+      if (roomData.host && !hostStillInRoom) {
+        roomData.host = null;
+      }
+
+      if (joinAsHost && roomData.host && roomData.host.toLowerCase() !== name.toLowerCase()) {
+        socket.emit('joinError', `Room host is already set to ${roomData.host}. Join without "Join as host".`);
+        return;
+      }
 
       if (roomData.isGameActive && (!Array.isArray(roomData.players) || roomData.players.length === 0)) {
         roomData.isGameActive = false;
@@ -148,6 +160,10 @@ function registerSocketHandlers(io) {
         ready: false,
         reactions: []
       });
+
+      if (joinAsHost && !roomData.host) {
+        roomData.host = name;
+      }
 
       socket.join(room);
       socket.data.room = room;

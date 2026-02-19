@@ -6,7 +6,7 @@ This document maps the current client/server event API used by Socket.IO.
 
 ## Client -> Server Events
 
-- `joinRoom` `{ name, room }`
+- `joinRoom` `{ name, room, joinAsHost }`
 - `updateSettings` `settingsObject`
 - `toggleReady`
 - `sendMessage` `string`

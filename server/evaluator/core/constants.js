@@ -97,7 +97,16 @@ const INTENT_KEYWORD_GROUPS = {
   survival: ['survive', 'escape', 'endure', 'resource', 'resilience', 'wilderness', 'adapt'],
   magic: ['magic', 'wizard', 'sorcerer', 'spell', 'arcane', 'rune', 'witch'],
   time: ['time', 'timeline', 'temporal', 'paradox', 'future', 'past', 'loop'],
-  social: ['diplomacy', 'negotiate', 'persuade', 'alliance', 'influence', 'politics']
+  social: ['diplomacy', 'negotiate', 'persuade', 'alliance', 'influence', 'politics'],
+  diplomacy: ['treaty', 'ceasefire', 'mediat', 'accord', 'delegat', 'coalition', 'embassy', 'summit', 'envoy'],
+  logistics: ['supply', 'route', 'convoy', 'evacuat', 'distribution', 'transport', 'shipment', 'gridlock', 'infrastructure'],
+  engineering: ['repair', 'rebuild', 'stabilize', 'reactor', 'power grid', 'structural', 'mechanical', 'systems'],
+  medicine: ['medical', 'triage', 'hospital', 'pandemic', 'outbreak', 'vaccine', 'containment', 'public health'],
+  finance: ['market', 'bank', 'economic', 'currency', 'debt', 'trade', 'asset', 'financial'],
+  cyber: ['cyber', 'hack', 'malware', 'network', 'encryption', 'firewall', 'data breach', 'botnet'],
+  ecology: ['climate', 'wildfire', 'flood', 'water', 'ecology', 'ecosystem', 'pollution', 'terraform'],
+  exploration: ['explore', 'expedition', 'map', 'discover', 'frontier', 'survey', 'reconnaissance', 'colonize'],
+  infrastructure: ['power', 'bridge', 'tunnel', 'satellite', 'telecom', 'grid', 'transit', 'dam']
 };
 
 const CAPABILITY_TRAIT_KEYWORDS = {
@@ -117,7 +126,15 @@ const CAPABILITY_TRAIT_KEYWORDS = {
   aquatic: ['water', 'underwater', 'ocean', 'sea', 'swim', 'aquatic', 'submarine'],
   adaptability: ['adapt', 'versatile', 'multi', 'transform', 'improvise', 'resourceful'],
   control: ['control', 'precision', 'focus', 'discipline', 'mastery', 'balanced'],
-  communication: ['speak', 'speech', 'language', 'translator', 'signal', 'sign', 'emoji']
+  communication: ['speak', 'speech', 'language', 'translator', 'signal', 'sign', 'emoji'],
+  precision: ['precision', 'accurate', 'steady', 'fine motor', 'calibrat', 'targeting'],
+  diplomacy: ['diplomacy', 'mediat', 'negotiat', 'statesman', 'ambassador', 'treaty', 'consensus'],
+  logistics: ['logistics', 'supply', 'distribution', 'convoy', 'route', 'transport', 'evacuat', 'operations'],
+  medicine: ['medic', 'doctor', 'surgery', 'triage', 'healer', 'biotech', 'public health', 'vaccine'],
+  finance: ['economic', 'finance', 'market', 'banking', 'trade', 'portfolio', 'capital'],
+  cyber: ['cyber', 'hacker', 'encryption', 'network', 'malware', 'firewall', 'digital', 'code'],
+  ecology: ['ecology', 'environment', 'climate', 'wildlife', 'conservation', 'terraform', 'agriculture'],
+  endurance: ['stamina', 'endurance', 'fatigue', 'long-term', 'marathon', 'attrition']
 };
 
 const INTENT_TO_TRAITS = {
@@ -131,7 +148,16 @@ const INTENT_TO_TRAITS = {
   survival: ['durability', 'adaptability', 'control'],
   magic: ['magic', 'control', 'adaptability'],
   time: ['time', 'intelligence', 'adaptability'],
-  social: ['social', 'communication', 'leadership']
+  social: ['social', 'communication', 'leadership'],
+  diplomacy: ['diplomacy', 'communication', 'leadership'],
+  logistics: ['logistics', 'leadership', 'adaptability'],
+  engineering: ['engineering', 'precision', 'control'],
+  medicine: ['medicine', 'precision', 'adaptability'],
+  finance: ['finance', 'intelligence', 'strategy'],
+  cyber: ['cyber', 'intelligence', 'control'],
+  ecology: ['ecology', 'adaptability', 'leadership'],
+  exploration: ['mobility', 'adaptability', 'intelligence'],
+  infrastructure: ['engineering', 'logistics', 'control']
 };
 
 const TWIST_EFFECT_RULES = [
@@ -142,12 +168,22 @@ const TWIST_EFFECT_RULES = [
   { keywords: ['30 seconds', 'against the clock', 'being timed', 'super speed'], helps: ['speed', 'control'], hurts: ['speed'], severity: 2, label: 'time pressure' },
   { keywords: ['earthquake', 'ice', 'quicksand', 'tightrope', 'moving train'], helps: ['mobility', 'durability', 'control'], hurts: ['mobility'], severity: 2, label: 'unstable terrain' },
   { keywords: ['time moves backwards', 'paradox', 'recursive loop', 'flat circle'], helps: ['time', 'intelligence', 'adaptability'], hurts: ['adaptability'], severity: 3, label: 'temporal distortion' },
-  { keywords: ['dream', 'subjective reality', 'metaphorical', 'void', 'dimension', 'quantum realm'], helps: ['magic', 'adaptability', 'intelligence'], hurts: ['control'], severity: 2, label: 'abstract-reality conditions' }
+  { keywords: ['dream', 'subjective reality', 'metaphorical', 'void', 'dimension', 'quantum realm'], helps: ['magic', 'adaptability', 'intelligence'], hurts: ['control'], severity: 2, label: 'abstract-reality conditions' },
+  { keywords: ['communication arrives', 'translation', '5-word', 'signal'], helps: ['communication', 'control'], hurts: ['communication'], severity: 2, label: 'message-loss environment' },
+  { keywords: ['public broadcast', 'public scrutiny', 'crowd votes'], helps: ['social', 'leadership', 'diplomacy'], hurts: ['stealth'], severity: 2, label: 'public accountability pressure' },
+  { keywords: ['non-lethal protocol', 'no direct force'], helps: ['control', 'diplomacy', 'intelligence'], hurts: ['combat'], severity: 2, label: 'force-restriction protocol' },
+  { keywords: ['sensor feed', 'decoy data', 'corrupted systems', 'analog backup'], helps: ['intelligence', 'cyber', 'engineering'], hurts: ['control'], severity: 2, label: 'information integrity collapse' },
+  { keywords: ['market stability', 'financial'], helps: ['finance', 'leadership', 'communication'], hurts: ['combat'], severity: 2, label: 'economic-risk constraints' },
+  { keywords: ['power source', 'energy budget', 'fuel reserves'], helps: ['engineering', 'logistics', 'control'], hurts: ['power'], severity: 2, label: 'resource scarcity' },
+  { keywords: ['aftershocks', 'solar storm', 'gravity fluctuates', 'micro-rifts'], helps: ['durability', 'adaptability'], hurts: ['mobility', 'precision'], severity: 3, label: 'volatile environmental hazards' },
+  { keywords: ['alliance', 'enemy cooperation', 'veto', 'hostile witnesses'], helps: ['diplomacy', 'social', 'leadership'], hurts: ['stealth'], severity: 2, label: 'coalition dependency' }
 ];
 
 const WIKI_SEARCH_HINTS = [
   'character', 'fictional character', 'hero', 'villain', 'comic', 'anime', 'manga', 'video game', 'film', 'tv',
-  'mythology', 'legend', 'historical figure', 'athlete', 'scientist', 'musician', 'politician', 'actor'
+  'mythology', 'legend', 'historical figure', 'athlete', 'scientist', 'musician', 'politician', 'actor',
+  'nickname', 'alias', 'epithet', 'title', 'object', 'artifact', 'vehicle', 'species', 'animal', 'deity', 'folklore',
+  'internet personality', 'streamer', 'creator', 'author', 'philosopher', 'architect', 'mathematician', 'surname', 'given name'
 ];
 
 const CHARACTER_NAME_ALIASES = {
@@ -194,7 +230,14 @@ const DOMAIN_RULES = [
   { label: 'stealth', keywords: ['stealth', 'shadow', 'spy', 'assassin', 'infiltrate'] },
   { label: 'leadership', keywords: ['leader', 'captain', 'commander', 'chief', 'king', 'queen'] },
   { label: 'animals', keywords: ['animal', 'beast', 'dragon', 'wolf', 'horse', 'rider', 'trainer'] },
-  { label: 'space', keywords: ['space', 'astronaut', 'galaxy', 'planet', 'alien', 'ship'] }
+  { label: 'space', keywords: ['space', 'astronaut', 'galaxy', 'planet', 'alien', 'ship'] },
+  { label: 'diplomacy', keywords: ['diplomacy', 'ceasefire', 'negotiat', 'treaty', 'alliance', 'summit'] },
+  { label: 'logistics', keywords: ['logistics', 'supply', 'convoy', 'evacuat', 'distribution', 'transport'] },
+  { label: 'infrastructure', keywords: ['grid', 'reactor', 'bridge', 'tunnel', 'satellite', 'telecom'] },
+  { label: 'cyber', keywords: ['cyber', 'network', 'hack', 'malware', 'data', 'encryption'] },
+  { label: 'medicine', keywords: ['medical', 'triage', 'hospital', 'outbreak', 'pandemic', 'vaccine'] },
+  { label: 'finance', keywords: ['market', 'bank', 'economic', 'currency', 'trade', 'financial'] },
+  { label: 'ecology', keywords: ['climate', 'wildfire', 'flood', 'ecosystem', 'water', 'environment'] }
 ];
 
 module.exports = {

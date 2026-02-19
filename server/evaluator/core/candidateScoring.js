@@ -38,12 +38,14 @@ function scoreInfoCandidate(characterInput, candidate) {
   const query = normalizeName(queryProfile.baseName || characterInput || '');
   const typoFixed = resolveLikelyTypo(query);
   const queryVariants = Array.from(new Set([query, typoFixed].map(v => normalizeName(v)).filter(Boolean)));
+  const entityHints = Array.isArray(queryProfile.entityHints) ? queryProfile.entityHints.map(h => String(h || '').toLowerCase()) : [];
 
   const title = normalizeName(normalized.title || '');
   const titleCompact = canonicalizeName(title);
   const aliasCompacts = normalized.aliases.map(alias => canonicalizeName(alias));
   const description = String(normalized.description || '').toLowerCase();
   const categories = normalized.categories.map(c => String(c || '').toLowerCase());
+  const categoryText = categories.join(' ');
   const snippet = String(normalized.searchSnippet || '').toLowerCase();
   const contextHints = queryProfile.contextHints.map(h => h.toLowerCase());
   const isSingleTokenQuery = queryVariants.some(queryVariant => queryVariant.split(/\s+/).filter(Boolean).length === 1);
@@ -97,7 +99,8 @@ function scoreInfoCandidate(characterInput, candidate) {
     }
 
     if (isSingleToken && !titleTokens.includes(queryTokens[0])) {
-      confidenceSignals.penalties -= 0.12;
+      const hasDisambiguatingHints = contextHints.length > 0 || entityHints.length > 0;
+      confidenceSignals.penalties -= hasDisambiguatingHints ? 0.04 : 0.12;
     }
 
     const similarity = calculateNameSimilarity(queryVariant, title);
@@ -138,16 +141,35 @@ function scoreInfoCandidate(characterInput, candidate) {
     }
   }
 
+  if (entityHints.length) {
+    const corpus = `${title} ${description} ${categoryText}`.toLowerCase();
+    const entityHintRegex = {
+      person: /person|biography|historical|actor|athlete|scientist|politician|author/,
+      character: /character|fictional|hero|villain/,
+      nickname: /nickname|alias|epithet|also known as/,
+      object: /object|artifact|device|vehicle|tool|machine/,
+      species: /animal|species|genus|taxonomy|organism/,
+      legend: /myth|mythology|deity|legend|folklore/,
+      name: /surname|family name|given name|name disambiguation/
+    };
+    const hintMatches = entityHints.reduce((count, hint) => {
+      const rx = entityHintRegex[hint];
+      return rx && rx.test(corpus) ? count + 1 : count;
+    }, 0);
+    if (hintMatches > 0) {
+      confidenceSignals.contextMatch += Math.min(0.16, hintMatches * 0.06);
+    }
+  }
+
   if (queryVariants.some(q => q && description.includes(q.toLowerCase()))) {
     confidenceSignals.quality += 0.08;
   }
 
-  const categoryText = categories.join(' ');
-  if (/fictional|character|superhero|villain|comic|manga|anime|mythology|historical|biography|actor|athlete|politician|scientist|animal|species|genus|family\s*name|surname|given\s*name/.test(categoryText)) {
+  if (/fictional|character|superhero|villain|comic|manga|anime|mythology|historical|biography|actor|athlete|politician|scientist|animal|species|genus|family\s*name|surname|given\s*name|artifact|object|vehicle|deity|folklore|nickname|epithet/.test(categoryText)) {
     confidenceSignals.quality += 0.1;
   }
 
-  if (/fictional|character|mythology|historical|animal|species|surname|given name/.test(snippet)) {
+  if (/fictional|character|mythology|historical|animal|species|surname|given name|artifact|object|deity|nickname/.test(snippet)) {
     confidenceSignals.quality += 0.05;
   }
 
@@ -159,11 +181,22 @@ function scoreInfoCandidate(characterInput, candidate) {
     confidenceSignals.quality += 0.08;
   }
 
+  if (isSingleTokenQuery) {
+    if (/fictional character|mythology|deity|folklore|cryptid|legend|species|animal/.test(`${categoryText} ${description}`)) {
+      confidenceSignals.quality += 0.08;
+      confidenceSignals.nameMatch += 0.04;
+    }
+    if (/\((?:character|mythology|folklore|cryptid|legend|animal|species)\)/i.test(String(normalized.title || ''))) {
+      confidenceSignals.quality += 0.06;
+    }
+  }
+
   const titleLower = String(normalized.title || '').toLowerCase();
   const mediaLikeTitle = /\((?:\d{4} film|film|album|song|tv series|television series|video game)\)/.test(titleLower);
   const mediaLikeDescription = /\bis a (?:\d{4}\s+)?(?:american|british|japanese|french|indian)?\s*(film|album|song|television series|video game)\b/.test(description);
   const queryLooksMedia = queryVariants.some(queryVariant => /film|movie|album|song|series|show/.test(queryVariant.toLowerCase()));
-  if (isSingleTokenQuery && !queryLooksMedia && (mediaLikeTitle || mediaLikeDescription)) {
+  const queryLooksEntitySpecific = entityHints.some(hint => ['object', 'legend', 'name', 'person', 'nickname', 'species'].includes(hint));
+  if (isSingleTokenQuery && !queryLooksMedia && !queryLooksEntitySpecific && (mediaLikeTitle || mediaLikeDescription)) {
     confidenceSignals.penalties -= 0.2;
   }
 

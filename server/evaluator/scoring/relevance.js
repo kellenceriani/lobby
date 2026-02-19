@@ -38,7 +38,11 @@ function buildKeywordFitDetails(sourceText, targetText) {
 function inferIntentGroups(text) {
   const tokens = new Set(getMeaningfulTokens(text || '', 200));
   return Object.entries(INTENT_KEYWORD_GROUPS)
-    .filter(([, keywords]) => keywords.some(keyword => tokens.has(normalizeKeywordToken(keyword))))
+    .filter(([, keywords]) => keywords.some((keyword) => {
+      const phraseTokens = getMeaningfulTokens(keyword, 8);
+      if (!phraseTokens.length) return false;
+      return phraseTokens.every(token => tokens.has(normalizeKeywordToken(token)));
+    }))
     .map(([intent]) => intent);
 }
 
@@ -88,8 +92,10 @@ function buildCapabilityProfile(character, info) {
 
   Object.entries(CAPABILITY_TRAIT_KEYWORDS).forEach(([trait, keywords]) => {
     const score = (keywords || []).reduce((count, keyword) => {
-      const normalized = normalizeKeywordToken(keyword);
-      return normalized && tokenSet.has(normalized) ? count + 1 : count;
+      const phraseTokens = getMeaningfulTokens(keyword, 8);
+      if (!phraseTokens.length) return count;
+      const matched = phraseTokens.every(token => tokenSet.has(normalizeKeywordToken(token)));
+      return matched ? count + 1 : count;
     }, 0);
     traits[trait] = Math.min(3, score);
   });

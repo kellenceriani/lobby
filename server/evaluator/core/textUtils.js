@@ -33,22 +33,57 @@ function collapseRepeatTypos(value) {
 function parseCharacterQuery(value) {
   const normalized = normalizeName(value);
   const parenthetical = [];
+  const quoted = [];
   normalized.replace(/\(([^)]+)\)/g, (_, inner) => {
     const clean = normalizeName(inner);
     if (clean) parenthetical.push(clean);
     return _;
   });
 
+  normalized.replace(/["'“”]([^"'“”]{2,})["'“”]/g, (_, inner) => {
+    const clean = normalizeName(inner);
+    if (clean) quoted.push(clean);
+    return _;
+  });
+
   const withoutParens = normalizeName(normalized.replace(/\([^)]*\)/g, ' '));
-  const fragments = [withoutParens];
-  if (withoutParens.includes(':')) fragments.push(normalizeName(withoutParens.split(':')[0]));
-  if (withoutParens.includes('-')) fragments.push(normalizeName(withoutParens.replace(/-/g, ' ')));
+  const aliasParts = withoutParens
+    .split(/\b(?:aka|a\.k\.a\.|alias|known as)\b/i)
+    .map(part => normalizeName(part))
+    .filter(Boolean);
+
+  const base = aliasParts[0] || withoutParens;
+  const aliasesFromName = aliasParts.slice(1);
+
+  const inferEntityHints = (text) => {
+    const lower = String(text || '').toLowerCase();
+    const hints = new Set();
+
+    if (/\b(surname|family name|last name|given name|first name)\b/.test(lower)) hints.add('name');
+    if (/\b(nickname|aka|alias|codename|epithet)\b/.test(lower)) hints.add('nickname');
+    if (/\b(object|artifact|weapon|vehicle|device|ship|robot|ai)\b/.test(lower)) hints.add('object');
+    if (/\b(animal|species|genus|creature|beast)\b/.test(lower)) hints.add('species');
+    if (/\b(legend|myth|mythology|deity|folklore)\b/.test(lower)) hints.add('legend');
+    if (/\b(actor|singer|musician|athlete|scientist|politician|author|streamer|creator|youtuber)\b/.test(lower)) hints.add('person');
+
+    if (!hints.size) {
+      hints.add('character');
+      hints.add('person');
+    }
+
+    return Array.from(hints);
+  };
+
+  const fragments = [base];
+  if (base.includes(':')) fragments.push(normalizeName(base.split(':')[0]));
+  if (base.includes('-')) fragments.push(normalizeName(base.replace(/-/g, ' ')));
 
   return {
     original: normalized,
-    baseName: withoutParens || normalized,
-    contextHints: parenthetical,
-    compact: canonicalizeName(withoutParens || normalized),
+    baseName: base || normalized,
+    contextHints: Array.from(new Set([...parenthetical, ...quoted, ...aliasesFromName])).slice(0, 8),
+    entityHints: inferEntityHints(normalized),
+    compact: canonicalizeName(base || normalized),
     searchFragments: Array.from(new Set(fragments.filter(Boolean)))
   };
 }
@@ -57,7 +92,7 @@ function tokenize(text) {
   return String(text || '')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter(token => token.length > 2);
+    .filter(token => token.length > 1);
 }
 
 function countOverlap(tokensA, tokensB) {

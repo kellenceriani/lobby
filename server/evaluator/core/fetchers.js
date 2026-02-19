@@ -7,7 +7,7 @@ const FETCH_CACHE = new Map();
 const INFLIGHT_FETCHES = new Map();
 const CACHE_TTL = 60 * 60 * 1000;
 
-async function getJson(url, timeoutMs = 6500, retries = 1) {
+async function getJson(url, timeoutMs = 8000, retries = 2) {
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     const json = await new Promise((resolve) => {
       const request = https.get(
@@ -75,7 +75,7 @@ function dedupeByKey(items, keySelector) {
   return out;
 }
 
-function buildSearchQueries(baseName, contextHints = []) {
+function buildSearchQueries(baseName, contextHints = [], entityHints = []) {
   const name = normalizeName(baseName);
   if (!name) return [];
 
@@ -96,14 +96,31 @@ function buildSearchQueries(baseName, contextHints = []) {
     'family name'
   ];
 
+  const entityHintMap = {
+    person: ['person', 'biography', 'historical figure', 'public figure'],
+    character: ['character', 'fictional character'],
+    nickname: ['nickname', 'alias', 'epithet'],
+    object: ['object', 'artifact', 'device', 'vehicle'],
+    species: ['animal', 'species', 'genus'],
+    legend: ['legend', 'mythology', 'deity', 'folklore'],
+    name: ['surname', 'family name', 'given name']
+  };
+
+  const expandedEntityHints = dedupeByKey(
+    (Array.isArray(entityHints) ? entityHints : [])
+      .flatMap(hint => entityHintMap[String(hint || '').toLowerCase()] || []),
+    hint => String(hint || '').toLowerCase()
+  );
+
   const queries = [
     name,
     `"${name}"`,
     ...broadEntityHints.map(hint => `${name} ${hint}`),
+    ...expandedEntityHints.map(hint => `${name} ${hint}`),
     ...WIKI_SEARCH_HINTS.map(hint => `${name} ${hint}`),
     ...hintQueries.flatMap(hint => [`${name} ${hint}`, `${hint} ${name}`, `"${name}" ${hint}`]),
     ...(name.includes(' ') ? [`${name} wiki`, `${name} wikipedia`] : []),
-    ...(name.split(/\s+/).length === 1 ? [`${name} (character)`, `${name} (surname)`] : [])
+    ...(name.split(/\s+/).length === 1 ? [`${name} (character)`, `${name} (surname)`, `${name} (mythology)`, `${name} (nickname)`] : [])
   ];
 
   return dedupeByKey(queries.map(q => normalizeName(q)).filter(Boolean), q => q.toLowerCase()).slice(0, 24);
@@ -335,7 +352,7 @@ function pickLooseSearchCandidate(character, candidates) {
     const description = String(candidate.description || '').toLowerCase();
     const categories = Array.isArray(candidate.categories) ? candidate.categories.join(' ').toLowerCase() : '';
     const titleLinked = isStrongTitleLink(character, candidate.title || '');
-    const entityLike = /(fictional|character|person|historical|animal|species|surname|family name|given name|mythology)/.test(`${description} ${categories}`);
+    const entityLike = /(fictional|character|person|historical|animal|species|surname|family name|given name|mythology|deity|folklore|artifact|object|vehicle|nickname|epithet)/.test(`${description} ${categories}`);
 
     return titleLinked && entityLike && !/(may refer to|disambiguation)/.test(description);
   });
@@ -430,6 +447,44 @@ async function fetchFromWikipediaEnhanced(title) {
   const wikidataId = page.pageprops && page.pageprops.wikibase_item;
   const wikidataMeta = await fetchWikidataMetadata(wikidataId);
   return mapWikipediaPageToCandidate(page, wikidataMeta);
+}
+
+async function fetchFromWikipediaContextualTitle(baseName, contextHints = []) {
+  const normalizedBase = normalizeName(baseName);
+  if (!normalizedBase) return null;
+
+  const normalizedHints = dedupeByKey(
+    (Array.isArray(contextHints) ? contextHints : [])
+      .map(hint => normalizeName(hint))
+      .filter(Boolean),
+    hint => hint.toLowerCase()
+  ).slice(0, 4);
+
+  if (!normalizedHints.length) return null;
+
+  const titleAttempts = dedupeByKey(
+    normalizedHints.flatMap((hint) => [
+      `${normalizedBase} (${hint})`,
+      `${normalizedBase} (${hint} character)`,
+      `${normalizedBase} (${hint} franchise)`
+    ]),
+    title => normalizeName(title).toLowerCase()
+  ).slice(0, 8);
+
+  for (const title of titleAttempts) {
+    const candidate = await fetchFromWikipediaEnhanced(title).catch(() => null);
+    if (candidate) return candidate;
+  }
+
+  for (const hint of normalizedHints) {
+    const rows = await searchWikipediaTitlesWithIntitle(`${normalizedBase} ${hint}`, 8).catch(() => []);
+    if (!rows.length) continue;
+    const candidates = await Promise.all(rows.map(row => fetchFromWikipediaEnhanced(row.title).catch(() => null)));
+    const best = pickBestInfoCandidate(`${normalizedBase} ${hint}`, candidates);
+    if (best) return { ...best, source: 'wikipedia-search' };
+  }
+
+  return null;
 }
 
 async function fetchFromWikipediaSummary(character) {
@@ -559,7 +614,7 @@ async function fetchFromWikipediaFuzzyToken(character) {
   const fallback = candidates.find((candidate) => {
     const title = String(candidate.title || '').toLowerCase();
     const description = String(candidate.description || '').toLowerCase();
-    return stems.some(stem => title.includes(stem.toLowerCase())) && /(fictional|character|animal|mythology|species)/.test(description);
+    return stems.some(stem => title.includes(stem.toLowerCase())) && /(fictional|character|animal|mythology|species|deity|artifact|object|surname|nickname|historical)/.test(description);
   });
 
   if (!fallback) return null;
@@ -575,14 +630,15 @@ async function fetchFromWikipediaSearchEnhanced(character, contextHints = []) {
   const normalized = normalizeName(character);
   if (!normalized) return null;
 
-  const uniqueQueries = buildSearchQueries(normalized, contextHints).slice(0, 8);
+  const profile = parseCharacterQuery(character);
+  const uniqueQueries = buildSearchQueries(normalized, contextHints, profile.entityHints || []).slice(0, 10);
 
   const resultLists = await Promise.all(uniqueQueries.map(query => searchWikipediaTitles(query, 10).catch(() => [])));
   const intitleResults = await Promise.all(uniqueQueries.slice(0, 4).map(query => searchWikipediaTitlesWithIntitle(query, 6).catch(() => [])));
   const searchRows = dedupeByKey(
     [...resultLists.flat(), ...intitleResults.flat()].filter(Boolean),
     row => normalizeName(row.title).toLowerCase()
-  ).slice(0, 14);
+  ).slice(0, 18);
 
   const candidates = await Promise.all(searchRows.map(async (row) => {
     const candidate = await fetchFromWikipediaEnhanced(row.title).catch(() => null);
@@ -748,7 +804,7 @@ async function fetchCharacterInfo(character) {
   const task = (async () => {
     const profile = parseCharacterQuery(character);
     const variants = getCharacterNameVariants(character).slice(0, 6);
-    const contextHints = profile.contextHints || [];
+    const contextHints = dedupeByKey([...(profile.contextHints || []), ...(profile.entityHints || [])], hint => String(hint || '').toLowerCase()).slice(0, 8);
 
     const baseName = profile.baseName || character;
     const stagedCandidates = [];
@@ -780,6 +836,7 @@ async function fetchCharacterInfo(character) {
 
     const stageOneFetches = [
       () => fetchFromWikipediaEnhanced(baseName),
+      () => fetchFromWikipediaContextualTitle(baseName, contextHints),
       () => fetchFromWikipediaSearchEnhanced(baseName, contextHints),
       () => fetchFromWikipediaOpenSearch(baseName, contextHints),
       () => fetchFromWikipediaPrefixSearch(baseName),

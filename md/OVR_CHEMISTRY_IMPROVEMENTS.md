@@ -1,29 +1,53 @@
-# OVR & Chemistry Improvements - Current Snapshot
+# OVR & Chemistry Improvement Log
 
-**Last updated:** February 18, 2026  
-**Status:** Enhanced evaluator logic is integrated
+Last updated: February 18, 2026
+Status: advanced evaluator and chemistry systems active
 
-## OVR Direction (Current)
+## Implemented Improvements
 
-- OVR is no longer treated as a flat direct map from a single score.
-- Evaluation includes scenario relevance and character viability signals.
-- Round 4 output surfaces both score context and presentation-friendly tiers.
+### OVR System
 
-## Chemistry Direction (Current)
+- Moved beyond flat score-to-OVR mapping into composite model:
+	- base score contribution
+	- rarity/franchise signal bonuses
+	- attribute-based bonus
+	- scenario fit multiplier
+- Added tiered OVR labels (Bronze -> Icon) for clearer UX interpretation.
+- Added expanded breakdown payload so UI can explain score composition.
 
-- Team chemistry is calculated server-side during Round 4 evaluation.
-- Chemistry contributes to final team standing alongside character OVR results.
-- Logic is modularized to keep pattern/rule tuning isolated from socket flow.
+### Relevance + Viability
 
-## Code Locations
+- Added intent/domain/trait matching for scenario and twist.
+- Added scenario feasibility scoring (`canDo`/`thrive`) logic.
+- Added twist impact model (helps/hurts/neutral with reasons).
 
-- `server/chemistryCalculator.js`
-- `server/evaluator.js`
-- `server/evaluator/ovr.js`
-- `server/evaluator/relevance.js`
-- `server/evaluator/candidateScoring.js`
+### Chemistry System
 
-## Practical Outcome
+- Upgraded from simple bonus to multi-phase synergy engine:
+	- relationships (allies/rivals/enemies)
+	- thematic feature rules
+	- franchise universe cohesion
+	- alignment and role composition
+	- era/narrative/power-balance checks
+	- penalty rules and overlap-adjusted stacking
 
-- Teams are judged with more context than pure popularity.
-- Final leaderboard reflects both individual character quality and roster synergy.
+## Current Risk Areas
+
+- Chemistry rule interactions can over-stack without continuous balance checks.
+- Expanded keyword systems may overfit to famous franchises.
+- Lookup confidence and typo recovery can cause occasional false positives.
+
+## Next High-Value Opportunities
+
+1. Add Monte Carlo distribution tests for chemistry bonus variance.
+2. Add confidence calibration dataset for candidate scoring.
+3. Add configurable weighting profile presets (`balanced`, `chaotic`, `competitive`).
+4. Add evaluator telemetry snapshots for post-match diagnostics.
+
+## Primary Code Paths
+
+- OVR: `server/evaluator/scoring/ovr.js`
+- Relevance/feasibility: `server/evaluator/scoring/relevance.js`
+- Candidate quality/confidence: `server/evaluator/core/candidateScoring.js`
+- Chemistry: `server/evaluator/team/chemistryCalculator.js`
+- Point economy: `server/services/scoreScaling.js`

@@ -1,34 +1,34 @@
-# Round 4 AI Evaluator - Implementation Status
+# Implementation Status
 
-**Last updated:** February 18, 2026  
-**Status:** Implemented and active in game flow
+Last updated: February 18, 2026
+Status: core gameplay and Round 4 pipeline fully operational
 
-## What Is Live
+## Live Features
 
-- Round 4 runs AI evaluation only (legacy final voting path removed from active flow).
-- Team rosters are collected from Rounds 1-3 and evaluated server-side.
-- Clients render sequential character reveals, team summaries, and final leaderboard.
+- Full lobby flow with host settings, readiness gating, chat, reactions.
+- Rounds 1–3 playable end-to-end with draft/twist/vote/results.
+- Round 4 AI evaluator fully integrated and authoritative.
+- Sequential Round 4 reveal UI with per-character and per-team detail.
+- Final result synchronization across all clients.
+- Snapshot persistence for room state in runtime storage.
 
-## Key Server Components
+## Verified Architecture Alignment
 
-- `server/round4Service.js`: orchestrates team evaluation pipeline
-- `server/evaluator.js`: character scoring entry point
-- `server/chemistryCalculator.js`: chemistry bonus logic
-- `server/socketHandlers.js`: round trigger + result emission
+- Socket flow implemented in `server/socket/socketHandlers.js` and consumed by `public/js/app.js` + `public/js/round4Eval.js`.
+- Scoring economy centralized in `server/services/scoreScaling.js`.
+- Evaluator is modularized under `server/evaluator/`.
+- Chemistry engine isolated under `server/evaluator/team/chemistryCalculator.js`.
 
-## Key Client Components
+## Known Limitations / Tradeoffs
 
-- `public/js/round4Eval.js`: Round 4 UI controller and reveal pacing
-- `public/css/round4Eval.css`: Round 4 styles
-- `public/js/app.js`: transition into Round 4 evaluator screen
-- `public/js/state.js`: round state tracking
+- No automated test suite in `package.json` (manual and ad hoc script validation only).
+- External lookup quality may vary with third-party API availability.
+- Chemistry engine is rule-heavy and can be high-variance without careful tuning.
+- Snapshot restore does not preserve live socket membership (by design).
 
-## Asset State
+## Recommended Next Improvements
 
-- Emotion icon set is present in `public/img/emotions/`:
-  - `mad.png`, `disappointed.png`, `confused.png`, `neutral.png`, `happy.png`, `amazed.png`, `mindBlown.png`
-
-## Validation Snapshot
-
-- Local syntax check command previously used: `node --check server/evaluator.js`
-- Local harness command previously used: `node server/_viabilityTestHarness.js`
+1. Add formal test harness for evaluator regression and score distribution.
+2. Add deterministic seed mode for repeatable scenario/twist testing.
+3. Add payload schema checks for socket events in development mode.
+4. Add benchmark scripts for evaluating tuning changes at scale.

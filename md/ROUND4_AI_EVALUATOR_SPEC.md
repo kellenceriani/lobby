@@ -1,34 +1,92 @@
-# Round 4 AI Evaluator - Current Spec
+# Round 4 AI Evaluator Specification
 
-**Last updated:** February 18, 2026  
-**Status:** Canonical implementation (in use)
+Last updated: February 18, 2026
+Status: Canonical implementation in active use
 
-## Round 4 Contract
+## 1) Purpose
 
-- Input: final 6-character team per player (compiled from Rounds 1-3)
-- Processing: server-side evaluation of each character + team chemistry
-- Output: ranked final leaderboard with per-team totals
+Round 4 is the final, server-authoritative evaluation phase that ranks each player's 6-character roster using character quality + team chemistry.
 
-## Runtime Flow
+## 2) Inputs
 
-1. Server enters final round state.
-2. Clients transition to Round 4 evaluator screen.
-3. Server evaluates all teams.
-4. Clients receive evaluation payload and render sequential results.
-5. Final rankings are shown and game ends.
+- `scenario`: generated at start of final round
+- `twist`: generated at start of final round
+- `finalTeam` per player: collected from stored teams in rounds 1–3
+- `finalTeamDraftMeta`: original draft context metadata per character where available
 
-## Key Behaviors
+## 3) Processing Pipeline
 
-- No Round 4 drafting
-- No Round 4 voting
-- Evaluation first, leaderboard second
-- Emotion assets are used for character reaction display
+1. `startFinalRound` compiles final teams and emits `round4Start`.
+2. Client sends `evaluateRound4`.
+3. `evaluateRound4FromGame(game)` orchestrates:
+	- per-player roster evaluation (concurrency-limited)
+	- per-character `scoreCharacter(...)`
+	- phrase assignment by emotion
+	- chemistry computation
+	- team summary assembly
+4. `calculateRound4Points(teamOVR)` maps team quality to Round 4 points.
+5. Results are persisted in game state and emitted as `round4Evaluated`.
 
-## Files Involved
+## 4) Character Evaluation Output Contract
 
-- `server/round4Service.js`
-- `server/evaluator.js`
-- `server/chemistryCalculator.js`
-- `server/socketHandlers.js`
-- `public/js/round4Eval.js`
-- `public/css/round4Eval.css`
+Each evaluated character includes:
+- `character`
+- `emotion`
+- `score` (0–30 style internal score)
+- `ovr` (0–99)
+- `ovrTier`
+- `attributes`
+- `rarity`
+- `characterType`
+- `reason`
+- `notes[]`
+- `breakdown` object
+- `phrase`
+
+## 5) Team Summary Contract
+
+Per player `teamSummary`:
+- `totalOVR`
+- `chemistryBonus`
+- `chemistryDetails[]`
+- `averageOVR`
+- `topPick`
+- `highestOVR`
+- `evaluationCount`
+
+## 6) Round 4 Point Formula
+
+From `server/services/scoreScaling.js`:
+
+- Base points: `teamOVR * ROUND4_BASE_MULTIPLIER`
+- Competitive bonus: `max(0, teamOVR - ROUND4_COMPETITIVE_FLOOR) * ROUND4_COMPETITIVE_MULTIPLIER`
+- Elite curve bonus: `(max(0, teamOVR - ROUND4_ELITE_FLOOR)^2) * ROUND4_ELITE_CURVE`
+- Total: rounded sum of components
+
+Current constants are defined in `scoreScaling.js` and should be treated as economy knobs.
+
+## 7) Server Safeguards
+
+- `round4InProgress`: prevents duplicate concurrent evaluations.
+- `round4Applied`: guarantees points are only added to totals once.
+- Cached payload replay: if results already exist, requester receives existing payload.
+
+## 8) Client Rendering Behavior
+
+- `round4Eval.js` renders team-by-team, character-by-character with reveal delays.
+- Team summary card is shown after each team’s character cards.
+- Final Round 4 leaderboard appears after all cards render.
+- Continue action triggers final synchronization via `requestFinalResults`.
+
+## 9) Failure Modes
+
+- Wrong phase request -> `round4EvaluationError`.
+- Evaluator internal exception -> `round4EvaluationError` and no state mutation.
+- Missing emotion icon -> client image fallback to alternate emotion path.
+
+## 10) Extension Points
+
+- Improve lookup precision: `server/evaluator/core/fetchers.js`, `candidateScoring.js`
+- Improve scenario realism: `server/evaluator/scoring/relevance.js`
+- Rebalance roster outcomes: `scoreScaling.js`
+- Rebalance team synergy volatility: `server/evaluator/team/chemistryCalculator.js`

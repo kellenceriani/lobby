@@ -1,8 +1,11 @@
 # public/js
 
-Client-side game scripts.
+Client runtime scripts.
 
-- `app.js` main realtime flow
-- `state.js` client state container
-- `ui.js` screen/UI helpers
-- `round4Eval.js` Round 4 evaluator UI
+- `app.js`: primary socket event wiring and screen transitions
+- `state.js`: in-memory client state + timer management
+- `ui.js`: screen helpers, toasts, UI toggles, utility rendering
+- `round4Eval.js`: Round 4 progressive reveal and final result sync UI
+
+Important coupling:
+- Socket event names must remain aligned with `server/socket/socketHandlers.js`

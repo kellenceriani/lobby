@@ -1,7 +1,9 @@
 # server/socket
 
-Realtime socket layer.
+Realtime Socket.IO API surface.
 
-- event handlers
-- room/player actions
-- input sanitization helpers
+- `socketHandlers.js`: event wiring and authoritative state transitions
+- `inputValidation.js`: sanitizers + request rate limiter
+
+See canonical contract:
+- `../../md/SOCKET_EVENT_CONTRACT.md`

@@ -1,7 +1,6 @@
 # server/evaluator/presentation
 
-Presentation-oriented evaluator output.
+Presentation-layer helpers for evaluator output.
 
-- emotion mapping
-- notes/breakdowns
-- phrase generation
+- `presentation.js`: emotion mapping, player-facing notes, structured breakdown payloads
+- `phraseGenerator.js`: short flavor lines keyed by emotion tier

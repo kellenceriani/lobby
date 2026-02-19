@@ -1,8 +1,11 @@
 # public
 
-Frontend static files served by Express.
+Frontend SPA assets served by Express.
 
-- `index.html` app shell
-- `css/` stylesheets
-- `js/` client logic
-- `img/` static assets
+- `index.html`: all screen layouts and interaction anchors
+- `css/`: visual styles split by feature area
+- `js/`: socket-driven gameplay logic
+- `img/`: static assets (including Round 4 emotion icons)
+
+Client/server event contract:
+- `../md/SOCKET_EVENT_CONTRACT.md`

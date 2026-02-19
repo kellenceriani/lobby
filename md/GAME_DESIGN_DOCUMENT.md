@@ -1,41 +1,98 @@
-# LobbyWARS - Game Design (Current)
+# LobbyWARS Game Design Document
 
-**Last updated:** February 18, 2026  
-**Status:** Production gameplay loop implemented (Rounds 1-3 + AI-evaluated Round 4)
+Last updated: February 18, 2026
+Status: Implemented in production flow (rounds 1–3 + server-authoritative Round 4 AI evaluation)
 
-## Core Game Loop
+## 1) Product Intent
 
-1. Players join a room (3-6 players).
-2. Rounds 1-3 repeat: `Draft -> Plot Twist -> Vote -> Results`.
-3. Round 4 uses final rosters from earlier rounds and runs AI evaluation (no drafting/voting).
-4. Final leaderboard ranks teams using OVR + chemistry.
+LobbyWARS is a real-time multiplayer party game where each player builds absurd two-character teams per round under scenario pressure. Community voting decides rounds 1–3; an AI evaluator resolves round 4 from full 6-character rosters.
 
-## System Architecture
+Primary design pillars:
+- Fast social drafting with visible live picks
+- Chaotic scenario/twist combinations
+- Human judgment in early rounds, AI judgment in final round
+- Competitive comeback potential through weighted scoring
 
-### Frontend (`public/`)
-- `index.html`: single-page shell and game screens
-- `js/app.js`: socket event flow + gameplay transitions
-- `js/state.js`: client-side state containers
-- `js/ui.js`: UI helpers and screen utilities
-- `js/round4Eval.js`: Round 4 evaluation presentation
-- `css/*.css`: split styling by feature area
+## 2) Match Structure
 
-### Backend (`server/`)
-- `server.js`: express + socket bootstrapping
-- `gameEngine.js`: game lifecycle, rounds, scoring data/state
-- `socketHandlers.js`: realtime handlers and room events
-- `round4Service.js`: Round 4 orchestration
-- `evaluator.js` + `evaluator/`: character relevance, viability, OVR, presentation helpers
+- **Player count**: 3–6
+- **Total rounds surfaced to player**: 4
+  - Rounds 1–3: draft + twist + vote
+  - Round 4: AI evaluation only
 
-## Gameplay Notes
+### Round 1–3 Sequence
 
-- Character drafting supports duplicate protection and auto-fill handling.
-- Room/lobby includes chat, reactions, ready state, and host settings.
-- Input sanitization and rate limiting are active in socket handlers.
-- State persistence support exists via server-side persistence helpers.
+1. `PRE_ROUND` countdown
+2. `DRAFT`
+	- each player submits up to 2 characters
+	- duplicates and invalid/empty submissions are auto-filled with random words
+3. `TWIST`
+	- one twist is revealed
+	- missing slots are auto-filled before voting
+4. `VOTING`
+	- players vote for another player’s team
+5. `RESULTS`
+	- weighted round points are applied
 
-## Operational Notes
+### Round 4 Sequence
 
-- Start command: `npm start`
-- Runtime dependencies: `express`, `socket.io`
-- Current project uses no formal automated test suite in `package.json`.
+1. Build each player’s final 6-character roster from rounds 1–3 results.
+2. Generate a fresh scenario + twist for final evaluation.
+3. Evaluate each character server-side.
+4. Aggregate team OVR + chemistry.
+5. Convert team strength to round points and emit final results.
+
+## 3) Scoring Design
+
+### Rounds 1–3 (social rounds)
+
+Scoring is generated from:
+- Team completion bonus
+- Most-voted winner bonus or tie bonus
+- Runner-up bonus
+- Non-voter penalty
+- Round weight scaling (`server/services/scoreScaling.js`)
+
+### Round 4 (AI round)
+
+Per team:
+- Evaluate each character -> OVR
+- Compute average OVR
+- Add chemistry bonus
+- Convert final team OVR to Round 4 points with nonlinear competitive + elite bonuses
+
+## 4) Player-Facing Rules
+
+- Duplicate picks are never accepted as-is; replacement is auto-generated.
+- Players can lock draft only after 2 picks.
+- Round progression can fast-forward when all required players lock/ready.
+- Final result reveal is synchronized: all players must request final results before emit.
+
+## 5) UX Surfaces
+
+- Lobby tabs: players, settings, chat
+- Draft UI: live picks, warnings, lock button
+- Voting UI: selectable teams + lock vote
+- Results UI: round leaderboard and breakdown
+- Round 4 UI: sequential per-character cards, team summaries, leaderboard
+
+## 6) Balance Levers
+
+- Scenario generation pools and theme category mapping (`gameEngine.js`)
+- Twist pool composition by difficulty
+- Draft/vote timer durations
+- Round weight multipliers
+- Evaluator confidence thresholds and relevance heuristics
+- Chemistry bonus cap/rules
+
+## 7) Non-Functional Behavior
+
+- Input sanitation for names, room codes, messages, reactions, and draft picks
+- Socket-level rate limiting for spam-sensitive actions
+- Snapshot persistence for room state (`server/storage/statePersistence.js`)
+
+## 8) Design Constraints to Preserve
+
+- Round 4 remains AI-evaluation-only (no voting fallback path)
+- Server remains authoritative for state mutations and final scoring
+- Payload shape compatibility for client screens must be preserved during refactors

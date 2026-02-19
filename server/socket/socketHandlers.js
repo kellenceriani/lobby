@@ -444,7 +444,14 @@ function registerSocketHandlers(io) {
       const allLocked = game.players.every(p => game.voteLocks[p.name] === true);
       if (allLocked) {
         clearTimeout(voteTimeouts[room]);
-        tallyResults(io, room);
+        if (!game.voteTallyStarted) {
+          game.voteTallyStarted = true;
+          io.to(room).emit('voteTallying', {
+            trigger: 'all_locked',
+            settleDelayMs: 1200
+          });
+          setTimeout(() => tallyResults(io, room), 1200);
+        }
       } else {
         io.to(room).emit('voteLockUpdate', {
           lockedPlayers: Object.keys(game.voteLocks),

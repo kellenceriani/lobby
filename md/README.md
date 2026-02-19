@@ -1,6 +1,6 @@
 # LobbyWARS Documentation Hub
 
-This folder is now organized for fast execution when you need to make large, targeted changes (for example: "improve chemistry by 20x" or "retune Round 4 scoring").
+This folder is now organized for fast execution when you need to make large, targeted changes (for example: "improve hybrid round scoring" or "retune Round 4 endgame scoring").
 
 ## Fast Start (Read in this order)
 
@@ -22,7 +22,7 @@ This folder is now organized for fast execution when you need to make large, tar
 	- `GAME_DESIGN_DOCUMENT.md`
 	- `ARCHITECTURE.md` (game engine + socket flow)
 
-- **"Improve AI evaluator quality"**
+- **"Improve AI evaluator quality (Rounds 1–4)"**
 	- `ROUND4_AI_EVALUATOR_SPEC.md`
 	- `EVALUATOR_TUNING_GUIDE.md`
 	- `OVR_CHEMISTRY_IMPROVEMENTS.md`

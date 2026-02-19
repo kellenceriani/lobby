@@ -1,6 +1,6 @@
 # Engineering Runbook
 
-Last updated: February 18, 2026
+Last updated: February 19, 2026
 
 This runbook is for rapid, safe iteration when making major gameplay/evaluator changes.
 
@@ -48,3 +48,15 @@ This runbook is for rapid, safe iteration when making major gameplay/evaluator c
 - Duplicate scoring in Round 4 (missing `round4Applied` guard behavior).
 - UI assumptions about evaluator payload fields.
 - Score inflation causing impossible leaderboard swings.
+
+## 5) Intel Telemetry Toggle
+
+- Default telemetry (always on):
+  - Per round log from `roundEvaluationService`:
+  - `📈 [Round X Intel Telemetry] avgConfidence=... avgFetchMs=... trusted=.../...`
+
+- Optional verbose telemetry (per-player rows):
+  - Set env var before starting server:
+    - PowerShell: `$env:INTEL_TELEMETRY_VERBOSE='true'`
+    - CMD: `set INTEL_TELEMETRY_VERBOSE=true`
+  - Truthy values supported: `1`, `true`, `yes`, `on`

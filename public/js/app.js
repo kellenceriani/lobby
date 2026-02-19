@@ -375,6 +375,7 @@ socket.on('roundStart', (data) => {
   let countdown = 3;
   document.getElementById('countdown').textContent = countdown;
   document.getElementById('countdown').style.fontSize = '10em';
+  document.getElementById('countdown').style.display = 'block';
 
   const timer = setInterval(() => {
     countdown--;
@@ -649,8 +650,10 @@ socket.on('votingPhaseStart', (data) => {
 
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
+  const scoringModeDisplay = document.getElementById('votingScoringMode');
   if (scenarioDisplay) scenarioDisplay.textContent = data.scenario;
   if (twistDisplay) twistDisplay.textContent = data.twist || 'No twist this round';
+  if (scoringModeDisplay) scoringModeDisplay.textContent = 'Community Votes + Contextual Intel Fit';
 
   const grid = document.getElementById('votingTeams');
   if (grid) grid.innerHTML = '';
@@ -723,7 +726,7 @@ socket.on('votingPhaseStart', (data) => {
   updateVoteStatusBadge('Select Team');
 
   showScreen('votingScreen');
-  showToast('⚖️ Time to vote! Tap a team card to select it.', 'info', 4000);
+  showToast('⚖️ Time to vote. Community vote + intel fit decides this round.', 'info', 4200);
 
   let timeLeft = 30;
   document.getElementById('voteTimer').textContent = timeLeft;
@@ -909,6 +912,54 @@ function getRoundLeaders(roundPoints = {}) {
   };
 }
 
+function showVoteTallyLoading(trigger = 'timer') {
+  const roundLabel = document.getElementById('roundLabel');
+  const countdown = document.getElementById('countdown');
+  const triggerText = trigger === 'all_locked'
+    ? 'All votes locked. Finalizing scores...'
+    : 'Voting window closed. Finalizing scores...';
+
+  if (roundLabel) {
+    roundLabel.innerHTML = `
+      <div style="text-align: center; padding: 20px;">
+        <div style="font-size: 2.5rem; margin-bottom: 12px;">⏳</div>
+        <h2 style="margin-bottom: 10px;">TALLYING ROUND RESULTS</h2>
+        <p style="margin: 8px 0;">${triggerText}</p>
+        <p style="margin: 8px 0;">Applying vote impact + contextual intel fit.</p>
+      </div>
+    `;
+  }
+
+  if (countdown) {
+    countdown.style.display = 'none';
+  }
+
+  showScreen('preRound');
+}
+
+function categorizeBreakdownLines(lines = []) {
+  const groups = {
+    vote: [],
+    intel: [],
+    core: []
+  };
+
+  (Array.isArray(lines) ? lines : []).forEach((line) => {
+    const normalized = String(line || '').toLowerCase();
+    if (/vote|runner-up|tied for most|didn't vote/.test(normalized)) {
+      groups.vote.push(line);
+      return;
+    }
+    if (/intel|relevance|adaptability|confidence|trusted/.test(normalized)) {
+      groups.intel.push(line);
+      return;
+    }
+    groups.core.push(line);
+  });
+
+  return groups;
+}
+
 function buildRoundWinnerHTML(data, isFinalRound = false) {
   const winnerInfo = getRoundLeaders(data.roundPoints);
   if (!winnerInfo.leaders.length) {
@@ -976,20 +1027,74 @@ socket.on('roundResults', (data) => {
     const topRoundScore = sorted.length ? sorted[0].roundScore : 0;
     sorted.forEach((playerEntry, idx) => {
       const medal = ['🥇', '🥈', '🥉'][idx] || '•';
+      const grouped = categorizeBreakdownLines(playerEntry.breakdown);
+      const previewLine = grouped.vote[0] || grouped.intel[0] || grouped.core[0] || 'No breakdown details available.';
+      const renderGroup = (title, lines) => {
+        if (!lines.length) {
+          return `<div class="breakdown-group"><h5>${title}</h5><div class="breakdown-line muted">No items</div></div>`;
+        }
+        return `
+          <div class="breakdown-group">
+            <h5>${title}</h5>
+            ${lines.map((line) => {
+              const isNegative = String(line).includes('-') || String(line).toLowerCase().includes("didn't vote");
+              return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
+            }).join('')}
+          </div>
+        `;
+      };
+
       breakdownHTML += `
         <div class="player-breakdown ${playerEntry.roundScore === topRoundScore ? 'top-score' : ''}" style="--result-index:${idx};">
           <div class="breakdown-header">${medal} ${playerEntry.name}</div>
           <div class="breakdown-points">+${playerEntry.roundScore} points</div>
-          <div class="breakdown-details">
-            ${playerEntry.breakdown.map(line => {
-              const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
-              return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
-            }).join('')}
-          </div>
+          <div class="breakdown-preview">${previewLine}</div>
+          <details class="breakdown-details-disclosure">
+            <summary>View full breakdown</summary>
+            <div class="breakdown-details">
+              ${renderGroup('Vote Impact', grouped.vote)}
+              ${renderGroup('Intel Impact', grouped.intel)}
+              ${renderGroup('Core Round Scoring', grouped.core)}
+            </div>
+          </details>
         </div>
       `;
     });
     breakdownContainer.innerHTML = breakdownHTML;
+  }
+
+  const scoringMeta = document.getElementById('roundScoringMeta');
+  if (scoringMeta) {
+    scoringMeta.innerHTML = '<strong>Scoring:</strong> Community votes + contextual intel fit';
+  }
+
+  const intelSummaryContainer = document.getElementById('resultsIntelSummary');
+  const intelSummary = data && data.roundIntelSummary ? data.roundIntelSummary : null;
+  if (intelSummaryContainer) {
+    const intelRows = intelSummary
+      ? Object.entries(intelSummary)
+        .filter(([, summary]) => summary)
+        .sort((a, b) => (Number((b[1] && b[1].averageRelevance) || 0) - Number((a[1] && a[1].averageRelevance) || 0)))
+      : [];
+
+    if (intelRows.length) {
+      intelSummaryContainer.style.display = 'grid';
+      intelSummaryContainer.innerHTML = intelRows.map(([name, summary]) => {
+        const relevance = Number(summary.averageRelevance || 0).toFixed(2);
+        const adaptability = Number(summary.averageAdaptability || 0).toFixed(2);
+        const confidencePct = Math.round(Number(summary.averageConfidence || 0) * 100);
+        const trustedCount = Number(summary.trustedCount || 0);
+        return `
+          <div class="intel-summary-card">
+            <div class="intel-summary-head">🧠 ${escapeHtml(name)} intel profile</div>
+            <div class="intel-summary-line">Relevance: ${relevance} • Adaptability: ${adaptability} • Confidence: ${confidencePct}% • Trusted picks: ${trustedCount}/2</div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      intelSummaryContainer.style.display = 'none';
+      intelSummaryContainer.innerHTML = '';
+    }
   }
 
   resetResultsDetails();
@@ -1002,7 +1107,13 @@ socket.on('roundResults', (data) => {
   }
 
   showScreen('resultsScreen');
-  showToast(winnerView.isTie ? '🤝 Tie at the top this round!' : '📊 Round results are in!', 'info');
+  showToast(winnerView.isTie ? '🤝 Tie at the top (votes + intel)!' : '📊 Round results are in (votes + intel)!', 'info');
+});
+
+socket.on('voteTallying', (data) => {
+  clearTimers();
+  const trigger = data && data.trigger ? data.trigger : 'timer';
+  showVoteTallyLoading(trigger);
 });
 
 function readyForNextRound() {

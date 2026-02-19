@@ -41,11 +41,35 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
         nameSignals: null,
         relevance: null,
         ovrData: fallbackOVRData
-      })
+      }),
+      scoreMeta: {
+        relevancePoints: 0,
+        draftedFitTotal: 0,
+        draftedScenarioBonus: 0,
+        draftedTwistBonus: 0,
+        infoConfidence: 0,
+        trustedInfo: false,
+        fetchDurationMs: 0
+      }
     };
   }
 
-  const info = await fetchCharacterInfo(character);
+  const fetchStartedAt = Date.now();
+  const info = await fetchCharacterInfo(character, {
+    mode: options && options.evaluationMode ? options.evaluationMode : 'default',
+    contextHints: options && options.fetchContext && Array.isArray(options.fetchContext.contextHints)
+      ? options.fetchContext.contextHints
+      : [],
+    entityHints: options && options.fetchContext && Array.isArray(options.fetchContext.entityHints)
+      ? options.fetchContext.entityHints
+      : [],
+    scenario: options && options.fetchContext ? options.fetchContext.scenario : scenario,
+    twist: options && options.fetchContext ? options.fetchContext.twist : twist,
+    originalScenario: options && options.fetchContext ? options.fetchContext.originalScenario : (options.originalScenario || scenario),
+    originalTwist: options && options.fetchContext ? options.fetchContext.originalTwist : (options.originalTwist || twist),
+    draftedRound: options && options.fetchContext ? options.fetchContext.draftedRound : null
+  });
+  const fetchDurationMs = Math.max(0, Date.now() - fetchStartedAt);
   const infoConfidence = info && typeof info.confidence === 'number' ? info.confidence : 0;
   const trustedInfo = infoConfidence >= MIN_INFO_CONFIDENCE ? info : null;
   const scoringInfo = trustedInfo || info;
@@ -177,7 +201,16 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
       },
       ovrData,
       scoreBreakdownSteps
-    })
+    }),
+    scoreMeta: {
+      relevancePoints: relevance.points,
+      draftedFitTotal: draftedScenarioBonus + draftedTwistBonus,
+      draftedScenarioBonus,
+      draftedTwistBonus,
+      infoConfidence: scoringInfo ? infoConfidence : 0,
+      trustedInfo: Boolean(trustedInfo),
+      fetchDurationMs
+    }
   };
 
   console.log(`📊 "${character}" → Score: ${result.score}/30, OVR: ${result.ovr} [${ovrData.tier.label}], Type: ${ovrData.type}, Rarity: ${ovrData.rarity}, Emotion: ${result.emotion}`);

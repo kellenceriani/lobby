@@ -26,7 +26,7 @@
     <div class="panel">
       <h1>⚡LobbyWARS</h1>
       <p class="subtitle">A LineupWars Spin-Off • 3-6 Players</p>
-      <p class="tagline">Build absurd teams • Vote & chaos • Win glory</p>
+      <p class="tagline">Build absurd teams • Vote + intel • Win glory</p>
       
       <div class="input-group">
         <label for="name"><svg class="icon-inline" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/></svg> Your Name:</label>
@@ -72,7 +72,7 @@
             <span class="accordion-icon">▼</span>
           </button>
           <div class="accordion-content">
-            <p>Build absurd teams of fictional characters and vote on whose team would win each scenario!</p>
+            <p>Build absurd teams of fictional characters, then win each round with both votes and contextual intel scoring.</p>
           </div>
         </div>
 
@@ -84,10 +84,10 @@
           <div class="accordion-content" style="display: none;">
             <ul>
               <li><strong>Lobby:</strong> Join room (3-6 players)</li>
-              <li><strong>Rounds 1-3:</strong> Draft 2 characters per scenario</li>
+              <li><strong>Rounds 1-3:</strong> Draft 2 characters per scenario, then score via votes + AI intel fit</li>
               <li><strong>Plot Twist:</strong> Surprise modifier revealed</li>
               <li><strong>Voting:</strong> Vote for best team (can change before locking!)</li>
-              <li><strong>Round 4:</strong> AI evaluates your 6-character roster from Rounds 1-3</li>
+              <li><strong>Round 4:</strong> Final AI showdown evaluates your full 6-character roster</li>
             </ul>
           </div>
         </div>
@@ -102,7 +102,7 @@
               <li>✓ You can change votes until you lock</li>
               <li>✓ Auto-filled characters fill duplicates</li>
               <li>✓ Lock early to speed up the game</li>
-              <li>✓ Final round rewards big teams!</li>
+              <li>✓ Context matters: mystery rounds favor character/person picks over generic objects</li>
               <li>✓ Press <kbd>ENTER</kbd> to submit drafts</li>
             </ul>
           </div>
@@ -336,6 +336,10 @@
 
     <!-- Collapsible Voting Context -->
     <div id="votingContext" class="voting-context-collapsible">
+      <div class="context-item scoring-mode-item">
+        <strong>🧠 Scoring Mode:</strong>
+        <span id="votingScoringMode">Community Votes + Contextual Intel Fit</span>
+      </div>
       <div class="context-item">
         <strong>📋 Scenario:</strong>
         <span id="votingScenario"></span>
@@ -380,6 +384,12 @@
       
       <!-- Winner Display -->
       <div id="roundWinner" class="winner-card-modern"></div>
+
+      <div id="roundScoringMeta" class="round-scoring-meta" aria-live="polite">
+        <strong>Scoring:</strong> Community votes + contextual intel fit
+      </div>
+
+      <div id="resultsIntelSummary" class="results-intel-summary" style="display: none;"></div>
       
       <!-- Leaderboard Toggle -->
       <div class="results-section-toggle">
@@ -426,7 +436,7 @@
       <div class="eval-loading-spinner" aria-hidden="true"></div>
       <div class="eval-loading-text">
         <strong id="evalLoadingTitle">Evaluating teams...</strong>
-        <span id="evalLoadingSubtitle">Fetching details and scoring picks.</span>
+        <span id="evalLoadingSubtitle">Using cached round intel + final scoring.</span>
         <div class="eval-progress-row">
           <div
             id="evalProgressBar"

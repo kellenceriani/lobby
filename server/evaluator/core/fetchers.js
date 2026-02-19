@@ -166,6 +166,65 @@ function tokensFromText(value) {
     .filter(token => token && token.length > 2);
 }
 
+function dedupeStrings(values, limit = 12) {
+  return dedupeByKey(
+    (Array.isArray(values) ? values : [])
+      .map((value) => normalizeName(value))
+      .filter(Boolean),
+    (value) => value.toLowerCase()
+  ).slice(0, limit);
+}
+
+function deriveContextProfile(options = {}) {
+  const scenario = normalizeName(options.scenario || '');
+  const twist = normalizeName(options.twist || '');
+  const originalScenario = normalizeName(options.originalScenario || '');
+  const originalTwist = normalizeName(options.originalTwist || '');
+  const corpus = `${scenario} ${twist} ${originalScenario} ${originalTwist}`.toLowerCase();
+
+  const contextHints = [];
+  const entityHints = ['character', 'person'];
+
+  const pushHints = (hints) => {
+    (Array.isArray(hints) ? hints : []).forEach((hint) => contextHints.push(hint));
+  };
+
+  if (/mystery|detective|investigat|heist|secret|identity|clue|spy|conspiracy/.test(corpus)) {
+    pushHints(['mystery', 'detective', 'fictional character']);
+    entityHints.push('fictional character', 'nickname');
+  }
+
+  if (/rescue|surviv|evacuat|disaster|crisis|medical|triage/.test(corpus)) {
+    pushHints(['rescue', 'survival', 'emergency']);
+    entityHints.push('person', 'historical figure');
+  }
+
+  if (/space|galaxy|orbit|lunar|cosmic|astronaut/.test(corpus)) {
+    pushHints(['space', 'cosmic']);
+    entityHints.push('person', 'character');
+  }
+
+  if (/myth|legend|deity|folklore|arcane|wizard|magic/.test(corpus)) {
+    pushHints(['mythology', 'legend']);
+    entityHints.push('legend', 'character');
+  }
+
+  if (/sports|championship|league|tournament|match|coach/.test(corpus)) {
+    pushHints(['athlete', 'sports']);
+    entityHints.push('person', 'athlete');
+  }
+
+  if (/build|repair|engineer|robot|system|grid|infrastructure/.test(corpus)) {
+    pushHints(['engineer', 'technology']);
+    entityHints.push('person', 'object');
+  }
+
+  return {
+    contextHints: dedupeStrings(contextHints, 10),
+    entityHints: dedupeStrings(entityHints, 10)
+  };
+}
+
 function resolveCanonicalAlias(name) {
   const normalized = normalizeName(name);
   const compact = canonicalizeName(normalized);
@@ -292,10 +351,11 @@ function buildSearchQueries(baseName, contextHints = [], entityHints = []) {
     .slice(0, 4);
 
   const broadEntityHints = [
-    'character',
     'fictional character',
-    'historical figure',
+    'character',
     'person',
+    'historical figure',
+    'character',
     'animal',
     'species',
     'mythological creature',
@@ -304,8 +364,9 @@ function buildSearchQueries(baseName, contextHints = [], entityHints = []) {
   ];
 
   const entityHintMap = {
-    person: ['person', 'biography', 'historical figure', 'public figure'],
-    character: ['character', 'fictional character'],
+    person: ['person', 'biography', 'historical figure', 'public figure', 'nickname'],
+    character: ['fictional character', 'character', 'protagonist'],
+    'fictional character': ['fictional character', 'character', 'franchise character'],
     nickname: ['nickname', 'alias', 'epithet'],
     object: ['object', 'artifact', 'device', 'vehicle'],
     species: ['animal', 'species', 'genus'],
@@ -319,11 +380,19 @@ function buildSearchQueries(baseName, contextHints = [], entityHints = []) {
     hint => String(hint || '').toLowerCase()
   );
 
+  const prioritizedEntityHints = dedupeByKey(
+    [
+      ...expandedEntityHints,
+      ...(Array.isArray(entityHints) ? entityHints : [])
+    ],
+    hint => String(hint || '').toLowerCase()
+  ).slice(0, 6);
+
   const queries = [
     name,
     `"${name}"`,
+    ...prioritizedEntityHints.map(hint => `${name} ${hint}`),
     ...broadEntityHints.map(hint => `${name} ${hint}`),
-    ...expandedEntityHints.map(hint => `${name} ${hint}`),
     ...WIKI_SEARCH_HINTS.map(hint => `${name} ${hint}`),
     ...hintQueries.flatMap(hint => [`${name} ${hint}`, `${hint} ${name}`, `"${name}" ${hint}`]),
     ...(name.includes(' ') ? [`${name} wiki`, `${name} wikipedia`] : []),
@@ -878,12 +947,19 @@ async function fetchFromWikipediaFuzzyToken(character) {
   };
 }
 
-async function fetchFromWikipediaSearchEnhanced(character, contextHints = []) {
+async function fetchFromWikipediaSearchEnhanced(character, contextHints = [], entityHints = []) {
   const normalized = normalizeName(character);
   if (!normalized) return null;
 
   const profile = parseCharacterQuery(character);
-  const uniqueQueries = buildSearchQueries(normalized, contextHints, profile.entityHints || []).slice(0, 10);
+  const mergedEntityHints = dedupeByKey(
+    [
+      ...(profile.entityHints || []),
+      ...(Array.isArray(entityHints) ? entityHints : [])
+    ],
+    hint => String(hint || '').toLowerCase()
+  );
+  const uniqueQueries = buildSearchQueries(normalized, contextHints, mergedEntityHints).slice(0, 10);
 
   const resultLists = await Promise.all(uniqueQueries.map(query => searchWikipediaTitles(query, 10).catch(() => [])));
   const intitleResults = await Promise.all(uniqueQueries.slice(0, 4).map(query => searchWikipediaTitlesWithIntitle(query, 6).catch(() => [])));
@@ -944,11 +1020,11 @@ async function fetchWikipediaCandidateFromWikidataRow(row) {
   };
 }
 
-async function fetchFromWikidata(character, contextHints = []) {
+async function fetchFromWikidata(character, contextHints = [], entityHints = []) {
   const normalized = normalizeName(character);
   if (!normalized) return null;
 
-  const queries = buildSearchQueries(normalized, contextHints).slice(0, 10);
+  const queries = buildSearchQueries(normalized, contextHints, entityHints).slice(0, 10);
   const searchResults = await Promise.all(
     queries.map(async (query) => {
       const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=8&type=item&origin=*`;
@@ -1046,7 +1122,7 @@ async function fetchFromOMDb(character) {
   };
 }
 
-async function fetchCharacterInfo(character) {
+async function fetchCharacterInfo(character, options = {}) {
   const cached = getCachedCharacter(character);
   if (cached) return cached;
 
@@ -1054,10 +1130,30 @@ async function fetchCharacterInfo(character) {
   if (INFLIGHT_FETCHES.has(key)) return INFLIGHT_FETCHES.get(key);
 
   const task = (async () => {
+    const mode = String(options.mode || 'default').toLowerCase();
+    const isRoundMode = mode === 'round';
+    const stageOneTargetConfidence = isRoundMode ? 0.68 : 0.75;
+    const preStageTwoTargetConfidence = isRoundMode ? 0.64 : 0.72;
     const profile = parseCharacterQuery(character);
     const seed = resolveCharacterSeed(character, profile);
     const variants = seed.variants;
-    const contextHints = seed.contextHints;
+    const derivedContext = deriveContextProfile(options);
+    const contextHints = dedupeByKey(
+      [
+        ...seed.contextHints,
+        ...(Array.isArray(options.contextHints) ? options.contextHints : []),
+        ...derivedContext.contextHints
+      ].map((hint) => normalizeName(hint)).filter(Boolean),
+      (hint) => hint.toLowerCase()
+    ).slice(0, 12);
+    const entityHints = dedupeByKey(
+      [
+        ...derivedContext.entityHints,
+        ...(Array.isArray(options.entityHints) ? options.entityHints : []),
+        ...(Array.isArray(profile.entityHints) ? profile.entityHints : [])
+      ],
+      (hint) => String(hint || '').toLowerCase()
+    ).slice(0, 10);
 
     const baseName = seed.baseName || profile.baseName || character;
     const stagedCandidates = [];
@@ -1125,20 +1221,20 @@ async function fetchCharacterInfo(character) {
     const stageOneFetches = [
       () => fetchFromWikipediaEnhanced(baseName),
       () => fetchFromWikipediaContextualTitle(baseName, contextHints),
-      () => fetchFromWikipediaSearchEnhanced(baseName, contextHints),
-      () => fetchFromWikipediaOpenSearch(baseName, contextHints),
+      () => fetchFromWikipediaSearchEnhanced(baseName, contextHints, entityHints),
+      ...(!isRoundMode ? [() => fetchFromWikipediaOpenSearch(baseName, contextHints)] : []),
       () => fetchFromWikipediaPrefixSearch(baseName),
-      () => fetchFromWikipediaFuzzyToken(baseName),
+      ...(!isRoundMode ? [() => fetchFromWikipediaFuzzyToken(baseName)] : []),
       () => fetchFromWikipediaSummary(baseName),
-      () => fetchFromWikidata(baseName, contextHints)
+      () => fetchFromWikidata(baseName, contextHints, entityHints)
     ];
 
     const seedVariantFetches = variants
       .filter(variant => canonicalizeName(variant) !== canonicalizeName(baseName))
-      .slice(0, 3)
+      .slice(0, isRoundMode ? 2 : 3)
       .flatMap(variant => [
         () => fetchFromWikipediaEnhanced(variant),
-        () => fetchFromWikipediaSearchEnhanced(variant, contextHints)
+        () => fetchFromWikipediaSearchEnhanced(variant, contextHints, entityHints)
       ]);
 
     stageOneFetches.push(...seedVariantFetches);
@@ -1149,7 +1245,7 @@ async function fetchCharacterInfo(character) {
 
       const stageCandidates = toUniqueCandidates();
       const stageBest = maybePreferSeedCandidate(stageCandidates, pickBestCandidate(character, stageCandidates));
-      if (stageBest && stageBest.confidence >= 0.75) {
+      if (stageBest && stageBest.confidence >= stageOneTargetConfidence) {
         const resolved = {
           ...stageBest,
           lookupMeta: {
@@ -1167,7 +1263,7 @@ async function fetchCharacterInfo(character) {
 
     let candidates = toUniqueCandidates();
     let best = maybePreferSeedCandidate(candidates, pickBestCandidate(character, candidates));
-    if (best && best.confidence >= 0.72) {
+    if (best && best.confidence >= preStageTwoTargetConfidence) {
       const resolved = {
         ...best,
         lookupMeta: {
@@ -1184,15 +1280,17 @@ async function fetchCharacterInfo(character) {
 
     const secondaryVariants = variants
       .filter(variant => canonicalizeName(variant) !== canonicalizeName(baseName))
-      .slice(0, 5);
+      .slice(0, isRoundMode ? 3 : 5);
 
     const stageTwoTasks = [
       ...secondaryVariants.map(variant => fetchFromWikipediaEnhanced(variant).catch(() => null)),
-      ...secondaryVariants.map(variant => fetchFromWikipediaSearchEnhanced(variant, contextHints).catch(() => null)),
-      ...secondaryVariants.slice(0, 3).map(variant => fetchFromWikipediaOpenSearch(variant, contextHints).catch(() => null)),
-      ...secondaryVariants.slice(0, 2).map(variant => fetchFromWikidata(variant, contextHints).catch(() => null)),
-      fetchFromFandom(baseName, contextHints).catch(() => null),
-      fetchFromOMDb(baseName).catch(() => null)
+      ...secondaryVariants.map(variant => fetchFromWikipediaSearchEnhanced(variant, contextHints, entityHints).catch(() => null)),
+      ...secondaryVariants.slice(0, isRoundMode ? 1 : 3).map(variant => fetchFromWikipediaOpenSearch(variant, contextHints).catch(() => null)),
+      ...secondaryVariants.slice(0, isRoundMode ? 1 : 2).map(variant => fetchFromWikidata(variant, contextHints, entityHints).catch(() => null)),
+      ...(!isRoundMode ? [
+        fetchFromFandom(baseName, contextHints).catch(() => null),
+        fetchFromOMDb(baseName).catch(() => null)
+      ] : [])
     ];
 
     const stageTwoResults = await Promise.all(stageTwoTasks);
@@ -1216,9 +1314,9 @@ async function fetchCharacterInfo(character) {
     }
 
     const rescueFetches = [
-      () => fetchFromWikipediaSearchEnhanced(baseName, contextHints),
+      () => fetchFromWikipediaSearchEnhanced(baseName, contextHints, entityHints),
       () => fetchFromWikipediaPrefixSearch(baseName),
-      () => fetchFromWikidata(baseName, contextHints),
+      ...(!isRoundMode ? [() => fetchFromWikidata(baseName, contextHints, entityHints)] : []),
       () => fetchFromWikipediaSummary(baseName)
     ];
 

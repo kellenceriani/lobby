@@ -1,23 +1,23 @@
 # LobbyWARS Game Design Document
 
-Last updated: February 18, 2026
-Status: Implemented in production flow (rounds 1–3 + server-authoritative Round 4 AI evaluation)
+Last updated: February 19, 2026
+Status: Implemented in production flow (rounds 1–3 hybrid vote + contextual intel, plus server-authoritative Round 4 AI evaluation)
 
 ## 1) Product Intent
 
-LobbyWARS is a real-time multiplayer party game where each player builds absurd two-character teams per round under scenario pressure. Community voting decides rounds 1–3; an AI evaluator resolves round 4 from full 6-character rosters.
+LobbyWARS is a real-time multiplayer party game where each player builds absurd two-character teams per round under scenario pressure. Rounds 1–3 are resolved by community voting plus contextual intel scoring; an AI evaluator resolves round 4 from full 6-character rosters.
 
 Primary design pillars:
 - Fast social drafting with visible live picks
 - Chaotic scenario/twist combinations
-- Human judgment in early rounds, AI judgment in final round
+- Human judgment + contextual intel in early rounds, full AI judgment in final round
 - Competitive comeback potential through weighted scoring
 
 ## 2) Match Structure
 
 - **Player count**: 3–6
 - **Total rounds surfaced to player**: 4
-  - Rounds 1–3: draft + twist + vote
+	- Rounds 1–3: draft + twist + vote + contextual intel scoring
   - Round 4: AI evaluation only
 
 ### Round 1–3 Sequence
@@ -31,8 +31,11 @@ Primary design pillars:
 	- missing slots are auto-filled before voting
 4. `VOTING`
 	- players vote for another player’s team
-5. `RESULTS`
-	- weighted round points are applied
+5. `TALLYING` (brief loading transition)
+	- vote lock/timer closes phase
+	- server finalizes vote + intel scoring
+6. `RESULTS`
+	- weighted vote points + contextual intel bonus are applied
 
 ### Round 4 Sequence
 
@@ -51,6 +54,7 @@ Scoring is generated from:
 - Most-voted winner bonus or tie bonus
 - Runner-up bonus
 - Non-voter penalty
+- Contextual intel bonus (relevance, adaptability, confidence)
 - Round weight scaling (`server/services/scoreScaling.js`)
 
 ### Round 4 (AI round)
@@ -93,6 +97,6 @@ Per team:
 
 ## 8) Design Constraints to Preserve
 
-- Round 4 remains AI-evaluation-only (no voting fallback path)
+- Rounds 1–3 remain hybrid (vote + contextual intel), and Round 4 remains AI-evaluation-only (no voting fallback path)
 - Server remains authoritative for state mutations and final scoring
 - Payload shape compatibility for client screens must be preserved during refactors

@@ -375,6 +375,11 @@
 
 .context-item:last-child { margin-bottom: 0; }
 
+.scoring-mode-item {
+  border-left-color: var(--secondary);
+  background: linear-gradient(135deg, #eef7ff, #f7f1ff);
+}
+
 .context-item strong {
   color: var(--primary);
   display: block;

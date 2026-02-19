@@ -6,6 +6,7 @@ const FALLBACK_WORDS = [
 let wordCache = [];
 
 const { getRoundWeight, scaleRoundPoints } = require('../services/scoreScaling');
+const { evaluateRoundFromGame } = require('../services/roundEvaluationService');
 const { loadRoomsSnapshot, queueRoomsSnapshot } = require('../storage/statePersistence');
 
 async function fetchRandomWords() {
@@ -743,7 +744,8 @@ function createGameInstance(roomCode, players, settings) {
     results: [],
     settings,
     roundStartTime: null,
-    allCharactersDrafted: []
+    allCharactersDrafted: [],
+    roundResolutionLocks: {}
   };
 }
 
@@ -998,6 +1000,9 @@ function startVoting(io, roomCode) {
   game.phaseStartTime = Date.now();
   game.votes = {};
   game.voteLocks = {};
+  game.voteTallyStarted = false;
+  game.roundResolutionLocks = game.roundResolutionLocks || {};
+  game.roundResolutionLocks[game.currentRound] = false;
 
   const teamsDisplay = game.players.map(p => ({
     name: p.name,
@@ -1014,7 +1019,19 @@ function startVoting(io, roomCode) {
     roundNumber: game.currentRound + 1
   });
 
-  const voteTimeout = setTimeout(() => tallyResults(io, roomCode), getVoteSeconds() * 1000);
+  const voteTimeout = setTimeout(() => {
+    if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
+    const activeGame = rooms[roomCode].gameState;
+    if (!activeGame || activeGame.activePhase !== 'VOTING' || activeGame.voteTallyStarted === true) return;
+
+    activeGame.voteTallyStarted = true;
+    io.to(roomCode).emit('voteTallying', {
+      trigger: 'timer',
+      settleDelayMs: 1200
+    });
+
+    setTimeout(() => tallyResults(io, roomCode), 1200);
+  }, getVoteSeconds() * 1000);
   voteTimeouts[roomCode] = voteTimeout;
   markRoomsDirty();
 }
@@ -1097,9 +1114,15 @@ function determineRoundWinner(points) {
   };
 }
 
-function tallyResults(io, roomCode) {
+async function tallyResults(io, roomCode) {
   if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
+  const roundIndex = game.currentRound;
+  game.roundResolutionLocks = game.roundResolutionLocks || {};
+  if (game.roundResolutionLocks[roundIndex] === true) return;
+  game.roundResolutionLocks[roundIndex] = true;
+
+  try {
   const scenario = game.scenarios[game.currentRound];
 
   if (!game.results[game.currentRound]) {
@@ -1114,6 +1137,29 @@ function tallyResults(io, roomCode) {
   });
 
   const { points, bonuses, voteCount, pointBreakdown } = calculateRoundBonuses(game, game.currentRound);
+
+  let roundIntel = null;
+  try {
+    roundIntel = await evaluateRoundFromGame(game, roundIndex);
+  } catch (error) {
+    console.error(`❌ Round ${roundIndex + 1} intel evaluation failed:`, error);
+  }
+
+  if (roundIntel && roundIntel.intelBonuses) {
+    game.results[roundIndex].teamEvaluation = roundIntel.playerEvaluations || {};
+
+    game.players.forEach((player) => {
+      const bonus = Number(roundIntel.intelBonuses[player.name]) || 0;
+      if (bonus !== 0) {
+        points[player.name] = (points[player.name] || 0) + bonus;
+      }
+
+      const intelLines = Array.isArray(roundIntel.intelBreakdown && roundIntel.intelBreakdown[player.name])
+        ? roundIntel.intelBreakdown[player.name]
+        : [];
+      intelLines.forEach((line) => pointBreakdown[player.name].push(line));
+    });
+  }
 
   game.activePhase = 'RESULTS';
 
@@ -1131,7 +1177,7 @@ function tallyResults(io, roomCode) {
   game.results[game.currentRound].winner = winnerInfo.winner;
   game.results[game.currentRound].isTie = winnerInfo.isTie;
   game.results[game.currentRound].tiedPlayers = winnerInfo.tiedPlayers;
-  game.results[game.currentRound].scenario = scenario.scenario;
+  game.results[game.currentRound].scenario = (scenario && scenario.scenario) ? scenario.scenario : game.currentScenario;
   game.results[game.currentRound].twist = game.currentTwist;
   game.results[game.currentRound].leaderboard = leaderboardData;
 
@@ -1143,12 +1189,23 @@ function tallyResults(io, roomCode) {
     voteCount,
     leaderboard: leaderboardData,
     pointBreakdown,
-    round: game.currentRound + 1
+    round: game.currentRound + 1,
+    roundIntelSummary: roundIntel
+      ? Object.entries(roundIntel.playerEvaluations || {}).reduce((acc, [name, data]) => {
+        acc[name] = data && data.summary ? data.summary : null;
+        return acc;
+      }, {})
+      : {}
   });
 
   game.players.forEach(p => p.voteLocked = false);
   game.resultsReady = {};
-  markRoomsDirty();
+  } catch (error) {
+    console.error(`❌ Failed to tally round ${roundIndex + 1} in room ${roomCode}:`, error);
+  } finally {
+    game.roundResolutionLocks[roundIndex] = false;
+    markRoomsDirty();
+  }
 }
 
 

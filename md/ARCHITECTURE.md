@@ -1,6 +1,6 @@
 # LobbyWARS Architecture Reference
 
-Last updated: February 18, 2026
+Last updated: February 19, 2026
 
 ## 1) Runtime Topology
 
@@ -22,7 +22,13 @@ Last updated: February 18, 2026
   - Owns room/game lifecycle state.
   - Generates scenarios + twists.
   - Runs Rounds 1–3 phase transitions: PRE_ROUND -> DRAFT -> TWIST -> VOTING -> RESULTS.
+  - Blends community voting with per-round contextual intel scoring.
   - Prepares Round 4 input rosters.
+
+- `server/services/roundEvaluationService.js`
+  - Evaluates current-round drafted picks (2 per player) with scenario/twist context.
+  - Produces per-player intel summaries and bounded intel round bonus.
+  - Emits lightweight telemetry for confidence/fetch latency.
 
 - `server/socket/socketHandlers.js`
   - Validates all realtime actions.
@@ -38,6 +44,7 @@ Last updated: February 18, 2026
 
 - `server/evaluator/*`
   - Character validation, metadata lookup, relevance scoring, OVR calculation, notes/breakdowns, phrase generation.
+  - Round-mode fetch path is lighter and context-prioritized (character/person-first).
 
 - `server/services/scoreScaling.js`
   - Round weights + Round 4 point curve.
@@ -51,7 +58,7 @@ Last updated: February 18, 2026
   - `players[]`, `host`, `settings`, `messages[]`, `gameState`, `isGameActive`.
 
 - **GameState**
-  - `players[]` (runtime player stats/team data), `currentRound`, `totalRounds`, `scenarios[]`, `activePhase`, `results[]`, `votes`, `voteLocks`, `draftEntries`, `allCharactersDrafted`.
+  - `players[]` (runtime player stats/team data), `currentRound`, `totalRounds`, `scenarios[]`, `activePhase`, `results[]`, `votes`, `voteLocks`, `draftEntries`, `allCharactersDrafted`, `roundResolutionLocks`.
   - Round 4 flags: `round4InProgress`, `round4Applied`, `round4Results`, `finalResultsReady`, `finalResultsEmitted`.
 
 - **Round 4 Team Evaluation**
@@ -65,7 +72,7 @@ Last updated: February 18, 2026
 3. `revealScenario` emits `scenarioRevealed` and starts draft timer.
 4. `revealPlotTwist` auto-fills missing picks, emits `plotTwistRevealed`.
 5. `startVoting` emits `votingPhaseStart`.
-6. `tallyResults` computes weighted points, emits `roundResults`.
+6. `tallyResults` computes weighted voting points, applies intel bonus from `roundEvaluationService`, emits `roundResults`.
 7. After round 3, `startFinalRound` compiles 6-char rosters and emits `round4Start`.
 8. `evaluateRound4` computes final evaluation and emits `round4Evaluated`.
 9. `requestFinalResults` synchronization emits `finalRoundResults` once all players are ready.
@@ -74,6 +81,7 @@ Last updated: February 18, 2026
 
 - Duplicate draft picks are replaced with random auto-fill words.
 - Regular rounds require exactly 2 locked picks per player.
+- Rounds 1–3 always score via both community vote and contextual intel bonus.
 - Round 4 does **not** include drafting or voting.
 - Round 4 scoring is applied once (`round4Applied` guard).
 - Final results broadcast is one-time (`finalResultsEmitted` guard).

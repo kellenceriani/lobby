@@ -125,7 +125,7 @@ function initRound4Evaluation(data) {
   const loadingTitle = document.getElementById('evalLoadingTitle');
   const loadingSubtitle = document.getElementById('evalLoadingSubtitle');
   if (loadingTitle) loadingTitle.textContent = 'Evaluating teams...';
-  if (loadingSubtitle) loadingSubtitle.textContent = 'Fetching details and scoring picks.';
+  if (loadingSubtitle) loadingSubtitle.textContent = 'Merging cached intel from earlier rounds with final scoring.';
   
   console.log(`📊 Teams: ${Object.keys(finalTeams).length}, Total characters: ${totalCharacters}`);
   

@@ -38,7 +38,17 @@ async function evaluateRound4FromGame(game) {
 
       const evalData = await scoreCharacter(char, scenario, twist, {
         originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
-        originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist
+        originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
+        evaluationMode: 'final',
+        fetchContext: {
+          scenario,
+          twist,
+          originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
+          originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
+          draftedRound: draftedMeta && Number.isFinite(Number(draftedMeta.draftedRound))
+            ? Number(draftedMeta.draftedRound)
+            : null
+        }
       });
 
       evalData.phrase = getRandomPhrase(evalData.emotion);

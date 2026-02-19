@@ -1168,26 +1168,123 @@ function endGame(io, roomCode) {
     }));
 
   const winner = finalLeaderboard[0] || null;
-  const winnerEvaluations = winner
+  const winnerTeamData = winner
     && game.round4Results
     && game.round4Results.payload
     && game.round4Results.payload.allTeamEvaluations
     && game.round4Results.payload.allTeamEvaluations[winner.name]
-    && Array.isArray(game.round4Results.payload.allTeamEvaluations[winner.name].evaluations)
-    ? game.round4Results.payload.allTeamEvaluations[winner.name].evaluations
+    ? game.round4Results.payload.allTeamEvaluations[winner.name]
+    : null;
+
+  const winnerEvaluations = winner
+    && winnerTeamData
+    && Array.isArray(winnerTeamData.evaluations)
+    ? winnerTeamData.evaluations
+    : [];
+  const winnerPlayer = winner ? game.players.find((player) => player.name === winner.name) : null;
+  const winnerDraftMeta = winnerPlayer && Array.isArray(winnerPlayer.finalTeamDraftMeta)
+    ? winnerPlayer.finalTeamDraftMeta
     : [];
 
-  const winnerCharacters = winnerEvaluations.map((entry) => ({
-    character: entry.character,
-    imageUrl: entry.imageUrl || null,
-    infoSource: entry.infoSource || null
-  }));
+  const rarityWeights = {
+    Bronze: 1,
+    Silver: 2,
+    Gold: 3,
+    Rare: 4,
+    Epic: 5,
+    Legendary: 6,
+    Icon: 7
+  };
+
+  const mvpEntry = winnerEvaluations.reduce((best, current) => {
+    if (!best) return current;
+    const bestOVR = Number(best.ovr) || 0;
+    const currentOVR = Number(current.ovr) || 0;
+    if (currentOVR > bestOVR) return current;
+    if (currentOVR === bestOVR && (Number(current.score) || 0) > (Number(best.score) || 0)) return current;
+    return best;
+  }, null);
+
+  const averageOVR = winnerEvaluations.length
+    ? Math.round(winnerEvaluations.reduce((sum, entry) => sum + (Number(entry.ovr) || 0), 0) / winnerEvaluations.length)
+    : 0;
+
+  const rarityScore = winnerEvaluations.reduce((sum, entry) => {
+    const rarity = entry && entry.rarity ? String(entry.rarity) : 'Bronze';
+    return sum + (rarityWeights[rarity] || 1);
+  }, 0);
+
+  const rarePlusCount = winnerEvaluations.filter((entry) => {
+    const rarity = entry && entry.rarity ? String(entry.rarity) : 'Bronze';
+    return ['Rare', 'Epic', 'Legendary', 'Icon'].includes(rarity);
+  }).length;
+
+  const imageIntel = winnerEvaluations.filter((entry) => entry && entry.imageUrl).length;
+  const winnerRound4Points = winner && game.round4Results && game.round4Results.roundPoints
+    ? (game.round4Results.roundPoints[winner.name] || 0)
+    : 0;
+
+  const winnerTeamStats = {
+    mvp: mvpEntry ? mvpEntry.character : 'N/A',
+    mvpOVR: mvpEntry ? (Number(mvpEntry.ovr) || 0) : 0,
+    averageOVR,
+    teamOVR: winnerTeamData && winnerTeamData.teamSummary ? (Number(winnerTeamData.teamSummary.totalOVR) || averageOVR) : averageOVR,
+    chemistryBonus: winnerTeamData && winnerTeamData.teamSummary ? (Number(winnerTeamData.teamSummary.chemistryBonus) || 0) : 0,
+    round4Points: winnerRound4Points,
+    rarityScore,
+    rarePlusCount,
+    imageIntel,
+    picks: winnerEvaluations.length
+  };
+
+  const winnerCharacters = winnerEvaluations.map((entry, index) => {
+    const draftMeta = winnerDraftMeta.find((meta) =>
+      meta
+      && meta.character
+      && entry.character
+      && String(meta.character).toLowerCase() === String(entry.character).toLowerCase()
+    ) || null;
+
+    const draftedRound = draftMeta && Number.isFinite(Number(draftMeta.draftedRound))
+      ? Number(draftMeta.draftedRound)
+      : Math.min(3, Math.floor(index / 2) + 1);
+    const pickNumberInRound = draftMeta && Number.isFinite(Number(draftMeta.pickNumberInRound))
+      ? Number(draftMeta.pickNumberInRound)
+      : ((index % 2) + 1);
+
+    const expectedAtDraft = Math.round(66 + ((4 - draftedRound) * 6) + ((3 - pickNumberInRound) * 3));
+    const expectedNearEnd = Math.max(56, expectedAtDraft - 8);
+    const currentOVR = Number(entry.ovr) || 0;
+
+    return {
+      character: entry.character,
+      imageUrl: entry.imageUrl || null,
+      infoSource: entry.infoSource || null,
+      ovr: currentOVR,
+      score: Number(entry.score) || 0,
+      rarity: entry.rarity || 'Bronze',
+      ovrTierLabel: entry && entry.ovrTier && entry.ovrTier.label ? entry.ovrTier.label : null,
+      characterType: entry.characterType || null,
+      draftRound,
+      pickNumberInRound,
+      globalDraftOrder: draftMeta && Number.isFinite(Number(draftMeta.globalDraftOrder)) ? Number(draftMeta.globalDraftOrder) : null,
+      draftedAtMs: draftMeta && Number.isFinite(Number(draftMeta.draftedAtMs)) ? Number(draftMeta.draftedAtMs) : null,
+      originalScenario: draftMeta && draftMeta.originalScenario ? draftMeta.originalScenario : null,
+      originalTwist: draftMeta && draftMeta.originalTwist ? draftMeta.originalTwist : null,
+      expectedAtDraft,
+      expectedNearEnd,
+      valueVsDraftExpected: currentOVR - expectedAtDraft,
+      valueVsLateExpected: currentOVR - expectedNearEnd,
+      notes: Array.isArray(entry.notes) ? entry.notes.slice(0, 2) : []
+    };
+  });
 
   io.to(roomCode).emit('gameEnded', {
     finalLeaderboard,
     totalRounds: game.totalRounds,
     winner,
-    winnerCharacters
+    winnerCharacters,
+    winnerTeamStats
   });
 
   room.isGameActive = false;

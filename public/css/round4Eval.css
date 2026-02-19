@@ -267,6 +267,35 @@
   line-height: 1.15;
 }
 
+.eval-card-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.eval-card-portrait {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.12);
+  background: rgba(0,0,0,0.12);
+  flex: 0 0 auto;
+}
+
+.eval-card-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.eval-card-portrait.missing {
+  border-style: dashed;
+  opacity: 0.9;
+}
+
 .eval-card-emotion {
   display: flex;
   align-items: center;
@@ -695,6 +724,54 @@
   background: rgba(205,127,50,0.1);
 }
 
+.spotlight-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 180px;
+}
+
+.spotlight-image {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(0,0,0,0.2);
+  flex: 0 0 auto;
+}
+
+.spotlight-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.spotlight-image.missing {
+  border-style: dashed;
+  opacity: 0.88;
+}
+
+.spotlight-meta {
+  min-width: 0;
+}
+
+.spotlight-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.spotlight-sub {
+  font-size: 0.62rem;
+  color: var(--text-secondary);
+}
+
 /* ========== TABLET UP (600px+) ========== */
 @media (min-width: 600px) {
   .eval-title {
@@ -851,6 +928,28 @@
   line-height: 1.25;
   color: #444;
   margin: 0.3rem 0 0;
+}
+
+.ovr-character-image-wrap {
+  width: 100%;
+  max-width: 180px;
+  margin: 0.35rem 0 0.25rem;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid rgba(0,0,0,0.08);
+  background: #f4f7ff;
+}
+
+.ovr-character-image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+}
+
+.ovr-character-image-wrap.missing {
+  border-style: dashed;
+  opacity: 0.92;
 }
 
 .ovr-dropdown summary {

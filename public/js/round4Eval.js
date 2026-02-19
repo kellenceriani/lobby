@@ -14,6 +14,37 @@ let round4State = {
   finalResultsRequested: false
 };
 
+function buildMissingCharacterImage(label = 'No Image') {
+  const safeLabel = escapeHtml(label);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="${safeLabel}">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#1f2430"/>
+          <stop offset="100%" stop-color="#2e3647"/>
+        </linearGradient>
+      </defs>
+      <rect width="256" height="256" rx="20" fill="url(#g)"/>
+      <circle cx="128" cy="94" r="40" fill="#56607a"/>
+      <rect x="54" y="148" width="148" height="58" rx="29" fill="#56607a"/>
+      <text x="128" y="235" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#c8d0e3">${safeLabel}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function normalizeImageUrl(url) {
+  if (!url) return null;
+  const raw = String(url).trim();
+  if (!raw) return null;
+  if (raw.startsWith('//')) return `https:${raw}`;
+  return raw;
+}
+
+function resolveCharacterImage(url, fallbackLabel = 'No Image') {
+  return normalizeImageUrl(url) || buildMissingCharacterImage(fallbackLabel);
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -251,12 +282,26 @@ function renderEvalCard(evalData, container) {
   const primaryEmotion = getEmotionFromOVR(evalData.ovr);
   const fallbackEmotion = evalData.emotion || 'neutral';
   const emotionIconPath = getEmotionIconPath(evalData);
+  const portraitSrc = resolveCharacterImage(evalData.imageUrl, 'No Portrait');
+  const hasPortrait = Boolean(normalizeImageUrl(evalData.imageUrl));
   
   const card = document.createElement('div');
   card.className = `eval-card eval-card-${evalData.emotion}`;
   card.innerHTML = `
     <div class="eval-card-header">
-      <h3 class="eval-card-name">${escapeHtml(evalData.character)}</h3>
+      <div class="eval-card-name-wrap">
+        <h3 class="eval-card-name">${escapeHtml(evalData.character)}</h3>
+        <div class="eval-card-portrait ${hasPortrait ? '' : 'missing'}">
+          <img
+            src="${escapeHtml(portraitSrc)}"
+            alt="${escapeHtml(evalData.character)} portrait"
+            loading="lazy"
+            decoding="async"
+            referrerpolicy="no-referrer"
+            onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';this.closest('.eval-card-portrait')?.classList.add('missing');"
+          >
+        </div>
+      </div>
       <div class="eval-card-emotion">
         <img src="${emotionIconPath}" alt="${escapeHtml(primaryEmotion)}"
              onerror="this.onerror=null;this.src='/img/emotions/${encodeURIComponent(fallbackEmotion)}.png';"
@@ -386,24 +431,54 @@ function displayFinalLeaderboard() {
         <th>Rank</th>
         <th>Team</th>
         <th>R4 Pts</th>
-        <th>Total Pts</th>
+        <th>Spotlight</th>
         <th>Team OVR</th>
         <th>Chemistry</th>
-        <th>Top Pick</th>
       </tr>
     </thead>
     <tbody>
-      ${round4State.finalLeaderboard.map((team, idx) => `
-        <tr class="rank-${idx + 1}">
-          <td>${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '#' + (idx + 1)}</td>
-          <td><strong>${escapeHtml(team.playerName)}</strong></td>
-          <td><strong>${typeof team.round4Points === 'number' ? team.round4Points : '-'}</strong></td>
-          <td><strong>${typeof team.totalScore === 'number' ? team.totalScore : '-'}</strong></td>
-          <td><strong>${team.totalOVR}</strong></td>
-          <td>${team.chemistryBonus >= 0 ? '+' : ''}${team.chemistryBonus}</td>
-          <td>${escapeHtml(team.topPick)}</td>
-        </tr>
-      `).join('')}
+      ${round4State.finalLeaderboard.map((team, idx) => {
+        const teamEvaluations = round4State.allTeamEvaluations && round4State.allTeamEvaluations[team.playerName]
+          ? round4State.allTeamEvaluations[team.playerName].evaluations
+          : [];
+        const topPickEval = Array.isArray(teamEvaluations)
+          ? teamEvaluations.find((entry) => entry.character === team.topPick)
+          : null;
+        const portrait = resolveCharacterImage(team.topPickImageUrl || (topPickEval && topPickEval.imageUrl), 'No Portrait');
+        const portraitMissing = !(team.topPickImageUrl || (topPickEval && topPickEval.imageUrl));
+        const imageHits = Array.isArray(teamEvaluations)
+          ? teamEvaluations.filter((entry) => normalizeImageUrl(entry && entry.imageUrl)).length
+          : 0;
+        const totalPicks = Array.isArray(teamEvaluations) ? teamEvaluations.length : 0;
+
+        return `
+          <tr class="rank-${idx + 1}">
+            <td>${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '#' + (idx + 1)}</td>
+            <td><strong>${escapeHtml(team.playerName)}</strong></td>
+            <td><strong>${typeof team.round4Points === 'number' ? team.round4Points : '-'}</strong></td>
+            <td>
+              <div class="spotlight-cell">
+                <div class="spotlight-image ${portraitMissing ? 'missing' : ''}">
+                  <img
+                    src="${escapeHtml(portrait)}"
+                    alt="${escapeHtml(team.topPick || 'Top Pick')} portrait"
+                    loading="lazy"
+                    decoding="async"
+                    referrerpolicy="no-referrer"
+                    onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';this.closest('.spotlight-image')?.classList.add('missing');"
+                  >
+                </div>
+                <div class="spotlight-meta">
+                  <div class="spotlight-name">${escapeHtml(team.topPick || 'N/A')}</div>
+                  <div class="spotlight-sub">Image Intel: ${imageHits}/${totalPicks}</div>
+                </div>
+              </div>
+            </td>
+            <td><strong>${team.totalOVR}</strong></td>
+            <td>${team.chemistryBonus >= 0 ? '+' : ''}${team.chemistryBonus}</td>
+          </tr>
+        `;
+      }).join('')}
     </tbody>
   `;
   
@@ -448,6 +523,30 @@ function requestFinalResults() {
 function openOVRBreakdown(evalData) {
   const modal = document.getElementById('ovrBreakdownModal');
   if (!modal) return;
+
+  const modalTitle = document.getElementById('modalTitle');
+  if (modalTitle) {
+    modalTitle.textContent = `OVR Breakdown — ${evalData.character}`;
+  }
+
+  const modalImage = document.getElementById('modalCharacterImage');
+  const modalImageWrap = document.getElementById('modalCharacterImageWrap');
+  if (modalImage) {
+    const modalImgSrc = resolveCharacterImage(evalData.imageUrl, 'No Portrait');
+    const hasImage = Boolean(normalizeImageUrl(evalData.imageUrl));
+    modalImage.src = modalImgSrc;
+    modalImage.alt = `${evalData.character} portrait`;
+    if (modalImageWrap) {
+      modalImageWrap.classList.toggle('missing', !hasImage);
+    }
+    modalImage.onerror = function onModalImageError() {
+      this.onerror = null;
+      this.src = buildMissingCharacterImage('No Portrait');
+      if (modalImageWrap) {
+        modalImageWrap.classList.add('missing');
+      }
+    };
+  }
 
   // Populate character summary
   const summaryEl = document.getElementById('modalCharacterSummary');

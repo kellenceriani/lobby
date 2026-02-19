@@ -271,13 +271,22 @@ function registerSocketHandlers(io) {
       player.teamAutoFilled.push(autoFilled);
       game.allCharactersDrafted.push(finalCharacter);
 
+      const pickNumberInRound = player.team.length;
+      const globalDraftOrder = game.allCharactersDrafted.length;
+      const draftedAtMs = Math.max(0, Date.now() - (game.roundStartTime || Date.now()));
+
       if (!game.draftEntries[name]) {
         game.draftEntries[name] = [];
       }
       game.draftEntries[name].push({
         character: finalCharacter,
         originalScenario: game.currentScenario || '',
-        originalTwist: game.currentTwist || ''
+        originalTwist: game.currentTwist || '',
+        draftedRound: (game.currentRound || 0) + 1,
+        pickNumberInRound,
+        globalDraftOrder,
+        draftedAtMs,
+        autoFilled
       });
 
       const allDraftsList = [];

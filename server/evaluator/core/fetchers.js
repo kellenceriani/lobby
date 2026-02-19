@@ -75,6 +75,20 @@ function dedupeByKey(items, keySelector) {
   return out;
 }
 
+function normalizeImageUrl(url) {
+  if (!url) return null;
+  const raw = String(url).trim();
+  if (!raw) return null;
+  if (raw.startsWith('//')) return `https:${raw}`;
+  return raw;
+}
+
+function upscaleWikipediaThumbnail(url, targetSize = 420) {
+  const normalized = normalizeImageUrl(url);
+  if (!normalized) return null;
+  return normalized.replace(/\/(\d+)px-/i, `/${targetSize}px-`);
+}
+
 function createKnownCharacterRecords() {
   const records = new Map();
 
@@ -596,7 +610,11 @@ function mapWikipediaPageToCandidate(page, wikidataMeta = null) {
     source: 'wikipedia',
     title: page.title,
     description: String(page.extract).substring(0, 3200),
-    imageUrl: page.thumbnail && page.thumbnail.source ? page.thumbnail.source : null,
+    imageUrl: upscaleWikipediaThumbnail(
+      (page.original && page.original.source)
+      || (page.thumbnail && page.thumbnail.source)
+      || null
+    ),
     profession: extractProfessionFromWikipedia(page.extract),
     pageprops: page.pageprops || {},
     categories,
@@ -629,7 +647,7 @@ async function fetchFromWikipediaEnhanced(title) {
   const normalized = normalizeName(title);
   if (!normalized) return null;
 
-  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(normalized)}&prop=extracts|pageprops|categories|pageimages&cllimit=24&exintro=false&exchars=4200&explaintext=true&pithumbsize=420&format=json&origin=*`;
+  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(normalized)}&prop=extracts|pageprops|categories|pageimages&cllimit=24&exintro=false&exchars=4200&explaintext=true&piprop=thumbnail|name|original&pithumbsize=420&format=json&origin=*`;
   const json = await getJson(url);
   const pages = json && json.query && json.query.pages ? Object.values(json.query.pages) : [];
   const page = pages[0];
@@ -694,9 +712,47 @@ async function fetchFromWikipediaSummary(character) {
     source: 'wikipedia',
     title: json.title || normalized,
     description: String(json.extract).substring(0, 1400),
-    imageUrl: (json.thumbnail && json.thumbnail.source) || (json.originalimage && json.originalimage.source) || null,
+    imageUrl: upscaleWikipediaThumbnail((json.thumbnail && json.thumbnail.source) || (json.originalimage && json.originalimage.source) || null),
     categories: [],
     aliases: []
+  };
+}
+
+async function enrichCandidateImage(candidate) {
+  if (!candidate) return candidate;
+  const normalizedCandidate = normalizeInfoCandidate(candidate);
+  if (!normalizedCandidate) return candidate;
+
+  const imageUrl = upscaleWikipediaThumbnail(normalizedCandidate.imageUrl);
+  if (imageUrl) {
+    return {
+      ...normalizedCandidate,
+      imageUrl
+    };
+  }
+
+  const title = normalizeName(
+    normalizedCandidate.title
+    || normalizedCandidate.enwikiTitle
+    || normalizedCandidate.wikidataLabel
+    || ''
+  );
+  if (!title) return normalizedCandidate;
+
+  const summary = await fetchFromWikipediaSummary(title).catch(() => null);
+  if (summary && summary.imageUrl) {
+    return {
+      ...normalizedCandidate,
+      imageUrl: upscaleWikipediaThumbnail(summary.imageUrl)
+    };
+  }
+
+  const wikiCandidate = await fetchFromWikipediaEnhanced(title).catch(() => null);
+  if (!wikiCandidate || !wikiCandidate.imageUrl) return normalizedCandidate;
+
+  return {
+    ...normalizedCandidate,
+    imageUrl: upscaleWikipediaThumbnail(wikiCandidate.imageUrl)
   };
 }
 
@@ -1103,8 +1159,9 @@ async function fetchCharacterInfo(character) {
             resolution: seed.resolution
           }
         };
-        setCachedCharacter(character, resolved);
-        return resolved;
+        const resolvedWithImage = await enrichCandidateImage(resolved);
+        setCachedCharacter(character, resolvedWithImage);
+        return resolvedWithImage;
       }
     }
 
@@ -1120,8 +1177,9 @@ async function fetchCharacterInfo(character) {
           resolution: seed.resolution
         }
       };
-      setCachedCharacter(character, resolved);
-      return resolved;
+      const resolvedWithImage = await enrichCandidateImage(resolved);
+      setCachedCharacter(character, resolvedWithImage);
+      return resolvedWithImage;
     }
 
     const secondaryVariants = variants
@@ -1152,8 +1210,9 @@ async function fetchCharacterInfo(character) {
           resolution: seed.resolution
         }
       };
-      setCachedCharacter(character, resolved);
-      return resolved;
+      const resolvedWithImage = await enrichCandidateImage(resolved);
+      setCachedCharacter(character, resolvedWithImage);
+      return resolvedWithImage;
     }
 
     const rescueFetches = [
@@ -1179,8 +1238,9 @@ async function fetchCharacterInfo(character) {
           resolution: seed.resolution
         }
       };
-      setCachedCharacter(character, resolved);
-      return resolved;
+      const resolvedWithImage = await enrichCandidateImage(resolved);
+      setCachedCharacter(character, resolvedWithImage);
+      return resolvedWithImage;
     }
 
     const aliasFallback = fallbackFromAliasIndex(character);

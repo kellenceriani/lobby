@@ -1036,22 +1036,250 @@ socket.on('gameEnded', (data) => {
   if (winnerGallery) {
     const winnerCharacters = Array.isArray(data.winnerCharacters) ? data.winnerCharacters : [];
     if (winnerCharacters.length) {
-      winnerGallery.innerHTML = winnerCharacters.map((entry) => {
+      const stats = data && data.winnerTeamStats ? data.winnerTeamStats : {};
+      const safeMVP = escapeHtml(stats.mvp || 'N/A');
+      const teamOVR = Number(stats.teamOVR) || 0;
+      const round4Points = Number(stats.round4Points) || 0;
+      const chemistryBonus = Number(stats.chemistryBonus) || 0;
+      const chemistryLabel = chemistryBonus >= 0 ? `+${chemistryBonus}` : String(chemistryBonus);
+      const rarityScore = Number(stats.rarityScore) || 0;
+      const pickCountForRarity = Number(stats.picks) || winnerCharacters.length || 6;
+      const rarityMax = Math.max(1, pickCountForRarity * 7);
+      const rarityPercent = Math.max(0, Math.min(100, Math.round((rarityScore / rarityMax) * 100)));
+      const rarityGems = '◆'.repeat(Math.max(1, Math.min(5, Math.round(rarityPercent / 20))));
+      const avgDraftValue = winnerCharacters.length
+        ? Math.round(
+          winnerCharacters.reduce((acc, entry) => acc + (Number(entry && entry.valueVsDraftExpected) || 0), 0)
+          / winnerCharacters.length
+        )
+        : 0;
+      const avgDraftValueLabel = avgDraftValue >= 0 ? `+${avgDraftValue}` : `${avgDraftValue}`;
+      const powerIndex = Math.max(
+        0,
+        Math.round((teamOVR * 0.54) + (round4Points * 0.34) + (rarityScore * 0.18) + (chemistryBonus * 2.25))
+      );
+      const powerTier = powerIndex >= 140 ? 'S+' : powerIndex >= 120 ? 'S' : powerIndex >= 98 ? 'A' : powerIndex >= 82 ? 'B' : 'C';
+      const teamOvrClass = teamOVR >= 92 ? 'ovr-elite' : teamOVR >= 86 ? 'ovr-high' : teamOVR >= 78 ? 'ovr-mid' : 'ovr-low';
+
+      const compactSlots = winnerCharacters.map((entry, index) => {
         const safeName = escapeHtml(entry && entry.character ? entry.character : 'Unknown');
-        const imageUrl = entry && entry.imageUrl ? String(entry.imageUrl) : placeholderImage;
+        const rawImage = entry && entry.imageUrl ? String(entry.imageUrl).trim() : '';
+        const imageUrl = rawImage.startsWith('//') ? `https:${rawImage}` : (rawImage || placeholderImage);
         return `
-          <figure class="winner-char-card ${entry && entry.imageUrl ? '' : 'missing'}">
+          <div class="winner-compact-slot ${rawImage ? '' : 'missing'}" data-slot="${index + 1}" title="${safeName}">
             <img
               src="${escapeHtml(imageUrl)}"
               alt="${safeName}"
               loading="lazy"
               decoding="async"
-              onerror="this.onerror=null;this.src='${placeholderImage}';this.closest('figure')?.classList.add('missing');"
+              onerror="this.onerror=null;this.src='${placeholderImage}';this.closest('.winner-compact-slot')?.classList.add('missing');"
             >
-            <figcaption>${safeName}</figcaption>
-          </figure>
+            <span class="winner-compact-index">${index + 1}</span>
+          </div>
         `;
       }).join('');
+
+      const expandedSlots = winnerCharacters.map((entry, index) => {
+        const safeName = escapeHtml(entry && entry.character ? entry.character : 'Unknown');
+        const rawImage = entry && entry.imageUrl ? String(entry.imageUrl).trim() : '';
+        const imageUrl = rawImage.startsWith('//') ? `https:${rawImage}` : (rawImage || placeholderImage);
+        const rarity = escapeHtml(entry && entry.rarity ? entry.rarity : 'Bronze');
+        const rarityRaw = String(entry && entry.rarity ? entry.rarity : 'bronze').toLowerCase();
+        const rarityClass = rarityRaw.includes('legend') ? 'rarity-legendary'
+          : rarityRaw.includes('epic') ? 'rarity-epic'
+            : rarityRaw.includes('rare') ? 'rarity-rare'
+              : 'rarity-common';
+        const ovr = Number(entry && entry.ovr) || 0;
+        const ovrTier = escapeHtml(entry && entry.ovrTierLabel ? entry.ovrTierLabel : 'Tiered');
+        const source = escapeHtml(entry && entry.infoSource ? entry.infoSource : 'unknown');
+        const sourceRaw = String(entry && entry.infoSource ? entry.infoSource : '').toLowerCase();
+        const sourceClass = sourceRaw.includes('wikipedia') || sourceRaw.includes('wikidata')
+          ? 'source-wiki'
+          : sourceRaw.includes('web')
+            ? 'source-web'
+            : sourceRaw.includes('llm')
+              ? 'source-llm'
+              : 'source-unknown';
+        const characterType = escapeHtml(entry && entry.characterType ? entry.characterType : 'balanced');
+        const draftRound = Number(entry && entry.draftRound) || (Math.floor(index / 2) + 1);
+        const draftPick = Number(entry && entry.pickNumberInRound) || ((index % 2) + 1);
+        const expectedAtDraft = Number(entry && entry.expectedAtDraft) || 0;
+        const expectedNearEnd = Number(entry && entry.expectedNearEnd) || 0;
+        const valueDraft = Number(entry && entry.valueVsDraftExpected) || 0;
+        const valueLate = Number(entry && entry.valueVsLateExpected) || 0;
+        const valueDraftLabel = valueDraft >= 0 ? `+${valueDraft}` : `${valueDraft}`;
+        const valueLateLabel = valueLate >= 0 ? `+${valueLate}` : `${valueLate}`;
+        const ovrToneClass = ovr >= 94 ? 'ovr-elite' : ovr >= 86 ? 'ovr-high' : ovr >= 78 ? 'ovr-mid' : 'ovr-low';
+        const draftedAtMs = Number(entry && entry.draftedAtMs);
+        const draftedAtLabel = Number.isFinite(draftedAtMs) ? `${(draftedAtMs / 1000).toFixed(1)}s` : 'n/a';
+        const draftOrderLabel = Number.isFinite(Number(entry && entry.globalDraftOrder)) ? `#${Number(entry.globalDraftOrder)}` : 'n/a';
+        const insightA = escapeHtml(entry && Array.isArray(entry.notes) && entry.notes[0] ? entry.notes[0] : 'Role fit stabilized under final scenario pressure.');
+        const insightB = escapeHtml(entry && Array.isArray(entry.notes) && entry.notes[1] ? entry.notes[1] : 'Draft value remained resilient into endgame.');
+        const originalScenario = escapeHtml(entry && entry.originalScenario ? entry.originalScenario : 'N/A');
+        const originalTwist = escapeHtml(entry && entry.originalTwist ? entry.originalTwist : 'N/A');
+        return `
+          <article class="winner-char-card winner-flip-card ${rarityClass} tier-${ovrToneClass} ${rawImage ? '' : 'missing'}" data-slot="${index + 1}" role="button" tabindex="0" aria-label="Flip ${safeName} card">
+            <div class="winner-flip-inner">
+              <div class="winner-flip-face winner-flip-front">
+                <span class="winner-slot">${index + 1}</span>
+                <div class="winner-char-frame">
+                  <img
+                    src="${escapeHtml(imageUrl)}"
+                    alt="${safeName}"
+                    loading="lazy"
+                    decoding="async"
+                    onerror="this.onerror=null;this.src='${placeholderImage}';this.closest('article')?.classList.add('missing');"
+                  >
+                </div>
+                <figcaption>${safeName}</figcaption>
+                <div class="winner-char-meta">
+                  <span class="winner-char-ovr ${ovrToneClass}">OVR ${ovr}</span>
+                  <span class="winner-char-rarity">${rarity}</span>
+                </div>
+                <div class="winner-char-submeta">
+                  <span class="winner-char-source ${sourceClass}">${source}</span>
+                  <span class="winner-char-type">${characterType}</span>
+                </div>
+                <div class="winner-flip-hint">Tap to flip</div>
+              </div>
+              <div class="winner-flip-face winner-flip-back">
+                <div class="winner-back-title">${safeName}</div>
+                <div class="winner-back-grid">
+                  <div><span>Tier</span><strong>${ovrTier}</strong></div>
+                  <div><span>Type</span><strong>${characterType}</strong></div>
+                  <div><span>Source</span><strong>${source}</strong></div>
+                  <div><span>Draft</span><strong>R${draftRound} · Pick ${draftPick}</strong></div>
+                  <div><span>Global Slot</span><strong>${draftOrderLabel}</strong></div>
+                  <div><span>Locked At</span><strong>${draftedAtLabel}</strong></div>
+                  <div><span>EV @ Draft</span><strong>${expectedAtDraft}</strong></div>
+                  <div><span>EV Near End</span><strong>${expectedNearEnd}</strong></div>
+                  <div><span>Value vs Draft</span><strong class="${valueDraft >= 0 ? 'plus' : 'minus'}">${valueDraftLabel}</strong></div>
+                  <div><span>Value vs Late</span><strong class="${valueLate >= 0 ? 'plus' : 'minus'}">${valueLateLabel}</strong></div>
+                </div>
+                <div class="winner-back-origin">Drafted Into: ${originalScenario}</div>
+                <div class="winner-back-origin">Twist Context: ${originalTwist}</div>
+                <ul class="winner-back-notes">
+                  <li>${insightA}</li>
+                  <li>${insightB}</li>
+                </ul>
+              </div>
+            </div>
+          </article>
+        `;
+      }).join('');
+
+      winnerGallery.innerHTML = `
+        <section class="winner-squad-stage" aria-label="Champion squad stage">
+          <button class="winner-squad-compact" type="button" aria-expanded="false" aria-controls="winnerSquadExpanded" aria-label="Expand Champion Squad">
+            <div class="winner-compact-title">🏆 ELITE FINAL SIX</div>
+            <div class="winner-compact-lineup">${compactSlots}</div>
+            <div class="winner-compact-stats" aria-label="Champion stats">
+              <span class="winner-stat-chip mvp">MVP: ${safeMVP}</span>
+              <span class="winner-stat-chip ovr ${teamOvrClass}">Team OVR: ${teamOVR}</span>
+              <span class="winner-stat-chip">Chemistry: ${chemistryLabel}</span>
+              <span class="winner-stat-chip">Rarity Score: ${rarityScore}</span>
+              <span class="winner-stat-chip">Power Index: ${powerIndex}</span>
+              <span class="winner-stat-chip">Avg Draft Value: ${avgDraftValueLabel}</span>
+            </div>
+            <div class="winner-compact-hint">Tap to morph into full squad intel • Tap cards to flip</div>
+          </button>
+          <div id="winnerSquadExpanded" class="winner-squad-shell winner-squad-shell-expanded" role="region" aria-label="Champion team expanded" aria-hidden="true">
+          <button class="winner-squad-close" type="button" aria-label="Close Champion Squad">✕</button>
+          <div class="winner-squad-banner">🏆 ELITE FINAL SIX • CHAMPION BREAKDOWN</div>
+          <div class="winner-squad-tools">
+            <button class="winner-flip-all" type="button" aria-pressed="false">🃏 FLIP ALL</button>
+          </div>
+          <div class="winner-expanded-stats" aria-label="Champion detail stats">
+            <div class="winner-expanded-stat mvp wide"><span>MVP</span><strong>${safeMVP} (${Number(stats.mvpOVR) || 0} OVR)</strong></div>
+            <div class="winner-expanded-stat team-ovr"><span>Team OVR</span><strong class="${teamOvrClass}">${teamOVR}</strong></div>
+            <div class="winner-expanded-stat power"><span>Power Index</span><strong>${powerIndex}</strong><em>Tier ${powerTier}</em></div>
+            <div class="winner-expanded-stat rarity wide"><span>Rarity Score</span><div class="rarity-topline"><strong>${rarityScore}</strong><strong class="rarity-rareplus">Rare+: ${Number(stats.rarePlusCount) || 0}/${Number(stats.picks) || winnerCharacters.length}</strong></div><div class="rarity-meter" aria-hidden="true"><span style="width:${rarityPercent}%"></span></div><div class="rarity-gems" aria-label="Rarity intensity">${rarityGems}</div></div>
+            <div class="winner-expanded-stat"><span>Chemistry</span><strong>${chemistryLabel}</strong></div>
+            <div class="winner-expanded-stat"><span>Avg Draft Value</span><strong class="${avgDraftValue >= 0 ? 'plus' : 'minus'}">${avgDraftValueLabel}</strong></div>
+          </div>
+          <div class="winner-char-gallery">
+            ${expandedSlots}
+          </div>
+          <div class="winner-squad-footer">Elite Final Six.</div>
+          </div>
+        </section>
+      `;
+
+      const compactButton = winnerGallery.querySelector('.winner-squad-compact');
+      const expandedShell = winnerGallery.querySelector('.winner-squad-shell-expanded');
+      const closeButton = winnerGallery.querySelector('.winner-squad-close');
+      const flipAllButton = winnerGallery.querySelector('.winner-flip-all');
+      const finalContainer = document.querySelector('.final-container-modern');
+      const squadStage = winnerGallery.querySelector('.winner-squad-stage');
+      const flipCards = winnerGallery.querySelectorAll('.winner-flip-card');
+
+      const setFlipAllState = (flipped) => {
+        if (!flipCards || !flipCards.length) return;
+        flipCards.forEach((card) => {
+          card.classList.toggle('is-flipped', flipped === true);
+        });
+        if (flipAllButton) {
+          flipAllButton.setAttribute('aria-pressed', flipped === true ? 'true' : 'false');
+          flipAllButton.textContent = flipped === true ? '↺ SHOW FRONTS' : '🃏 FLIP ALL';
+        }
+      };
+
+      const closeExpanded = () => {
+        if (!expandedShell || !compactButton) return;
+        expandedShell.classList.remove('is-open');
+        expandedShell.setAttribute('aria-hidden', 'true');
+        compactButton.setAttribute('aria-expanded', 'false');
+        if (finalContainer) finalContainer.classList.remove('squad-open');
+        if (squadStage) squadStage.classList.remove('expanded');
+        setFlipAllState(false);
+      };
+
+      const openExpanded = () => {
+        if (!expandedShell || !compactButton) return;
+        expandedShell.classList.add('is-open');
+        expandedShell.setAttribute('aria-hidden', 'false');
+        compactButton.setAttribute('aria-expanded', 'true');
+        if (finalContainer) finalContainer.classList.add('squad-open');
+        if (squadStage) squadStage.classList.add('expanded');
+      };
+
+      if (compactButton) {
+        compactButton.addEventListener('click', openExpanded);
+      }
+      if (closeButton) {
+        closeButton.addEventListener('click', closeExpanded);
+      }
+
+      if (flipAllButton) {
+        flipAllButton.addEventListener('click', () => {
+          const shouldFlip = flipAllButton.getAttribute('aria-pressed') !== 'true';
+          setFlipAllState(shouldFlip);
+        });
+      }
+
+      if (flipCards && flipCards.length) {
+        flipCards.forEach((card) => {
+          card.addEventListener('click', () => {
+            card.classList.toggle('is-flipped');
+            if (flipAllButton) {
+              const allFlipped = Array.from(flipCards).every((tile) => tile.classList.contains('is-flipped'));
+              flipAllButton.setAttribute('aria-pressed', allFlipped ? 'true' : 'false');
+              flipAllButton.textContent = allFlipped ? '↺ SHOW FRONTS' : '🃏 FLIP ALL';
+            }
+          });
+          card.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              card.classList.toggle('is-flipped');
+              if (flipAllButton) {
+                const allFlipped = Array.from(flipCards).every((tile) => tile.classList.contains('is-flipped'));
+                flipAllButton.setAttribute('aria-pressed', allFlipped ? 'true' : 'false');
+                flipAllButton.textContent = allFlipped ? '↺ SHOW FRONTS' : '🃏 FLIP ALL';
+              }
+            }
+          });
+        });
+      }
     } else {
       winnerGallery.innerHTML = '';
     }

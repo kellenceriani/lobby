@@ -17,11 +17,14 @@ function getOVRTier(ovr) {
 }
 
 function mapScoreToOVR(score) {
-  return Math.round((score / SCORE_MAX) * 99);
+  const normalized = Math.max(0, Math.min(1, (score || 0) / SCORE_MAX));
+  const curved = Math.pow(normalized, 0.86);
+  return Math.round(curved * 99);
 }
 
 function detectRarity(character, info) {
   const lower = String(character || '').toLowerCase();
+  const confidence = info && typeof info.confidence === 'number' ? info.confidence : 0;
 
   if (RARITY_KEYWORDS.icon.some(name => lower.includes(name))) return 15;
   if (RARITY_KEYWORDS.legendary.some(name => lower.includes(name))) return 12;
@@ -39,16 +42,27 @@ function detectRarity(character, info) {
     }
   }
 
-  const nicheSignal = calculateNicheSignal(character, info);
-  if (nicheSignal >= 3) return 6;
-  if (nicheSignal >= 2) return 4;
-  if (info && info.source === 'wikipedia') return 4;
-  if (info) return 2;
+  const obscuritySignal = calculateObscuritySignal(character, info);
 
-  return 0;
+  if (!info) return 0;
+  if (confidence < 0.35) return 1;
+
+  let bonus = 2;
+  if (info.source === 'wikipedia' || info.source === 'wikidata+wiki') bonus += 2;
+  else if (info.source === 'wikipedia-search' || info.source === 'wikidata') bonus += 1;
+
+  if (obscuritySignal >= 7) bonus += 7;
+  else if (obscuritySignal >= 5) bonus += 5;
+  else if (obscuritySignal >= 3) bonus += 3;
+  else if (obscuritySignal >= 2) bonus += 2;
+
+  if (confidence >= 0.75) bonus += 2;
+  else if (confidence >= 0.6) bonus += 1;
+
+  return Math.max(0, Math.min(12, bonus));
 }
 
-function calculateNicheSignal(character, info) {
+function calculateObscuritySignal(character, info) {
   if (!info) return 0;
 
   const lower = String(character || '').toLowerCase();
@@ -61,15 +75,32 @@ function calculateNicheSignal(character, info) {
     return members.some(member => lower.includes(member) || compact.includes(canonicalizeName(member)));
   });
 
+  const inPowerLists = Object.values(POWER_LEVELS).some(names =>
+    names.some(name => lower.includes(name) || compact.includes(canonicalizeName(name)))
+  );
+
   let signal = 0;
   if (!inKnownFranchise) signal += 1;
+  if (!inPowerLists) signal += 1;
   if (Array.isArray(info.categories) && info.categories.length >= 3) signal += 1;
-  if (Array.isArray(info.aliases) && info.aliases.length >= 2) signal += 1;
+  if (Array.isArray(info.aliases) && info.aliases.length >= 3) signal += 1;
 
   const titleWordCount = String(info.title || character || '').trim().split(/\s+/).filter(Boolean).length;
   if (titleWordCount >= 2) signal += 1;
+  if (titleWordCount === 1) signal += 1;
 
-  return Math.min(4, signal);
+  const description = String(info.description || info.wikidataDescription || '').toLowerCase();
+  if (/anime|manga|visual novel|webtoon|light novel|vtuber|mythology|folklore|indie|cult|obscure|niche/.test(description)) {
+    signal += 1;
+  }
+
+  const candidateCount = info.lookupMeta && typeof info.lookupMeta.candidateCount === 'number'
+    ? info.lookupMeta.candidateCount
+    : 0;
+  if (candidateCount >= 10) signal += 2;
+  else if (candidateCount >= 6) signal += 1;
+
+  return Math.min(9, signal);
 }
 
 function getRarityTier(bonus) {
@@ -159,16 +190,20 @@ function calculateAttributes(character, info, scenario, twist, typeData) {
 }
 
 function calculateAdvancedOVR(score, character, info, scenario, twist) {
-  const baseOVR = Math.round((score / SCORE_MAX) * 70);
+  const normalized = Math.max(0, Math.min(1, (score || 0) / SCORE_MAX));
+  const baseOVR = Math.round(38 + (Math.pow(normalized, 0.88) * 42));
   const rarityBonus = detectRarity(character, info);
   const typeData = detectCharacterType(character, info);
   const attributes = calculateAttributes(character, info, scenario, twist, typeData);
 
   const topStats = Object.values(attributes).sort((a, b) => b - a).slice(0, 3);
-  const attributeBonus = Math.round(topStats.reduce((sum, val) => sum + val, 0) / 3 * 0.15);
+  const attributeBonus = Math.round((topStats.reduce((sum, val) => sum + val, 0) / 3) * 0.13);
   const scenarioFit = calculateScenarioFit(character, info, scenario, twist);
+  const confidenceBonus = info && typeof info.confidence === 'number'
+    ? Math.round(Math.max(0, (info.confidence - 0.4) * 12))
+    : 0;
 
-  let finalOVR = Math.round((baseOVR + rarityBonus + attributeBonus) * scenarioFit);
+  let finalOVR = Math.round((baseOVR + rarityBonus + attributeBonus + confidenceBonus) * scenarioFit);
   finalOVR = Math.max(0, Math.min(99, finalOVR));
 
   return {

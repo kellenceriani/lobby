@@ -58,6 +58,8 @@ function scoreInfoCandidate(characterInput, candidate) {
 
   const sourceBase = {
     wikipedia: 0.3,
+    'wikipedia-search': 0.28,
+    'wikidata+wiki': 0.28,
     wikidata: 0.24,
     fandom: 0.18,
     omdb: 0.1,
@@ -71,10 +73,19 @@ function scoreInfoCandidate(characterInput, candidate) {
   let bestAliasMatch = 0;
   queryVariants.forEach(queryVariant => {
     const queryCompact = canonicalizeName(queryVariant);
+    const queryTokens = queryVariant.toLowerCase().split(/\s+/).filter(Boolean);
 
     let variantNameMatch = 0;
     if (queryCompact && titleCompact && queryCompact === titleCompact) {
       variantNameMatch += 0.38;
+    }
+
+    if (queryCompact && titleCompact && (titleCompact.includes(queryCompact) || queryCompact.includes(titleCompact))) {
+      variantNameMatch += 0.08;
+    }
+
+    if (queryTokens.length === 1 && title.toLowerCase().startsWith(`${queryTokens[0]} `)) {
+      variantNameMatch += 0.06;
     }
 
     const similarity = calculateNameSimilarity(queryVariant, title);
@@ -84,6 +95,15 @@ function scoreInfoCandidate(characterInput, candidate) {
     if (aliasCompacts.includes(queryCompact)) variantAliasMatch += 0.24;
     else if (aliasCompacts.some(alias => alias && queryCompact && (alias.includes(queryCompact) || queryCompact.includes(alias)))) {
       variantAliasMatch += 0.12;
+    }
+
+    if (
+      queryTokens.length === 1 &&
+      queryCompact &&
+      titleCompact &&
+      (queryCompact.startsWith(titleCompact) || titleCompact.startsWith(queryCompact))
+    ) {
+      variantAliasMatch += 0.16;
     }
 
     if (description.includes(queryVariant.toLowerCase())) {
@@ -130,6 +150,10 @@ function scoreInfoCandidate(characterInput, candidate) {
     confidenceSignals.penalties -= 0.25;
   }
 
+  if (/\((?:character|mythology|historical figure|actor|singer|writer|athlete)\)/i.test(String(normalized.title || ''))) {
+    confidenceSignals.quality += 0.04;
+  }
+
   score += confidenceSignals.nameMatch;
   score += confidenceSignals.aliasMatch;
   score += confidenceSignals.contextMatch;
@@ -138,10 +162,10 @@ function scoreInfoCandidate(characterInput, candidate) {
 
   let confidence = Math.max(0, Math.min(1, score));
   const linkageScore = confidenceSignals.nameMatch + confidenceSignals.aliasMatch + confidenceSignals.contextMatch;
-  if (linkageScore < 0.12) {
-    confidence = Math.min(confidence, 0.34);
-  } else if (linkageScore < 0.2) {
-    confidence = Math.min(confidence, 0.45);
+  if (linkageScore < 0.09) {
+    confidence = Math.min(confidence, 0.4);
+  } else if (linkageScore < 0.16) {
+    confidence = Math.min(confidence, 0.52);
   }
 
   return {

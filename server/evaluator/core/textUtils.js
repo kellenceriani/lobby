@@ -16,6 +16,12 @@ function canonicalizeName(name) {
   return normalizeName(name).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function stripDiacritics(value) {
+  return normalizeName(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
 function collapseRepeatTypos(value) {
   return normalizeName(value).replace(/([a-z])\1{2,}/gi, '$1$1');
 }
@@ -209,7 +215,20 @@ function getCharacterNameVariants(name) {
 
   const lower = normalized.toLowerCase();
   const compact = canonicalizeName(profile.baseName || normalized);
-  const variants = new Set([normalized, profile.baseName, ...profile.searchFragments]);
+  const baseName = profile.baseName || normalized;
+  const variants = new Set([normalized, baseName, ...profile.searchFragments]);
+
+  const deaccented = stripDiacritics(baseName);
+  if (deaccented && canonicalizeName(deaccented) !== canonicalizeName(baseName)) {
+    variants.add(deaccented);
+  }
+
+  const baseTokens = baseName.split(/\s+/).filter(Boolean);
+  if (baseTokens.length >= 2) {
+    variants.add(baseTokens[0]);
+    variants.add(baseTokens[baseTokens.length - 1]);
+    variants.add(baseTokens.slice(0, 2).join(' '));
+  }
 
   const aliasCandidates = [
     ...(CHARACTER_NAME_ALIASES[lower] || []),
@@ -226,8 +245,8 @@ function getCharacterNameVariants(name) {
     });
   }
 
-  const typoFix = resolveLikelyTypo(profile.baseName);
-  if (typoFix && canonicalizeName(typoFix) !== canonicalizeName(profile.baseName)) {
+  const typoFix = resolveLikelyTypo(baseName);
+  if (typoFix && canonicalizeName(typoFix) !== canonicalizeName(baseName)) {
     variants.add(typoFix);
   }
 

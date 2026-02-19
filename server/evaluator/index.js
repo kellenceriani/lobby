@@ -45,9 +45,10 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
     };
   }
 
-  const info = validation.wordCount <= 4 ? await fetchCharacterInfo(character) : null;
+  const info = await fetchCharacterInfo(character);
   const infoConfidence = info && typeof info.confidence === 'number' ? info.confidence : 0;
   const trustedInfo = infoConfidence >= MIN_INFO_CONFIDENCE ? info : null;
+  const scoringInfo = trustedInfo || info;
 
   if (trustedInfo) {
     console.log(`✅ Found info for "${character}" from ${trustedInfo.source} (confidence ${Math.round(infoConfidence * 100)}%)`);
@@ -55,22 +56,25 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
     console.log(`⚠️ No trusted info found for "${character}"`);
   }
 
+  const infoRichness = scoringInfo
+    ? Math.min(
+      4,
+      (scoringInfo.description && scoringInfo.description.length >= 600 ? 2 : 0) +
+      (Array.isArray(scoringInfo.aliases) && scoringInfo.aliases.length >= 2 ? 1 : 0) +
+      (Array.isArray(scoringInfo.categories) && scoringInfo.categories.length >= 3 ? 1 : 0)
+    )
+    : 0;
+
   let score = trustedInfo
-    ? infoConfidence >= 0.86
-      ? 16
-      : infoConfidence >= 0.75
-      ? 14
-      : infoConfidence >= 0.62
-      ? 12
-      : 10
-    : 8;
+    ? Math.round(7 + (infoConfidence * 9) + infoRichness)
+    : 6;
 
   const scoreBreakdownSteps = [];
   scoreBreakdownSteps.push({
     step: 'Base Score',
     points: score,
     description: trustedInfo
-      ? `Character resolved via APIs (${Math.round(infoConfidence * 100)}% confidence, ${trustedInfo.confidenceBand || 'n/a'} band)`
+      ? `Character resolved via APIs (${Math.round(infoConfidence * 100)}% confidence, ${trustedInfo.confidenceBand || 'n/a'} band, richness +${infoRichness})`
       : 'Unknown or low-confidence match'
   });
 
@@ -80,7 +84,7 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
     scoreBreakdownSteps.push({ step: 'Name Signals', points: nameSignals.points, description: nameSignals.note });
   }
 
-  const relevance = scoreRelevance(character, trustedInfo, scenario, twist);
+  const relevance = scoreRelevance(character, scoringInfo, scenario, twist);
   score += relevance.points;
   if (relevance.points !== 0) {
     scoreBreakdownSteps.push({ step: 'Scenario/Twist Relevance', points: relevance.points, description: relevance.note });
@@ -88,7 +92,7 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
 
   const draftedScenario = options.originalScenario || scenario;
   const draftedTwist = options.originalTwist || twist;
-  const draftedFitBonus = calculateDraftedFitBonus(trustedInfo, draftedScenario, draftedTwist, character);
+  const draftedFitBonus = calculateDraftedFitBonus(scoringInfo, draftedScenario, draftedTwist, character);
   const draftedScenarioBonus = Math.min(3, draftedFitBonus.scenario || 0);
   const draftedTwistBonus = Math.min(3, draftedFitBonus.twist || 0);
 
@@ -110,19 +114,29 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
     });
   }
 
-  if (trustedInfo && trustedInfo.source === 'wikipedia') {
-    score += 2;
-    scoreBreakdownSteps.push({ step: 'Wikipedia Source', points: 2, description: 'Found on Wikipedia (prestigious source)' });
+  if (scoringInfo && scoringInfo.source === 'wikipedia') {
+    score += 1;
+    scoreBreakdownSteps.push({ step: 'Wikipedia Source', points: 1, description: 'Found on Wikipedia (high-trust source)' });
+  }
+
+  if (!trustedInfo && info) {
+    const lowConfidencePenalty = infoConfidence < 0.2 ? -3 : infoConfidence < 0.3 ? -2 : -1;
+    score += lowConfidencePenalty;
+    scoreBreakdownSteps.push({
+      step: 'Low Confidence Penalty',
+      points: lowConfidencePenalty,
+      description: `Low-confidence resolution (${Math.round(infoConfidence * 100)}%)`
+    });
   }
 
   if (!trustedInfo && validation.wordCount >= 3) {
-    score -= 2;
-    scoreBreakdownSteps.push({ step: 'Long Unknown Name', points: -2, description: '3+ words but not found in database' });
+    score -= 1;
+    scoreBreakdownSteps.push({ step: 'Long Unknown Name', points: -1, description: '3+ words but no trusted match' });
   }
 
   score = Math.max(SCORE_MIN, Math.min(SCORE_MAX, score));
 
-  const ovrData = calculateAdvancedOVR(score, character, trustedInfo, scenario, twist);
+  const ovrData = calculateAdvancedOVR(score, character, scoringInfo, scenario, twist);
   const roundedScore = Math.round(score);
 
   const result = {
@@ -134,22 +148,22 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
     attributes: ovrData.attributes,
     rarity: ovrData.rarity,
     characterType: ovrData.type,
-    reason: trustedInfo ? 'Evaluated' : 'Unknown character',
+    reason: scoringInfo ? (trustedInfo ? 'Evaluated' : 'Low-confidence character match') : 'Unknown character',
     notes: buildNotes({
       validation,
-      info: trustedInfo,
+      info: scoringInfo,
       scenario,
       twist,
       score,
       scoreMeta: {
         relevanceNote: relevance.note || nameSignals.note,
-        infoConfidence: trustedInfo ? infoConfidence : 0
+        infoConfidence: scoringInfo ? infoConfidence : 0
       }
     }),
     breakdown: buildBreakdown({
       character,
       validation,
-      info: trustedInfo,
+      info: scoringInfo,
       scenario,
       twist,
       score: roundedScore,

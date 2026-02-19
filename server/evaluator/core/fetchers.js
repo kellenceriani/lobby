@@ -1,99 +1,106 @@
 const https = require('https');
-const { WIKI_SEARCH_HINTS, CHARACTER_NAME_ALIASES } = require('./constants');
+const { WIKI_SEARCH_HINTS, CHARACTER_NAME_ALIASES, FRANCHISE_DATABASE, RARITY_KEYWORDS, POWER_LEVELS, MIN_INFO_CONFIDENCE } = require('./constants');
 const { normalizeName, canonicalizeName, getCharacterNameVariants, parseCharacterQuery, resolveLikelyTypo } = require('./textUtils');
 const { normalizeInfoCandidate, extractProfessionFromWikipedia, pickBestInfoCandidate } = require('./candidateScoring');
 
 const FETCH_CACHE = new Map();
 const INFLIGHT_FETCHES = new Map();
-const CACHE_TTL = 3600000;
+const CACHE_TTL = 60 * 60 * 1000;
 
-function getJson(url, timeoutMs = 4500) {
-  return new Promise((resolve) => {
-    const req = https.get(
-      url,
-      {
-        headers: {
-          'User-Agent': 'LobbyWARS/1.1',
-          Accept: 'application/json'
-        }
-      },
-      (res) => {
-        let data = '';
-        res.on('data', chunk => { data += chunk; });
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data));
-          } catch (e) {
-            resolve(null);
+async function getJson(url, timeoutMs = 6500, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const json = await new Promise((resolve) => {
+      const request = https.get(
+        url,
+        {
+          headers: {
+            'User-Agent': 'LobbyWARS/1.3',
+            Accept: 'application/json'
           }
-        });
-      }
-    );
+        },
+        (response) => {
+          let data = '';
+          response.on('data', chunk => { data += chunk; });
+          response.on('end', () => {
+            if (response.statusCode && response.statusCode >= 400) return resolve(null);
+            try {
+              resolve(JSON.parse(data));
+            } catch (error) {
+              resolve(null);
+            }
+          });
+        }
+      );
 
-    req.on('error', () => resolve(null));
-    req.setTimeout(timeoutMs, () => {
-      req.destroy();
-      resolve(null);
+      request.on('error', () => resolve(null));
+      request.setTimeout(timeoutMs, () => {
+        request.destroy();
+        resolve(null);
+      });
     });
-  });
+
+    if (json) return json;
+  }
+
+  return null;
 }
 
 function getCachedCharacter(name) {
-  const normalized = name.toLowerCase().trim();
-  const cached = FETCH_CACHE.get(normalized);
+  const key = normalizeName(name).toLowerCase();
+  const cached = FETCH_CACHE.get(key);
   if (!cached) return null;
-  if (Date.now() - cached.timestamp > CACHE_TTL) {
-    FETCH_CACHE.delete(normalized);
+  const ttl = typeof cached.ttl === 'number' ? cached.ttl : CACHE_TTL;
+  if (Date.now() - cached.timestamp > ttl) {
+    FETCH_CACHE.delete(key);
     return null;
   }
   return cached.data;
 }
 
-function setCachedCharacter(name, data) {
-  FETCH_CACHE.set(name.toLowerCase().trim(), {
-    data,
-    timestamp: Date.now()
-  });
+function setCachedCharacter(name, data, ttl = CACHE_TTL) {
+  const key = normalizeName(name).toLowerCase();
+  FETCH_CACHE.set(key, { data, timestamp: Date.now(), ttl });
 }
 
-function toTitleCase(text) {
-  return String(text || '')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(token => token.charAt(0).toUpperCase() + token.slice(1))
-    .join(' ');
+function dedupeByKey(items, keySelector) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items) {
+    if (!item) continue;
+    const key = keySelector(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 function fallbackFromAliasIndex(character) {
-  const variants = getCharacterNameVariants(character).map(v => canonicalizeName(v));
-  const aliasEntries = Object.entries(CHARACTER_NAME_ALIASES);
+  const variants = getCharacterNameVariants(character).map(name => canonicalizeName(name));
 
-  for (const [key, aliases] of aliasEntries) {
-    const all = [key, ...(Array.isArray(aliases) ? aliases : [])]
-      .map(name => normalizeName(name))
-      .filter(Boolean);
+  for (const [canonical, aliases] of Object.entries(CHARACTER_NAME_ALIASES)) {
+    const all = [canonical, ...(Array.isArray(aliases) ? aliases : [])].map(normalizeName).filter(Boolean);
     const allCanonical = all.map(name => canonicalizeName(name));
+    if (!allCanonical.some(alias => variants.includes(alias))) continue;
 
-    if (allCanonical.some(aliasCanon => variants.includes(aliasCanon))) {
-      const bestTitle = all.find(name => name.includes(' ')) || all[0] || key;
-      return {
-        source: 'local-index',
-        title: toTitleCase(bestTitle),
-        description: `Resolved via local alias index for ${character}.`,
-        aliases: all,
-        categories: ['fictional characters'],
-        confidence: 0.58,
-        confidenceBand: 'medium',
-        confidenceSignals: {
-          sourceReliability: 0.16,
-          nameMatch: 0.22,
-          aliasMatch: 0.2,
-          contextMatch: 0,
-          quality: 0,
-          penalties: 0
-        }
-      };
-    }
+    const title = all.find(name => name.includes(' ')) || all[0] || character;
+    return {
+      source: 'local-index',
+      title,
+      description: `Resolved via local alias index for ${character}.`,
+      aliases: all,
+      categories: ['character/person name match'],
+      confidence: 0.58,
+      confidenceBand: 'medium',
+      confidenceSignals: {
+        sourceReliability: 0.16,
+        nameMatch: 0.22,
+        aliasMatch: 0.2,
+        contextMatch: 0,
+        quality: 0,
+        penalties: 0
+      }
+    };
   }
 
   return null;
@@ -109,7 +116,7 @@ function fallbackFromTypo(character) {
 
   return {
     source: 'local-index',
-    title: toTitleCase(corrected),
+    title: corrected,
     description: `Resolved via typo-correction fallback for ${character}.`,
     aliases: [profile.baseName || character, corrected],
     categories: ['character/person name match'],
@@ -126,123 +133,437 @@ function fallbackFromTypo(character) {
   };
 }
 
-async function fetchWikidataMetadata(entityId) {
-  if (!entityId) return null;
-  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(entityId)}&languages=en&props=labels|descriptions|aliases&format=json&origin=*`;
+function fallbackFromKnowledgeIndex(character) {
+  const normalized = normalizeName(character).toLowerCase();
+  const compact = canonicalizeName(character);
+  if (!normalized || !compact) return null;
 
-  try {
-    const json = await getJson(url);
-    const entity = json && json.entities ? json.entities[entityId] : null;
-    if (!entity) return null;
+  const findInList = (names) => (Array.isArray(names) ? names : []).find((name) => {
+    const target = normalizeName(name).toLowerCase();
+    const targetCompact = canonicalizeName(name);
+    return normalized === target || compact === targetCompact || normalized.includes(target) || target.includes(normalized);
+  });
 
-    const aliases = entity.aliases && entity.aliases.en
-      ? entity.aliases.en.map(item => item && item.value).filter(Boolean).slice(0, 16)
-      : [];
+  for (const [franchise, data] of Object.entries(FRANCHISE_DATABASE)) {
+    const members = Array.isArray(data) ? data : data.members;
+    const matched = findInList(members);
+    if (!matched) continue;
 
     return {
-      wikidataId: entityId,
-      wikidataLabel: entity.labels && entity.labels.en ? entity.labels.en.value : null,
-      wikidataDescription: entity.descriptions && entity.descriptions.en ? entity.descriptions.en.value : null,
-      aliases
+      source: 'local-index',
+      title: normalizeName(matched),
+      description: `Resolved via built-in franchise index (${franchise}).`,
+      aliases: [normalizeName(matched)],
+      categories: ['fictional characters', `${franchise} franchise`],
+      confidence: 0.56,
+      confidenceBand: 'medium',
+      confidenceSignals: {
+        sourceReliability: 0.14,
+        nameMatch: 0.22,
+        aliasMatch: 0.14,
+        contextMatch: 0,
+        quality: 0.06,
+        penalties: 0
+      }
     };
-  } catch (e) {
-    return null;
   }
-}
 
-async function fetchFromWikipediaEnhanced(title) {
-  const normalized = normalizeName(title);
-  const query = encodeURIComponent(normalized);
-  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${query}&prop=extracts|pageprops|categories&cllimit=36&exintro=false&exchars=4200&explaintext=true&format=json&origin=*`;
+  for (const [tier, names] of Object.entries(RARITY_KEYWORDS)) {
+    const matched = findInList(names);
+    if (!matched) continue;
 
-  try {
-    const json = await getJson(url);
-    if (!json || !json.query || !json.query.pages) return null;
+    return {
+      source: 'local-index',
+      title: normalizeName(matched),
+      description: `Resolved via built-in rarity index (${tier}).`,
+      aliases: [normalizeName(matched)],
+      categories: ['known character'],
+      confidence: 0.52,
+      confidenceBand: 'medium',
+      confidenceSignals: {
+        sourceReliability: 0.14,
+        nameMatch: 0.2,
+        aliasMatch: 0.12,
+        contextMatch: 0,
+        quality: 0.06,
+        penalties: 0
+      }
+    };
+  }
 
-    const pages = json.query.pages;
-    const firstPage = Object.values(pages)[0];
+  for (const [className, names] of Object.entries(POWER_LEVELS)) {
+    const matched = findInList(names);
+    if (!matched) continue;
 
-    if (firstPage && firstPage.extract && !firstPage.extract.includes('Disambiguation') && !firstPage.extract.includes('may refer to')) {
-      const profession = extractProfessionFromWikipedia(firstPage.extract);
-      const categories = Array.isArray(firstPage.categories)
-        ? firstPage.categories.map(c => (c && c.title ? c.title.replace(/^Category:/, '') : '')).filter(Boolean).slice(0, 16)
-        : [];
-      const wikidataMeta = await fetchWikidataMetadata(firstPage.pageprops && firstPage.pageprops.wikibase_item);
-
-      return {
-        source: 'wikipedia',
-        description: firstPage.extract.substring(0, 3200),
-        title: firstPage.title,
-        profession,
-        pageprops: firstPage.pageprops || {},
-        categories,
-        aliases: wikidataMeta && wikidataMeta.aliases ? wikidataMeta.aliases : [],
-        wikidataDescription: wikidataMeta ? wikidataMeta.wikidataDescription : null,
-        wikidataId: wikidataMeta ? wikidataMeta.wikidataId : null
-      };
-    }
-  } catch (e) {
-    return null;
+    return {
+      source: 'local-index',
+      title: normalizeName(matched),
+      description: `Resolved via built-in power index (${className}).`,
+      aliases: [normalizeName(matched)],
+      categories: ['known character'],
+      confidence: 0.5,
+      confidenceBand: 'medium',
+      confidenceSignals: {
+        sourceReliability: 0.12,
+        nameMatch: 0.2,
+        aliasMatch: 0.1,
+        contextMatch: 0,
+        quality: 0.08,
+        penalties: 0
+      }
+    };
   }
 
   return null;
 }
 
+function fallbackFromNameOnly(character) {
+  const title = normalizeName(character);
+  if (!title) return null;
+
+  return {
+    source: 'name-only',
+    title,
+    description: `${title} (no verified external record; using lexical profile fallback).`,
+    aliases: [title],
+    categories: ['unverified character'],
+    confidence: 0.34,
+    confidenceBand: 'low',
+    confidenceSignals: {
+      sourceReliability: 0.06,
+      nameMatch: 0.18,
+      aliasMatch: 0.1,
+      contextMatch: 0,
+      quality: 0,
+      penalties: 0
+    }
+  };
+}
+
+function pickBestCandidate(character, candidates) {
+  const bestScored = pickBestInfoCandidate(character, candidates);
+  if (bestScored) return bestScored;
+
+  const preScored = (Array.isArray(candidates) ? candidates : [])
+    .filter(candidate => candidate && typeof candidate.confidence === 'number')
+    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+
+  if (!preScored.length) return null;
+  return preScored[0].confidence >= MIN_INFO_CONFIDENCE ? preScored[0] : null;
+}
+
+async function fetchWikidataMetadata(entityId) {
+  if (!entityId) return null;
+
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(entityId)}&languages=en&props=labels|descriptions|aliases|sitelinks&format=json&origin=*`;
+  const json = await getJson(url);
+  const entity = json && json.entities ? json.entities[entityId] : null;
+  if (!entity) return null;
+
+  const aliases = entity.aliases && entity.aliases.en
+    ? entity.aliases.en.map(entry => entry && entry.value).filter(Boolean).slice(0, 20)
+    : [];
+
+  return {
+    wikidataId: entityId,
+    wikidataLabel: entity.labels && entity.labels.en ? entity.labels.en.value : null,
+    wikidataDescription: entity.descriptions && entity.descriptions.en ? entity.descriptions.en.value : null,
+    enwikiTitle: entity.sitelinks && entity.sitelinks.enwiki ? entity.sitelinks.enwiki.title : null,
+    aliases
+  };
+}
+
+function mapWikipediaPageToCandidate(page, wikidataMeta = null) {
+  if (!page || !page.extract) return null;
+  if (/disambiguation|may refer to/i.test(page.extract)) return null;
+
+  const categories = Array.isArray(page.categories)
+    ? page.categories.map(c => (c && c.title ? c.title.replace(/^Category:/, '') : '')).filter(Boolean).slice(0, 20)
+    : [];
+
+  return {
+    source: 'wikipedia',
+    title: page.title,
+    description: String(page.extract).substring(0, 3200),
+    profession: extractProfessionFromWikipedia(page.extract),
+    pageprops: page.pageprops || {},
+    categories,
+    aliases: wikidataMeta && Array.isArray(wikidataMeta.aliases) ? wikidataMeta.aliases : [],
+    wikidataDescription: wikidataMeta ? wikidataMeta.wikidataDescription : null,
+    wikidataId: wikidataMeta ? wikidataMeta.wikidataId : null
+  };
+}
+
+async function fetchWikipediaDisambiguationLinks(title, limit = 14) {
+  const normalized = normalizeName(title);
+  if (!normalized) return [];
+
+  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(normalized)}&prop=links&plnamespace=0&pllimit=${Math.max(5, Math.min(50, limit * 3))}&format=json&origin=*`;
+  const json = await getJson(url);
+  const pages = json && json.query && json.query.pages ? Object.values(json.query.pages) : [];
+  const page = pages[0];
+  const links = page && Array.isArray(page.links) ? page.links : [];
+
+  return dedupeByKey(
+    links
+      .map(link => normalizeName(link && link.title))
+      .filter(Boolean)
+      .filter(linkTitle => !/(disambiguation|list of|surname|given name|may refer to)/i.test(linkTitle)),
+    linkTitle => linkTitle.toLowerCase()
+  ).slice(0, limit);
+}
+
+async function fetchFromWikipediaEnhanced(title) {
+  const normalized = normalizeName(title);
+  if (!normalized) return null;
+
+  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(normalized)}&prop=extracts|pageprops|categories&cllimit=24&exintro=false&exchars=4200&explaintext=true&format=json&origin=*`;
+  const json = await getJson(url);
+  const pages = json && json.query && json.query.pages ? Object.values(json.query.pages) : [];
+  const page = pages[0];
+  if (!page || !page.extract) return null;
+
+  if (/disambiguation|may refer to/i.test(String(page.extract))) {
+    return null;
+  }
+
+  const wikidataId = page.pageprops && page.pageprops.wikibase_item;
+  const wikidataMeta = await fetchWikidataMetadata(wikidataId);
+  return mapWikipediaPageToCandidate(page, wikidataMeta);
+}
+
 async function fetchFromWikipediaSummary(character) {
   const normalized = normalizeName(character);
-  const query = encodeURIComponent(normalized.replace(/\s+/g, '_'));
-  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${query}`;
+  if (!normalized) return null;
+
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(normalized.replace(/\s+/g, '_'))}`;
   const json = await getJson(url);
   if (!json || !json.extract || json.type === 'disambiguation') return null;
 
   return {
     source: 'wikipedia',
-    description: json.extract.substring(0, 1200),
-    title: json.title || normalized
+    title: json.title || normalized,
+    description: String(json.extract).substring(0, 1400),
+    categories: [],
+    aliases: []
   };
+}
+
+async function searchWikipediaTitles(queryText, limit = 8) {
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(queryText)}&srlimit=${limit}&format=json&origin=*`;
+  const json = await getJson(url);
+  const rows = json && json.query && Array.isArray(json.query.search) ? json.query.search : [];
+  return rows
+    .map((row) => {
+      if (!row || !row.title) return null;
+      return {
+        title: row.title,
+        pageId: row.pageid || null,
+        snippet: row.snippet ? String(row.snippet).replace(/<[^>]+>/g, ' ') : ''
+      };
+    })
+    .filter(Boolean);
+}
+
+async function fetchFromWikipediaOpenSearch(character, contextHints = []) {
+  const normalized = normalizeName(character);
+  if (!normalized) return null;
+
+  const query = [normalized, ...contextHints.slice(0, 2)].join(' ').trim();
+  const url = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=8&namespace=0&format=json&origin=*`;
+  const json = await getJson(url);
+
+  if (!Array.isArray(json) || !Array.isArray(json[1])) return null;
+  const titles = json[1].slice(0, 8).map(title => normalizeName(title)).filter(Boolean);
+  if (!titles.length) return null;
+
+  const candidates = await Promise.all(titles.map(title => fetchFromWikipediaEnhanced(title).catch(() => null)));
+  return pickBestInfoCandidate(character, candidates);
+}
+
+async function fetchFromWikipediaPrefixSearch(character) {
+  const normalized = normalizeName(character);
+  if (!normalized) return null;
+
+  const token = normalized.split(/\s+/).filter(Boolean)[0] || normalized;
+  const attempts = [normalized];
+  if (token.length >= 8) {
+    attempts.push(token.slice(0, Math.max(6, token.length - 2)));
+    attempts.push(token.slice(0, 6));
+  }
+
+  for (const attempt of dedupeByKey(attempts, value => value.toLowerCase())) {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=prefixsearch&pssearch=${encodeURIComponent(attempt)}&pslimit=10&format=json&origin=*`;
+    const json = await getJson(url);
+    const rows = json && json.query && Array.isArray(json.query.prefixsearch) ? json.query.prefixsearch : [];
+    const titles = rows.map(row => normalizeName(row && row.title)).filter(Boolean);
+    if (!titles.length) continue;
+
+    const candidates = await Promise.all(titles.slice(0, 8).map(title => fetchFromWikipediaEnhanced(title).catch(() => null)));
+    const best = pickBestInfoCandidate(character, candidates);
+    if (best) return best;
+  }
+
+  return null;
 }
 
 async function fetchFromWikipediaSearchEnhanced(character, contextHints = []) {
   const normalized = normalizeName(character);
-  const candidatePool = [];
+  if (!normalized) return null;
 
-  const runSearch = async (queryText, limit = 6) => {
-    const query = encodeURIComponent(queryText);
-    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&srlimit=${limit}&format=json&origin=*`;
-    const json = await getJson(url);
-    return json && json.query && Array.isArray(json.query.search) ? json.query.search : [];
+  const queryVariants = [
+    normalized,
+    `"${normalized}"`,
+    `${normalized} character`,
+    `${normalized} person`,
+    `${normalized} singer`,
+    `${normalized} actor`,
+    `${normalized} athlete`,
+    `${normalized} writer`,
+    `${normalized} fictional character`,
+    `${normalized} mythology`,
+    ...contextHints.slice(0, 3).flatMap(hint => [`${normalized} ${hint}`, `${hint} ${normalized}`]),
+    ...WIKI_SEARCH_HINTS.slice(0, 6).map(hint => `${normalized} ${hint}`)
+  ];
+
+  const uniqueQueries = dedupeByKey(
+    queryVariants.map(text => normalizeName(text)).filter(Boolean),
+    text => text.toLowerCase()
+  ).slice(0, 12);
+
+  const resultLists = await Promise.all(uniqueQueries.map(query => searchWikipediaTitles(query).catch(() => [])));
+  const searchRows = dedupeByKey(
+    resultLists.flat().filter(Boolean),
+    row => normalizeName(row.title).toLowerCase()
+  ).slice(0, 18);
+
+  const candidates = await Promise.all(searchRows.map(async (row) => {
+    const candidate = await fetchFromWikipediaEnhanced(row.title).catch(() => null);
+    if (!candidate) return null;
+    return {
+      ...candidate,
+      source: 'wikipedia-search',
+      searchSnippet: row.snippet || null
+    };
+  }));
+  const best = pickBestInfoCandidate(character, candidates);
+  if (best) return best;
+
+  const topTitle = searchRows[0] && searchRows[0].title ? searchRows[0].title : normalized;
+  const disambiguationTitles = await fetchWikipediaDisambiguationLinks(topTitle, 10);
+  if (!disambiguationTitles.length) return null;
+
+  const disambiguationCandidates = await Promise.all(disambiguationTitles.map(async (title) => {
+    const candidate = await fetchFromWikipediaEnhanced(title).catch(() => null);
+    if (!candidate) return null;
+    return {
+      ...candidate,
+      source: 'wikipedia-search'
+    };
+  }));
+
+  return pickBestInfoCandidate(character, disambiguationCandidates);
+}
+
+async function fetchWikipediaCandidateFromWikidataRow(row) {
+  if (!row || !row.id) return null;
+
+  const meta = await fetchWikidataMetadata(row.id);
+  const enwikiTitle = meta && meta.enwikiTitle ? meta.enwikiTitle : null;
+  if (!enwikiTitle) return null;
+
+  const wikiCandidate = await fetchFromWikipediaEnhanced(enwikiTitle);
+  if (!wikiCandidate) return null;
+
+  return {
+    ...wikiCandidate,
+    source: 'wikidata+wiki',
+    aliases: dedupeByKey([...(wikiCandidate.aliases || []), ...((meta && meta.aliases) || [])], alias => normalizeName(alias).toLowerCase()),
+    wikidataDescription: (meta && meta.wikidataDescription) || row.description || null,
+    wikidataId: row.id
   };
+}
 
-  try {
-    const baselineQueries = [
-      normalized,
-      `"${normalized}"`,
-      `${normalized} character`,
-      `${normalized} person`
-    ];
+async function fetchFromWikidata(character, contextHints = []) {
+  const normalized = normalizeName(character);
+  if (!normalized) return null;
 
-    contextHints.forEach(hint => {
-      baselineQueries.push(`${normalized} ${hint}`);
-      baselineQueries.push(`${hint} ${normalized}`);
-    });
+  const queries = [normalized, ...contextHints.slice(0, 3).map(hint => `${normalized} ${hint}`)].slice(0, 6);
+  const searchResults = await Promise.all(
+    queries.map(async (query) => {
+      const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=6&origin=*`;
+      const json = await getJson(url);
+      return json && Array.isArray(json.search) ? json.search : [];
+    })
+  );
 
-    WIKI_SEARCH_HINTS.slice(0, 10).forEach(hint => baselineQueries.push(`${normalized} ${hint}`));
+  const rankedRows = dedupeByKey(
+    searchResults.flat().filter(Boolean),
+    candidate => candidate.id
+  ).slice(0, 8);
 
-    const dedupedQueries = Array.from(new Set(baselineQueries.map(normalizeName).filter(Boolean)));
+  if (!rankedRows.length) return null;
 
-    for (const queryText of dedupedQueries) {
-      const results = await runSearch(queryText);
-      for (const result of results) {
-        if (!result || !result.title) continue;
-        const pageResult = await fetchFromWikipediaEnhanced(result.title);
-        if (pageResult) candidatePool.push(pageResult);
-      }
+  const allCandidates = await Promise.all(rankedRows.map(async (row) => {
+    const [meta, wikiCandidate] = await Promise.all([
+      fetchWikidataMetadata(row.id),
+      fetchWikipediaCandidateFromWikidataRow(row).catch(() => null)
+    ]);
+
+    const wikidataCandidate = {
+      source: 'wikidata',
+      title: row.label || normalized,
+      description: row.description || (meta && meta.wikidataDescription) || 'Wikidata entity',
+      profession: row.description || null,
+      aliases: meta && Array.isArray(meta.aliases) ? meta.aliases : [],
+      wikidataDescription: meta ? meta.wikidataDescription : row.description || null,
+      wikidataId: row.id || null,
+      categories: []
+    };
+
+    return [wikidataCandidate, wikiCandidate].filter(Boolean);
+  }));
+
+  const flattenedCandidates = allCandidates.flat();
+  return pickBestInfoCandidate(character, flattenedCandidates);
+}
+
+async function fetchFromFandom(character, contextHints = []) {
+  const normalized = normalizeName(character);
+  if (!normalized) return null;
+
+  const query = [normalized, ...contextHints.slice(0, 2)].join(' ').trim();
+  const searchUrl = `https://community.fandom.com/api/v1/Search/List?query=${encodeURIComponent(query)}&limit=4&ns=0`;
+  const searchJson = await getJson(searchUrl);
+  const items = searchJson && Array.isArray(searchJson.items) ? searchJson.items : [];
+
+  for (const item of items) {
+    if (!item || !item.url) continue;
+    try {
+      const parsed = new URL(item.url);
+      const wikiIndex = parsed.pathname.indexOf('/wiki/');
+      if (wikiIndex < 0) continue;
+
+      const articleTitle = decodeURIComponent(parsed.pathname.slice(wikiIndex + 6));
+      const apiUrl = `https://${parsed.hostname}/api.php?action=query&titles=${encodeURIComponent(articleTitle)}&prop=extracts&explaintext=true&format=json&origin=*`;
+      const pageJson = await getJson(apiUrl);
+      const pages = pageJson && pageJson.query && pageJson.query.pages ? Object.values(pageJson.query.pages) : [];
+      const page = pages[0];
+      if (!page || !page.extract) continue;
+
+      return {
+        source: 'fandom',
+        title: page.title || articleTitle,
+        description: String(page.extract).substring(0, 1800),
+        aliases: [],
+        categories: ['fictional characters']
+      };
+    } catch (error) {
+      continue;
     }
-  } catch (e) {
-    return null;
   }
 
-  return pickBestInfoCandidate(character, candidatePool);
+  return null;
 }
 
 async function fetchFromOMDb(character) {
@@ -252,171 +573,176 @@ async function fetchFromOMDb(character) {
   const query = encodeURIComponent(normalizeName(character));
   const url = `https://www.omdbapi.com/?apikey=${apiKey}&s=${query}`;
   const json = await getJson(url);
-  if (json && json.Search && json.Search[0]) {
-    const top = json.Search[0];
-    return {
-      source: 'omdb',
-      description: `${top.Type || 'title'}: ${top.Title} (${top.Year || 'n/a'})`,
-      title: top.Title
-    };
-  }
 
-  return null;
-}
-
-async function fetchFromWikidata(character, contextHints = []) {
-  const normalized = normalizeName(character);
-  const searches = [normalized, ...contextHints.map(h => `${normalized} ${h}`)].slice(0, 6);
-
-  const allCandidates = [];
-
-  for (const searchText of searches) {
-    const query = encodeURIComponent(searchText);
-    const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${query}&language=en&format=json&limit=8&origin=*`;
-    const searchJson = await getJson(searchUrl);
-    const results = searchJson && Array.isArray(searchJson.search) ? searchJson.search : [];
-
-    results.forEach(candidate => {
-      if (!candidate || !candidate.label) return;
-      allCandidates.push(candidate);
-    });
-  }
-
-  const bestCandidate = allCandidates[0];
-  if (!bestCandidate) return null;
-
-  const wikidataMeta = await fetchWikidataMetadata(bestCandidate.id);
+  if (!json || !Array.isArray(json.Search) || !json.Search.length) return null;
+  const top = json.Search[0];
 
   return {
-    source: 'wikidata',
-    description: `${bestCandidate.description || 'Wikidata entity'} (${bestCandidate.label || normalized})`,
-    title: bestCandidate.label || normalized,
-    profession: bestCandidate.description || null,
-    aliases: wikidataMeta && wikidataMeta.aliases ? wikidataMeta.aliases : [],
-    wikidataDescription: wikidataMeta && wikidataMeta.wikidataDescription ? wikidataMeta.wikidataDescription : bestCandidate.description || null,
-    wikidataId: bestCandidate.id || null
+    source: 'omdb',
+    title: top.Title,
+    description: `${top.Type || 'title'}: ${top.Title} (${top.Year || 'n/a'})`,
+    categories: [top.Type || 'title'],
+    aliases: []
   };
-}
-
-async function fetchFromFandom(character, contextHints = []) {
-  const normalized = normalizeName(character);
-  const searchQueries = [
-    normalized,
-    ...contextHints.map(hint => `${normalized} ${hint}`),
-    ...WIKI_SEARCH_HINTS.slice(0, 8).map(hint => `${normalized} ${hint}`)
-  ];
-
-  for (const searchQuery of searchQueries) {
-    const searchUrl = `https://community.fandom.com/api/v1/Search/List?query=${encodeURIComponent(searchQuery)}&limit=5&ns=0`;
-    const searchJson = await getJson(searchUrl);
-    const items = searchJson && Array.isArray(searchJson.items) ? searchJson.items : [];
-
-    for (const item of items) {
-      if (!item || !item.url) continue;
-
-      try {
-        const parsedUrl = new URL(item.url);
-        const wikiIndex = parsedUrl.pathname.indexOf('/wiki/');
-        if (wikiIndex === -1) continue;
-        const articleTitle = decodeURIComponent(parsedUrl.pathname.slice(wikiIndex + 6));
-        const apiUrl = `https://${parsedUrl.hostname}/api.php?action=query&titles=${encodeURIComponent(articleTitle)}&prop=extracts&explaintext=true&format=json&origin=*`;
-        const pageJson = await getJson(apiUrl);
-        if (!pageJson || !pageJson.query || !pageJson.query.pages) continue;
-        const pages = pageJson.query.pages;
-        const firstPage = Object.values(pages)[0];
-        if (firstPage && firstPage.extract) {
-          return {
-            source: 'fandom',
-            description: firstPage.extract.substring(0, 1800),
-            title: firstPage.title || articleTitle
-          };
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-  }
-
-  return null;
 }
 
 async function fetchCharacterInfo(character) {
   const cached = getCachedCharacter(character);
   if (cached) return cached;
 
-  const inflightKey = character.toLowerCase().trim();
-  const existingInflight = INFLIGHT_FETCHES.get(inflightKey);
-  if (existingInflight) return existingInflight;
+  const key = normalizeName(character).toLowerCase();
+  if (INFLIGHT_FETCHES.has(key)) return INFLIGHT_FETCHES.get(key);
 
-  const fetchPromise = (async () => {
-    const queryProfile = parseCharacterQuery(character);
-    const variants = getCharacterNameVariants(character);
-    const contextHints = queryProfile.contextHints;
+  const task = (async () => {
+    const profile = parseCharacterQuery(character);
+    const variants = getCharacterNameVariants(character).slice(0, 6);
+    const contextHints = profile.contextHints || [];
 
-    const candidates = [];
-    const seen = new Set();
+    const baseName = profile.baseName || character;
+    const stagedCandidates = [];
 
-    const addCandidate = (candidate) => {
-      const normalized = normalizeInfoCandidate(candidate);
-      if (!normalized) return;
-      const key = `${normalized.source}|${canonicalizeName(normalized.title || '')}|${canonicalizeName(normalized.description || '').slice(0, 80)}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      candidates.push(normalized);
+    const collectCandidates = (items) => {
+      (Array.isArray(items) ? items : [items]).forEach((item) => {
+        const normalizedCandidate = normalizeInfoCandidate(item);
+        if (normalizedCandidate) stagedCandidates.push(normalizedCandidate);
+      });
     };
 
-    for (const variant of variants.slice(0, 10)) {
-      const direct = await fetchFromWikipediaEnhanced(variant);
-      if (direct) addCandidate(direct);
-    }
+    const toUniqueCandidates = () => dedupeByKey(
+      stagedCandidates,
+      (candidate) => {
+        const source = String(candidate.source || 'unknown');
+        const title = canonicalizeName(candidate.title || '');
+        const desc = canonicalizeName(candidate.description || '').slice(0, 120);
+        return `${source}|${title}|${desc}`;
+      }
+    );
 
-    const secondaryLookups = [
-      ...variants.slice(0, 8).map(variant => fetchFromWikipediaSummary(variant).catch(() => null)),
-      ...variants.slice(0, 6).map(variant => fetchFromWikipediaSearchEnhanced(variant, contextHints).catch(() => null)),
-      fetchFromFandom(queryProfile.baseName, contextHints).catch(() => null),
-      fetchFromOMDb(queryProfile.baseName).catch(() => null),
-      fetchFromWikidata(queryProfile.baseName, contextHints).catch(() => null)
+    const runWithRetries = async (fn, attempts = 2) => {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const candidate = await fn().catch(() => null);
+        if (candidate) return candidate;
+      }
+      return null;
+    };
+
+    const stageOneFetches = [
+      () => fetchFromWikipediaEnhanced(baseName),
+      () => fetchFromWikipediaSearchEnhanced(baseName, contextHints),
+      () => fetchFromWikipediaOpenSearch(baseName, contextHints),
+      () => fetchFromWikipediaPrefixSearch(baseName),
+      () => fetchFromWikipediaSummary(baseName),
+      () => fetchFromWikidata(baseName, contextHints)
     ];
 
-    const results = await Promise.all(secondaryLookups);
-    results.forEach(result => {
-      if (result) addCandidate(result);
-    });
+    for (const runFetch of stageOneFetches) {
+      const candidate = await runWithRetries(runFetch, 2);
+      collectCandidates(candidate);
+    }
 
-    const bestHit = pickBestInfoCandidate(character, candidates);
-    if (bestHit) {
-      const enriched = {
-        ...bestHit,
+    let candidates = toUniqueCandidates();
+    let best = pickBestCandidate(character, candidates);
+    if (best && best.confidence >= 0.72) {
+      const resolved = {
+        ...best,
         lookupMeta: {
-          queriedVariants: variants.slice(0, 10),
+          queriedVariants: variants,
           candidateCount: candidates.length,
           contextHints
         }
       };
-      setCachedCharacter(character, enriched);
-      return enriched;
+      setCachedCharacter(character, resolved);
+      return resolved;
+    }
+
+    const secondaryVariants = variants
+      .filter(variant => canonicalizeName(variant) !== canonicalizeName(baseName))
+      .slice(0, 3);
+
+    const stageTwoTasks = [
+      ...secondaryVariants.map(variant => fetchFromWikipediaEnhanced(variant).catch(() => null)),
+      ...secondaryVariants.map(variant => fetchFromWikipediaSearchEnhanced(variant, contextHints).catch(() => null)),
+      ...secondaryVariants.slice(0, 2).map(variant => fetchFromWikipediaOpenSearch(variant, contextHints).catch(() => null)),
+      fetchFromFandom(baseName, contextHints).catch(() => null),
+      fetchFromOMDb(baseName).catch(() => null)
+    ];
+
+    const stageTwoResults = await Promise.all(stageTwoTasks);
+    collectCandidates(stageTwoResults);
+
+    candidates = toUniqueCandidates();
+    best = pickBestCandidate(character, candidates);
+    if (best) {
+      const resolved = {
+        ...best,
+        lookupMeta: {
+          queriedVariants: variants,
+          candidateCount: candidates.length,
+          contextHints
+        }
+      };
+      setCachedCharacter(character, resolved);
+      return resolved;
+    }
+
+    const rescueFetches = [
+      () => fetchFromWikipediaSearchEnhanced(baseName, contextHints),
+      () => fetchFromWikipediaPrefixSearch(baseName),
+      () => fetchFromWikidata(baseName, contextHints),
+      () => fetchFromWikipediaSummary(baseName)
+    ];
+
+    for (const runFetch of rescueFetches) {
+      const candidate = await runWithRetries(runFetch, 2);
+      collectCandidates(candidate);
+    }
+    candidates = toUniqueCandidates();
+    best = pickBestCandidate(character, candidates);
+    if (best) {
+      const resolved = {
+        ...best,
+        lookupMeta: {
+          queriedVariants: variants,
+          candidateCount: candidates.length,
+          contextHints
+        }
+      };
+      setCachedCharacter(character, resolved);
+      return resolved;
     }
 
     const aliasFallback = fallbackFromAliasIndex(character);
     if (aliasFallback) {
-      setCachedCharacter(character, aliasFallback);
+      setCachedCharacter(character, aliasFallback, 10 * 60 * 1000);
       return aliasFallback;
     }
 
     const typoFallback = fallbackFromTypo(character);
     if (typoFallback) {
-      setCachedCharacter(character, typoFallback);
+      setCachedCharacter(character, typoFallback, 10 * 60 * 1000);
       return typoFallback;
+    }
+
+    const knowledgeFallback = fallbackFromKnowledgeIndex(character);
+    if (knowledgeFallback) {
+      setCachedCharacter(character, knowledgeFallback, 10 * 60 * 1000);
+      return knowledgeFallback;
+    }
+
+    const nameOnlyFallback = fallbackFromNameOnly(character);
+    if (nameOnlyFallback) {
+      setCachedCharacter(character, nameOnlyFallback, 30 * 1000);
+      return nameOnlyFallback;
     }
 
     return null;
   })();
 
-  INFLIGHT_FETCHES.set(inflightKey, fetchPromise);
+  INFLIGHT_FETCHES.set(key, task);
   try {
-    return await fetchPromise;
+    return await task;
   } finally {
-    INFLIGHT_FETCHES.delete(inflightKey);
+    INFLIGHT_FETCHES.delete(key);
   }
 }
 
@@ -425,6 +751,8 @@ module.exports = {
   getJson,
   fetchFromWikipediaEnhanced,
   fetchFromWikipediaSearchEnhanced,
+  fetchFromWikipediaOpenSearch,
+  fetchFromWikipediaPrefixSearch,
   fetchFromWikipediaSummary,
   fetchFromWikidata,
   fetchFromFandom,

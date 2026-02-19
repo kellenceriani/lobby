@@ -1,4 +1,4 @@
-const MIN_INFO_CONFIDENCE = 0.4;
+const MIN_INFO_CONFIDENCE = 0.33;
 const SCORE_MIN = 0;
 const SCORE_MAX = 30;
 

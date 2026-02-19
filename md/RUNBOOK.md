@@ -12,8 +12,9 @@ This runbook is for rapid, safe iteration when making major gameplay/evaluator c
 - Syntax check evaluator:
   - `node --check server/evaluator.js`
 
-- Existing local harness (if present in your branch):
-  - `node server/_viabilityTestHarness.js`
+- Evaluator viability harness:
+  - `node server/viabilityTestHarness.js`
+  - `npm run eval:viability`
 
 - Smoke module exports:
   - `node -e "const ev=require('./server/evaluator'); const ge=require('./server/core/gameEngine'); const sh=require('./server/socket/socketHandlers'); const r4=require('./server/services/round4Service'); console.log('ok', typeof ev.scoreCharacter, typeof ge.startGame, typeof sh, typeof r4.evaluateRound4FromGame);"`

@@ -142,30 +142,38 @@ function buildBreakdown({ character, validation, info, scenario, twist, score, n
   }
 
   if (ovrData) {
-    const baseOVR = Math.round((score / SCORE_MAX) * 70);
+    const normalized = Math.max(0, Math.min(1, (score || 0) / SCORE_MAX));
+    const baseOVR = Math.round(38 + (Math.pow(normalized, 0.88) * 42));
     const rarityBonus = getRarityBonusFromTier(ovrData.rarity);
     const attributeValues = Object.values(ovrData.attributes || {});
     const topStats = attributeValues.sort((a, b) => b - a).slice(0, 3);
-    const attributeBonus = topStats.length > 0 ? Math.round(topStats.reduce((sum, val) => sum + val, 0) / 3 * 0.15) : 0;
+    const attributeBonus = topStats.length > 0 ? Math.round(topStats.reduce((sum, val) => sum + val, 0) / 3 * 0.13) : 0;
+    const confidenceBonus = info && typeof info.confidence === 'number'
+      ? Math.round(Math.max(0, (info.confidence - 0.4) * 12))
+      : 0;
     const scenarioFit = calculateScenarioFitValue(character, info, scenario, twist);
-    const preMultiplier = baseOVR + rarityBonus + attributeBonus;
+    const preMultiplier = baseOVR + rarityBonus + attributeBonus + confidenceBonus;
+    const safeOVR = ovrData.ovr || 1;
 
     breakdown.ovrBreakdown = {
       baseFromScore: baseOVR,
       rarityBonus,
       attributeBonus,
+      confidenceBonus,
       scenarioMultiplier: scenarioFit,
       finalOVR: ovrData.ovr,
       percentages: {
-        scoreContribution: Math.round((baseOVR / ovrData.ovr) * 100),
-        rarityContribution: Math.round((rarityBonus / ovrData.ovr) * 100),
-        attributeContribution: Math.round((attributeBonus / ovrData.ovr) * 100),
-        scenarioEffect: Math.round(((scenarioFit - 1.0) * preMultiplier / ovrData.ovr) * 100)
+        scoreContribution: Math.round((baseOVR / safeOVR) * 100),
+        rarityContribution: Math.round((rarityBonus / safeOVR) * 100),
+        attributeContribution: Math.round((attributeBonus / safeOVR) * 100),
+        confidenceContribution: Math.round((confidenceBonus / safeOVR) * 100),
+        scenarioEffect: Math.round(((scenarioFit - 1.0) * preMultiplier / safeOVR) * 100)
       },
       explanations: {
-        base: `Base OVR from score (${score}/30 → ${baseOVR}/70 maximum)`,
+        base: `Base OVR from score (${score}/30 → ${baseOVR} baseline)`,
         rarity: getRarityExplanation(ovrData.rarity, rarityBonus),
         attributes: `Top 3 attributes averaged: ${topStats.join(', ')} → +${attributeBonus}`,
+        confidence: `Evidence confidence bonus: +${confidenceBonus}`,
         scenario: getScenarioFitExplanation(scenarioFit)
       }
     };

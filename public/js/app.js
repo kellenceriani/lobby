@@ -73,6 +73,10 @@ function playErrorSound() {
   setTimeout(() => playSound(250, 100, 'sine', 0.2), 100);
 }
 
+function appendText(parent, text) {
+  parent.appendChild(document.createTextNode(text));
+}
+
 // ========================
 // JOIN & LOBBY
 // ========================
@@ -169,13 +173,40 @@ socket.on('roomData', (data) => {
     const li = document.createElement('li');
     li.className = `player-item ${p.ready ? 'ready' : 'not-ready'}`;
     li.setAttribute('role', 'listitem');
-    const hostBadge = p.name === data.host ? '<span class="host-star">★</span> ' : '';
-    const isMe = p.name === player.name ? ' <span class="you-badge">(YOU)</span>' : '';
-    li.innerHTML = `
-      <span class="ready-badge"></span>
-      <span>${hostBadge}<strong>${p.name}</strong>${isMe}</span>
-      <span style="margin-left: auto; font-size: 0.85em; opacity: 0.7;">#${idx + 1}</span>
-    `;
+
+    const readyBadge = document.createElement('span');
+    readyBadge.className = 'ready-badge';
+
+    const nameWrap = document.createElement('span');
+    if (p.name === data.host) {
+      const hostStar = document.createElement('span');
+      hostStar.className = 'host-star';
+      hostStar.textContent = '★';
+      nameWrap.appendChild(hostStar);
+      appendText(nameWrap, ' ');
+    }
+
+    const strong = document.createElement('strong');
+    strong.textContent = p.name;
+    nameWrap.appendChild(strong);
+
+    if (p.name === player.name) {
+      appendText(nameWrap, ' ');
+      const youBadge = document.createElement('span');
+      youBadge.className = 'you-badge';
+      youBadge.textContent = '(YOU)';
+      nameWrap.appendChild(youBadge);
+    }
+
+    const idxSpan = document.createElement('span');
+    idxSpan.style.marginLeft = 'auto';
+    idxSpan.style.fontSize = '0.85em';
+    idxSpan.style.opacity = '0.7';
+    idxSpan.textContent = `#${idx + 1}`;
+
+    li.appendChild(readyBadge);
+    li.appendChild(nameWrap);
+    li.appendChild(idxSpan);
     ul.appendChild(li);
   });
 
@@ -233,7 +264,10 @@ socket.on('roomData', (data) => {
     data.messages.slice(-10).forEach(msg => {
       const div = document.createElement('div');
       div.className = 'chat-message';
-      div.innerHTML = `<strong>${msg.player}:</strong> ${msg.text}`;
+      const strong = document.createElement('strong');
+      strong.textContent = `${msg.player}:`;
+      div.appendChild(strong);
+      appendText(div, ` ${msg.text}`);
       chatContainer.appendChild(div);
     });
     chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -283,9 +317,15 @@ socket.on('newMessage', (msg) => {
   const div = document.createElement('div');
   div.className = msg.isReaction ? 'chat-reaction' : 'chat-message';
   if (msg.isReaction) {
-    div.innerHTML = `<em>${msg.player}</em> ${msg.text}`;
+    const em = document.createElement('em');
+    em.textContent = msg.player;
+    div.appendChild(em);
+    appendText(div, ` ${msg.text}`);
   } else {
-    div.innerHTML = `<strong>${msg.player}:</strong> ${msg.text}`;
+    const strong = document.createElement('strong');
+    strong.textContent = `${msg.player}:`;
+    div.appendChild(strong);
+    appendText(div, ` ${msg.text}`);
   }
   chatContainer.appendChild(div);
 
@@ -598,156 +638,6 @@ socket.on('plotTwistRevealed', (data) => {
 });
 
 // ========================
-// FINAL TEAM REVEAL (Round 4)
-// ========================
-socket.on('finalTeamRevealed', (data) => {
-  clearTimers();
-  gameState.myFinalTeam = [];
-
-  const charInput = document.getElementById('charInput');
-  if (charInput) {
-    charInput.value = '';
-    charInput.focus();
-  }
-
-  const myTeamList = document.getElementById('myTeam');
-  if (myTeamList) {
-    myTeamList.innerHTML = '';
-    const myCurrentTeam = data.playerTeams.find(t => t.name === player.name)?.teamSoFar || [];
-
-    const lockedSection = document.createElement('div');
-    lockedSection.style.cssText = 'margin-bottom: 15px; opacity: 0.8;';
-    lockedSection.innerHTML = `
-      <small style="font-weight: bold; color: #999;">Previous Rounds (Locked):</small>
-    `;
-    myTeamList.appendChild(lockedSection);
-
-    myCurrentTeam.forEach(char => {
-      const li = document.createElement('li');
-      li.textContent = char;
-      li.classList.add('existing-pick');
-      myTeamList.appendChild(li);
-    });
-    gameState.myFinalTeam = [...myCurrentTeam];
-  }
-
-  const livePicksList = document.getElementById('livePicksList');
-  if (livePicksList) livePicksList.innerHTML = '';
-
-  const warningEl = document.getElementById('draftWarning');
-  if (warningEl) warningEl.style.display = 'none';
-
-  document.getElementById('scenarioText').textContent = `🎯 ADD UP TO 6 CHARACTERS TO YOUR ULTIMATE TEAM (${gameState.myFinalTeam.length}/6)`;
-
-  const lockBtn = document.getElementById('lockDraftBtn');
-  if (lockBtn) {
-    lockBtn.style.display = 'inline-block';
-    lockBtn.disabled = gameState.myFinalTeam.length === 0;
-    lockBtn.textContent = `🔒 FINALIZE TEAM (${gameState.myFinalTeam.length}/6)`;
-    lockBtn.className = 'btn btn-success';
-    lockBtn.onclick = lockFinalDraft;
-  }
-
-  if (document.getElementById('draftCounter')) {
-    document.getElementById('draftCounter').textContent = `(${gameState.myFinalTeam.length}/6)`;
-    document.getElementById('draftCounter').style.color = '#666';
-  }
-
-  showScreen('scenarioScreen');
-
-  let timeLeft = data.draftTimeRemaining;
-  document.getElementById('draftTimer').textContent = timeLeft;
-
-  const draftTimer = setInterval(() => {
-    timeLeft--;
-    const timerEl = document.getElementById('draftTimer');
-    if (timerEl) {
-      timerEl.textContent = timeLeft;
-      if (timeLeft <= 10) {
-        timerEl.style.color = '#ff5252';
-        timerEl.style.fontWeight = 'bold';
-      }
-    }
-    if (timeLeft <= 0) clearInterval(draftTimer);
-  }, 1000);
-
-  addTimer(draftTimer);
-});
-
-function handleFinalRoundInput(e) {
-  if (e.key === 'Enter' && e.target.value.trim()) {
-    const char = e.target.value.trim();
-
-    const isFinalRound = document.getElementById('scenarioText')?.textContent.includes('ULTIMATE TEAM');
-    if (!isFinalRound) return;
-
-    if (gameState.myFinalTeam.length >= 6) {
-      showToast('⚠️ Your team is full (6 characters max)!', 'error');
-      return;
-    }
-
-    if (gameState.myFinalTeam.some(c => c.toLowerCase() === char.toLowerCase())) {
-      showToast(`❌ "${char}" is already in your team!`, 'error', 3000);
-      return;
-    }
-
-    submitFinalDraft(char);
-  }
-}
-
-function submitFinalDraft(char) {
-  gameState.myFinalTeam.push(char);
-
-  const li = document.createElement('li');
-  li.textContent = char;
-  li.classList.add('new-pick');
-  const myTeamList = document.getElementById('myTeam');
-  if (myTeamList) myTeamList.appendChild(li);
-
-  socket.emit('draftCharacter', char);
-
-  const counter = document.getElementById('draftCounter');
-  if (counter) {
-    counter.textContent = `(${gameState.myFinalTeam.length}/6)`;
-  }
-
-  const charInput = document.getElementById('charInput');
-  if (charInput) {
-    charInput.value = '';
-    charInput.focus();
-  }
-
-  const lockBtn = document.getElementById('lockDraftBtn');
-  if (lockBtn) {
-    lockBtn.disabled = false;
-    lockBtn.textContent = `🔒 FINALIZE TEAM (${gameState.myFinalTeam.length}/6)`;
-  }
-}
-
-document.addEventListener('keypress', (e) => {
-  if (e.target.id === 'charInput' && document.getElementById('scenarioScreen')?.classList.contains('active')) {
-    const isFinalRound = document.getElementById('scenarioText')?.textContent.includes('ULTIMATE TEAM');
-    if (isFinalRound) {
-      handleFinalRoundInput(e);
-    }
-  }
-});
-
-function lockFinalDraft() {
-  if (gameState.myFinalTeam.length === 0) {
-    showToast('⚠️ Add at least 1 character to your team!', 'warning');
-    return;
-  }
-  socket.emit('lockFinalDraft');
-  const lockBtn = document.getElementById('lockDraftBtn');
-  if (lockBtn) {
-    lockBtn.disabled = true;
-    lockBtn.textContent = '✅ TEAM FINALIZED!';
-    showToast('🎉 Your ultimate team is locked in!', 'info');
-  }
-}
-
-// ========================
 // VOTING PHASE
 // ========================
 socket.on('votingPhaseStart', (data) => {
@@ -779,13 +669,29 @@ socket.on('votingPhaseStart', (data) => {
     card.className = 'vote-card';
     card.style.animationDelay = `${idx * 0.1}s`;
     card.onclick = () => castVote(team.name);
-    card.innerHTML = `
-      <h3>👤 ${team.name}</h3>
-      <ul class="team-display">
-        ${team.team.map(t => `<li>• ${t}</li>`).join('')}
-      </ul>
-      <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span> votes</p>
-    `;
+
+    const title = document.createElement('h3');
+    title.textContent = `👤 ${team.name}`;
+    card.appendChild(title);
+
+    const teamList = document.createElement('ul');
+    teamList.className = 'team-display';
+    team.team.forEach((member) => {
+      const li = document.createElement('li');
+      li.textContent = `• ${member}`;
+      teamList.appendChild(li);
+    });
+    card.appendChild(teamList);
+
+    const voteP = document.createElement('p');
+    voteP.className = 'vote-count';
+    const voteBadge = document.createElement('span');
+    voteBadge.className = 'vote-badge';
+    voteBadge.textContent = String(team.votes || 0);
+    voteP.appendChild(voteBadge);
+    appendText(voteP, ' votes');
+    card.appendChild(voteP);
+
     if (grid) grid.appendChild(card);
   });
 
@@ -883,92 +789,6 @@ socket.on('round4Start', (data) => {
     }
   }, 5000);
 });
-
-/* COMMENTED OUT - Old Round 4 voting system, replaced by AI evaluation
-socket.on('finalVotingPhaseStart', (data) => {
-  clearTimers();
-  gameState.voted = false;
-  gameState.voteLocked = false;
-  gameState.currentVoteChoice = null;
-
-  const scenarioDisplay = document.getElementById('votingScenario');
-  const twistDisplay = document.getElementById('votingTwist');
-  if (scenarioDisplay) scenarioDisplay.textContent = data.finalPrompt || 'Which team is the BEST?';
-  if (twistDisplay) twistDisplay.innerHTML = '<strong style="color: #ff4081;">ROUND 4: FINAL VOTING!</strong>';
-
-  const grid = document.getElementById('votingTeams');
-  if (grid) grid.innerHTML = '';
-
-  data.teams.forEach((team, idx) => {
-    if (!team.team || team.team.length === 0) {
-      return;
-    }
-
-    if (team.name === player.name) {
-      return;
-    }
-
-    const card = document.createElement('div');
-    card.className = 'vote-card final-vote';
-    card.style.animationDelay = `${idx * 0.1}s`;
-    card.onclick = () => castVote(team.name);
-    card.innerHTML = `
-      <h3>👤 ${team.name}</h3>
-      <ul class="team-display final-team-display">
-        ${team.team.map(t => `<li>• ${t}</li>`).join('')}
-      </ul>
-      <p class="vote-count"><span class="vote-badge">${team.votes || 0}</span> votes</p>
-    `;
-    if (grid) grid.appendChild(card);
-  });
-
-  if (grid && grid.children.length === 0) {
-    const msg = document.createElement('p');
-    msg.textContent = '(Your team isn\'t shown—cast your vote for the best team!)';
-    msg.style.cssText = 'color: #999; font-size: 1.1em; margin: 20px; font-weight: bold;';
-    grid.appendChild(msg);
-  }
-
-  const lockSection = document.getElementById('voteLockSection');
-  if (lockSection) {
-    lockSection.style.display = 'none';
-  }
-
-  const lockBtn = document.getElementById('lockVoteBtn');
-  if (lockBtn) {
-    lockBtn.style.display = 'none';
-    lockBtn.disabled = true;
-    lockBtn.className = 'btn btn-success btn-lock-vote';
-  }
-
-  const votedIndication = document.getElementById('votedIndication');
-  if (votedIndication) votedIndication.style.display = 'none';
-
-  const voteLockNotice = document.getElementById('voteLockNotice');
-  if (voteLockNotice) voteLockNotice.style.display = 'block';
-
-  updateVoteStatusBadge('Final Vote');
-
-  showScreen('votingScreen');
-
-  let timeLeft = 30;
-  document.getElementById('voteTimer').textContent = timeLeft;
-
-  const voteTimer = setInterval(() => {
-    timeLeft--;
-    const timerEl = document.getElementById('voteTimer');
-    if (timerEl) {
-      timerEl.textContent = timeLeft;
-      if (timeLeft <= 10) {
-        timerEl.style.color = '#ff5252';
-      }
-    }
-    if (timeLeft <= 0) clearInterval(voteTimer);
-  }, 1000);
-
-  addTimer(voteTimer);
-});
-END OF COMMENTED OUT CODE */
 
 function castVote(playerName) {
   playVoteSound();

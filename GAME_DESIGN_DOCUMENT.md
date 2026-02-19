@@ -258,7 +258,7 @@ exports.startRound = (io, roomCode, isIncreasingDifficulty) => void
 exports.startFinalRound = (io, roomCode) => void
 exports.revealPlotTwist = (io, roomCode) => void
 exports.tallyResults = (roomCode) => ResultsObject
-exports.tallyFinalResults = (roomCode) => FinalResultsObject
+exports.markRoomsDirty = () => void
 
 // Utilities
 exports.getRandomWord = () => string
@@ -657,7 +657,6 @@ startRound(io, roomCode)      // Begin new standard round
 startFinalRound(io, roomCode) // Begin round 4 with all teams
 revealPlotTwist(io, roomCode) // Show twist + trigger voting phase
 tallyResults(roomCode)        // Calculate round scores
-tallyFinalResults(roomCode)   // Calculate final game scores
 ```
 
 ---
@@ -684,9 +683,9 @@ socket.on('startGame')            // Host starts game
 ```javascript
 socket.on('draftCharacter')       // Player drafts char
 socket.on('lockDraft')            // Player locks team
-socket.on('lockFinalDraft')       // Final round lock
 socket.on('castVote')             // Player votes for team
 socket.on('lockVote')             // Player locks vote
+socket.on('evaluateRound4')       // Trigger server-authoritative AI scoring
 socket.on('readyForNextRound')    // Player ready for next round
 socket.on('playAgain')            // Return to lobby
 ```

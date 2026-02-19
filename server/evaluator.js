@@ -2,6 +2,7 @@ const https = require('https');
 
 // Cache: { characterName: { data, timestamp } }
 const FETCH_CACHE = new Map();
+const INFLIGHT_FETCHES = new Map();
 const CACHE_TTL = 3600000; // 1 hour
 
 const SCORE_MIN = 0;
@@ -1707,52 +1708,49 @@ async function fetchCharacterInfo(character) {
   const cached = getCachedCharacter(character);
   if (cached) return cached;
 
-  const variants = getCharacterNameVariants(character);
-  
-  // Try enhanced tiers in order
-  for (const variant of variants) {
-    const result = await fetchFromWikipediaEnhanced(variant);
-    if (result) {
-      setCachedCharacter(character, result);
-      return result;
-    }
+  const inflightKey = character.toLowerCase().trim();
+  const existingInflight = INFLIGHT_FETCHES.get(inflightKey);
+  if (existingInflight) {
+    return existingInflight;
   }
 
-  for (const variant of variants) {
-    const result = await fetchFromWikipediaSummary(variant);
-    if (result) {
-      setCachedCharacter(character, result);
-      return result;
+  const fetchPromise = (async () => {
+    const variants = getCharacterNameVariants(character);
+    
+    // Try enhanced tiers in order (high precision first)
+    for (const variant of variants) {
+      const result = await fetchFromWikipediaEnhanced(variant);
+      if (result) {
+        setCachedCharacter(character, result);
+        return result;
+      }
     }
-  }
 
-  for (const variant of variants) {
-    const result = await fetchFromWikipediaSearchEnhanced(variant);
-    if (result) {
-      setCachedCharacter(character, result);
-      return result;
+    // Broader lookups in parallel to reduce long sequential tail latency
+    const secondaryLookups = [
+      ...variants.map((variant) => fetchFromWikipediaSummary(variant).catch(() => null)),
+      ...variants.map((variant) => fetchFromWikipediaSearchEnhanced(variant).catch(() => null)),
+      fetchFromFandom(character).catch(() => null),
+      fetchFromOMDb(character).catch(() => null),
+      fetchFromWikidata(character).catch(() => null)
+    ];
+
+    const results = await Promise.all(secondaryLookups);
+    const firstHit = results.find(Boolean) || null;
+    if (firstHit) {
+      setCachedCharacter(character, firstHit);
+      return firstHit;
     }
-  }
 
-  let result = await fetchFromFandom(character);
-  if (result) {
-    setCachedCharacter(character, result);
-    return result;
+    return null; // All APIs failed
+  })();
+
+  INFLIGHT_FETCHES.set(inflightKey, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    INFLIGHT_FETCHES.delete(inflightKey);
   }
-  
-  result = await fetchFromOMDb(character);
-  if (result) {
-    setCachedCharacter(character, result);
-    return result;
-  }
-  
-  result = await fetchFromWikidata(character);
-  if (result) {
-    setCachedCharacter(character, result);
-    return result;
-  }
-  
-  return null; // All APIs failed
 }
 
 // ========== STEP 5: SCORING LOGIC ==========

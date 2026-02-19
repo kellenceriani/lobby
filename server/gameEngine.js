@@ -6,6 +6,7 @@ const FALLBACK_WORDS = [
 let wordCache = [];
 
 const { getRoundWeight, scaleRoundPoints } = require('./scoreScaling');
+const { loadRoomsSnapshot, queueRoomsSnapshot } = require('./statePersistence');
 
 async function fetchRandomWords() {
   try {
@@ -399,8 +400,14 @@ function generateFinalPrompt() {
 const rooms = {};
 const voteTimeouts = {};
 
+Object.assign(rooms, loadRoomsSnapshot());
+
+function markRoomsDirty() {
+  queueRoomsSnapshot(rooms);
+}
+
 function createRoom(roomCode) {
-  return {
+  const room = {
     roomCode,
     players: [],
     gameState: null,
@@ -416,6 +423,8 @@ function createRoom(roomCode) {
     messages: [],
     reactions: {}
   };
+  markRoomsDirty();
+  return room;
 }
 
 function createGameInstance(roomCode, players, settings) {
@@ -565,92 +574,6 @@ function calculateRoundBonuses(game, round) {
   return { points, bonuses, voteCount, pointBreakdown };
 }
 
-function calculateFinalRoundBonuses(game) {
-  const voteCount = {};
-  game.players.forEach(p => {
-    voteCount[p.name] = 0;
-  });
-
-  Object.values(game.votes).forEach(votedName => {
-    if (voteCount.hasOwnProperty(votedName)) {
-      voteCount[votedName]++;
-    }
-  });
-
-  const sortedVotes = Object.entries(voteCount).sort((a, b) => b[1] - a[1]);
-  const totalPlayers = game.players.length;
-
-  const points = {};
-  const bonuses = {};
-  const pointBreakdown = {};
-
-  game.players.forEach(p => {
-    points[p.name] = 0;
-    pointBreakdown[p.name] = [];
-
-    if (p.finalTeam.length === 6) {
-      const hasAutoFilled = p.teamAutoFilled.some(filled => filled === true);
-      if (!hasAutoFilled) {
-        points[p.name] += 40;
-        pointBreakdown[p.name].push('Complete Team (6 chars): +40');
-      } else {
-        pointBreakdown[p.name].push('Complete Team (contains auto-filled): No bonus (had duplicate or empty)');
-      }
-    }
-  });
-
-  const isTie = sortedVotes.length > 1 && sortedVotes[0][1] === sortedVotes[1][1] && sortedVotes[0][1] > 0;
-
-  if (!isTie && sortedVotes.length > 0 && sortedVotes[0][1] > 0) {
-    const winner = sortedVotes[0][0];
-    const votesReceived = sortedVotes[0][1];
-
-    const finalWinBonus = 100 + (totalPlayers * 10);
-    points[winner] += finalWinBonus;
-    pointBreakdown[winner].push(`Most Votes (${votesReceived}): +${finalWinBonus}`);
-
-    if (sortedVotes.length > 1 && sortedVotes[1][1] > 0) {
-      const runnerUpBonus = 40;
-      points[sortedVotes[1][0]] += runnerUpBonus;
-      pointBreakdown[sortedVotes[1][0]].push(`Runner-Up: +${runnerUpBonus}`);
-    }
-  } else if (isTie) {
-    const finalTieBonus = 75 + (totalPlayers * 8);
-    const tiedPlayers = sortedVotes.filter(v => v[1] === sortedVotes[0][1]);
-
-    tiedPlayers.forEach(([playerName]) => {
-      points[playerName] += finalTieBonus;
-      pointBreakdown[playerName].push(`Tied for Most Votes: +${finalTieBonus}`);
-    });
-  }
-
-  const votingPlayers = new Set(Object.keys(game.votes));
-  game.players.forEach(p => {
-    if (!votingPlayers.has(p.name)) {
-      const penalty = 25;
-      points[p.name] -= penalty;
-      if (!pointBreakdown[p.name]) pointBreakdown[p.name] = [];
-      pointBreakdown[p.name].push(`Didn't Vote: -${penalty}`);
-    }
-  });
-
-  const roundNumber = 4;
-  const roundWeight = getRoundWeight(roundNumber);
-
-  game.players.forEach(p => {
-    const baseEarned = Math.max(0, points[p.name]);
-    const earned = scaleRoundPoints(baseEarned, roundNumber);
-    points[p.name] = earned;
-    p.roundScores[3] = earned;
-    p.totalScore += earned;
-
-    if (baseEarned !== earned) {
-      pointBreakdown[p.name].push(`Round ${roundNumber} Weight (x${roundWeight.toFixed(2)}): ${baseEarned} → ${earned}`);
-    }
-  });
-
-  return { points, bonuses, voteCount, pointBreakdown };
-}
 
 function startGame(io, roomCode) {
   const room = rooms[roomCode];
@@ -668,10 +591,12 @@ function startGame(io, roomCode) {
     settings: room.settings
   });
 
+  markRoomsDirty();
   setTimeout(() => startRound(io, roomCode), 3000);
 }
 
 function startRound(io, roomCode) {
+  if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   if (!game || game.currentRound >= game.totalRounds) {
     startFinalRound(io, roomCode);
@@ -686,11 +611,13 @@ function startRound(io, roomCode) {
     totalRounds: game.totalRounds
   });
 
+  markRoomsDirty();
   setTimeout(() => revealScenario(io, roomCode), 3000);
 }
 
 function revealScenario(io, roomCode) {
   const room = rooms[roomCode];
+  if (!room || !room.gameState) return;
   const game = room.gameState;
   game.activePhase = 'DRAFT';
   game.roundStartTime = Date.now();
@@ -720,9 +647,11 @@ function revealScenario(io, roomCode) {
   });
 
   game.draftTimeout = setTimeout(() => revealPlotTwist(io, roomCode), draftSeconds * 1000);
+  markRoomsDirty();
 }
 
 function revealPlotTwist(io, roomCode) {
+  if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   const scenario = game.scenarios[game.currentRound];
   if (!game.settings.plotTwists) {
@@ -758,10 +687,12 @@ function revealPlotTwist(io, roomCode) {
     }))
   });
 
+  markRoomsDirty();
   setTimeout(() => startVoting(io, roomCode), 3000);
 }
 
 function startVoting(io, roomCode) {
+  if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   game.activePhase = 'VOTING';
   game.phaseStartTime = Date.now();
@@ -785,10 +716,12 @@ function startVoting(io, roomCode) {
 
   const voteTimeout = setTimeout(() => tallyResults(io, roomCode), getVoteSeconds() * 1000);
   voteTimeouts[roomCode] = voteTimeout;
+  markRoomsDirty();
 }
 
 function startFinalRound(io, roomCode) {
   console.log(`🏁 Starting Round 4 for room ${roomCode}`);
+  if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   game.activePhase = 'AI_EVALUATION';
   game.phaseStartTime = Date.now();
@@ -838,36 +771,9 @@ function startFinalRound(io, roomCode) {
       finalTeams
     });
   }, 3000);
+  markRoomsDirty();
 }
 
-function startFinalVoting(io, roomCode) {
-  const game = rooms[roomCode].gameState;
-  game.activePhase = 'FINAL_VOTING';
-  game.phaseStartTime = Date.now();
-  game.votes = {};
-  game.voteLocks = {};
-
-  const finalPrompt = generateFinalPrompt();
-  const finalScenario = game.scenarios[Math.floor(Math.random() * game.scenarios.length)];
-  game.currentScenario = finalScenario.scenario;
-
-  const teamsDisplay = game.players.map(p => ({
-    name: p.name,
-    team: p.finalTeam,
-    votes: 0
-  }));
-
-  io.to(roomCode).emit('finalVotingPhaseStart', {
-    teams: teamsDisplay,
-    votingTimeRemaining: getVoteSeconds(),
-    totalPlayers: game.players.length,
-    scenario: game.currentScenario,
-    finalPrompt
-  });
-
-  const voteTimeout = setTimeout(() => tallyFinalResults(io, roomCode), getVoteSeconds() * 1000);
-  voteTimeouts[roomCode] = voteTimeout;
-}
 
 // Helper function to determine round winner(s) and detect ties
 function determineRoundWinner(points) {
@@ -888,6 +794,7 @@ function determineRoundWinner(points) {
 }
 
 function tallyResults(io, roomCode) {
+  if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   const scenario = game.scenarios[game.currentRound];
 
@@ -937,38 +844,13 @@ function tallyResults(io, roomCode) {
 
   game.players.forEach(p => p.voteLocked = false);
   game.resultsReady = {};
+  markRoomsDirty();
 }
 
-function tallyFinalResults(io, roomCode) {
-  const game = rooms[roomCode].gameState;
-
-  const { points, bonuses, voteCount, pointBreakdown } = calculateFinalRoundBonuses(game);
-
-  const leaderboardData = [...game.players].sort((a, b) => b.totalScore - a.totalScore).map(p => ({
-    name: p.name,
-    score: p.totalScore,
-    roundScore: points[p.name],
-    breakdown: pointBreakdown[p.name]
-  }));
-
-  // Use improved winner detection with tie support
-  const winnerInfo = determineRoundWinner(points);
-
-  io.to(roomCode).emit('finalRoundResults', {
-    winner: winnerInfo.winner,
-    isTie: winnerInfo.isTie,
-    tiedPlayers: winnerInfo.tiedPlayers,
-    roundPoints: points,
-    voteCount,
-    leaderboard: leaderboardData,
-    pointBreakdown
-  });
-
-  setTimeout(() => endGame(io, roomCode), 3000);
-}
 
 function endGame(io, roomCode) {
   const room = rooms[roomCode];
+  if (!room || !room.gameState) return;
   const game = room.gameState;
   const finalLeaderboard = [...game.players]
     .filter(p => !p.isBot)
@@ -986,8 +868,10 @@ function endGame(io, roomCode) {
   });
 
   room.isGameActive = false;
+  markRoomsDirty();
   setTimeout(() => {
     room.gameState = null;
+    markRoomsDirty();
   }, 10000);
 }
 
@@ -1002,6 +886,6 @@ module.exports = {
   revealPlotTwist,
   startFinalRound,
   tallyResults,
-  tallyFinalResults,
+  markRoomsDirty,
   endGame
 };

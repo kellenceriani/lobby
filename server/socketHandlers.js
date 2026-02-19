@@ -7,22 +7,67 @@ const {
   startFinalRound,
   revealPlotTwist,
   tallyResults,
-  tallyFinalResults,
   getRandomWord,
-  endGame
+  endGame,
+  markRoomsDirty
 } = require('./gameEngine');
 
-const { scoreCharacter } = require('./evaluator');
-const { getRandomPhrase } = require('./phraseGenerator');
-const { calculateChemistryBonus, calculateChemistryDetails } = require('./chemistryCalculator');
-const { getRoundWeight, calculateRound4Points } = require('./scoreScaling');
+const { evaluateRound4FromGame } = require('./round4Service');
+const {
+  sanitizeName,
+  sanitizeRoomCode,
+  sanitizeMessage,
+  sanitizeReaction,
+  sanitizeDraftCharacter,
+  sanitizeSettings,
+  createRateLimiter
+} = require('./inputValidation');
+
+const allowRequest = createRateLimiter();
+
+function getRoomData(roomCode) {
+  if (!roomCode) return null;
+  return rooms[roomCode] || null;
+}
+
+function emitRoomData(io, roomCode, roomData) {
+  io.to(roomCode).emit('roomData', {
+    players: roomData.players,
+    isGameActive: roomData.isGameActive,
+    host: roomData.host,
+    settings: roomData.settings,
+    messages: roomData.messages
+  });
+}
+
+function getJoinedRoom(socket) {
+  const room = socket.data.room;
+  const name = socket.data.name;
+  if (!room || !name) return null;
+
+  const roomData = getRoomData(room);
+  if (!roomData) return null;
+
+  return { room, name, roomData };
+}
 
 function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('joinRoom', ({ name, room }) => {
-      room = room.toUpperCase();
+    socket.on('joinRoom', (payload) => {
+      if (!allowRequest(`${socket.id}:joinRoom`, 10000, 6)) {
+        socket.emit('joinError', 'Too many join attempts. Please wait a moment.');
+        return;
+      }
+
+      const name = sanitizeName(payload && payload.name);
+      const room = sanitizeRoomCode(payload && payload.room);
+
+      if (!name || !room) {
+        socket.emit('joinError', 'Invalid name or room code format.');
+        return;
+      }
 
       if (!rooms[room]) {
         rooms[room] = createRoom(room);
@@ -41,122 +86,124 @@ function registerSocketHandlers(io) {
         return;
       }
 
-      if (roomData.players.find(p => p.name === name)) {
+      if (roomData.players.find(p => p.name.toLowerCase() === name.toLowerCase())) {
         socket.emit('joinError', 'Name already taken in this room.');
         return;
       }
 
-      const player = {
+      roomData.players.push({
         id: socket.id,
         name,
         ready: false,
         reactions: []
-      };
-      roomData.players.push(player);
-      socket.join(room);
+      });
 
+      socket.join(room);
       socket.data.room = room;
       socket.data.name = name;
 
-      io.to(room).emit('roomData', {
-        players: roomData.players,
-        isGameActive: roomData.isGameActive,
-        host: roomData.host,
-        settings: roomData.settings,
-        messages: roomData.messages
-      });
-
+      emitRoomData(io, room, roomData);
+      markRoomsDirty();
       console.log(`${name} joined room ${room}`);
     });
 
     socket.on('updateSettings', (newSettings) => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const roomData = rooms[room];
-      if (roomData.host !== name) return;
-      if (roomData.isGameActive) return;
+      const { room, name, roomData } = joined;
+      if (roomData.host !== name || roomData.isGameActive) return;
 
-      roomData.settings = { ...roomData.settings, ...newSettings };
+      const cleaned = sanitizeSettings(newSettings);
+      roomData.settings = { ...roomData.settings, ...cleaned };
 
       io.to(room).emit('settingsUpdated', roomData.settings);
+      markRoomsDirty();
     });
 
     socket.on('toggleReady', () => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const roomData = rooms[room];
+      const { room, name, roomData } = joined;
       const player = roomData.players.find(p => p.name === name);
-      if (player) {
-        player.ready = !player.ready;
-        io.to(room).emit('roomData', {
-          players: roomData.players,
-          isGameActive: roomData.isGameActive,
-          host: roomData.host,
-          settings: roomData.settings,
-          messages: roomData.messages
-        });
-      }
+      if (!player) return;
+
+      player.ready = !player.ready;
+      emitRoomData(io, room, roomData);
+      markRoomsDirty();
     });
 
     socket.on('readyForNextRound', () => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const game = rooms[room].gameState;
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
       if (!game) return;
 
       game.resultsReady = game.resultsReady || {};
       game.resultsReady[name] = true;
 
       const allReady = game.players.every(p => game.resultsReady[p.name] === true);
+      if (!allReady) return;
 
-      if (allReady) {
-        game.currentRound++;
-        if (game.currentRound < game.totalRounds) {
-          startRound(io, room);
-        } else {
-          startFinalRound(io, room);
-        }
+      game.currentRound += 1;
+      if (game.currentRound < game.totalRounds) {
+        startRound(io, room);
+      } else {
+        startFinalRound(io, room);
       }
+      markRoomsDirty();
     });
 
-    socket.on('sendMessage', (message) => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+    socket.on('sendMessage', (rawMessage) => {
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const roomData = rooms[room];
+      if (!allowRequest(`${socket.id}:sendMessage`, 5000, 6)) {
+        socket.emit('gameError', 'Slow down—message rate limit reached.');
+        return;
+      }
+
+      const { room, name, roomData } = joined;
+      const message = sanitizeMessage(rawMessage, 240);
+      if (!message) return;
+
       const msg = { player: name, text: message, timestamp: Date.now() };
       roomData.messages.push(msg);
       if (roomData.messages.length > 50) roomData.messages.shift();
 
       io.to(room).emit('newMessage', msg);
+      markRoomsDirty();
     });
 
-    socket.on('sendReaction', (reaction) => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+    socket.on('sendReaction', (rawReaction) => {
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const roomData = rooms[room];
+      if (!allowRequest(`${socket.id}:sendReaction`, 5000, 10)) {
+        return;
+      }
+
+      const { room, name, roomData } = joined;
+      const reaction = sanitizeReaction(rawReaction);
+      if (!reaction) return;
+
       const msg = { player: name, text: reaction, timestamp: Date.now(), isReaction: true };
       roomData.messages.push(msg);
       if (roomData.messages.length > 50) roomData.messages.shift();
 
       io.to(room).emit('newMessage', msg);
+      markRoomsDirty();
     });
 
     socket.on('startGame', () => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const roomData = rooms[room];
+      const { room, name, roomData } = joined;
+
       if (roomData.host !== name) {
         socket.emit('gameError', 'Only the host can start the game.');
         return;
@@ -174,14 +221,20 @@ function registerSocketHandlers(io) {
       }
 
       startGame(io, room);
+      markRoomsDirty();
     });
 
-    socket.on('draftCharacter', (character) => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+    socket.on('draftCharacter', (rawCharacter) => {
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const game = rooms[room].gameState;
+      if (!allowRequest(`${socket.id}:draftCharacter`, 10000, 20)) {
+        socket.emit('draftError', 'Too many draft submissions.');
+        return;
+      }
+
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
       if (!game || game.activePhase !== 'DRAFT') return;
 
       const player = game.players.find(p => p.name === name);
@@ -192,16 +245,17 @@ function registerSocketHandlers(io) {
         return;
       }
 
-      if (!character.trim()) return;
+      const character = sanitizeDraftCharacter(rawCharacter);
+      if (!character) return;
 
-      const charNormalized = character.trim().toLowerCase();
+      const charNormalized = character.toLowerCase();
       const isDuplicateOwn = player.team.some(c => c.toLowerCase() === charNormalized);
       const isDuplicateOther = game.players.some(p =>
         p.name !== name && p.team.some(c => c.toLowerCase() === charNormalized)
       );
       const isDuplicateAcrossRounds = game.allCharactersDrafted.some(c => c.toLowerCase() === charNormalized);
 
-      let finalCharacter = character.trim();
+      let finalCharacter = character;
       let autoFilled = false;
 
       if (isDuplicateOwn || isDuplicateOther || isDuplicateAcrossRounds) {
@@ -253,14 +307,16 @@ function registerSocketHandlers(io) {
           return acc;
         }, {})
       });
+
+      markRoomsDirty();
     });
 
     socket.on('lockDraft', () => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const game = rooms[room].gameState;
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
       if (!game || game.activePhase !== 'DRAFT') return;
 
       const player = game.players.find(p => p.name === name);
@@ -284,184 +340,90 @@ function registerSocketHandlers(io) {
         clearTimeout(game.draftTimeout);
         revealPlotTwist(io, room);
       }
+      markRoomsDirty();
     });
 
     socket.on('castVote', (votedPlayerName) => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const game = rooms[room].gameState;
-      if (!game || (game.activePhase !== 'VOTING' && game.activePhase !== 'FINAL_VOTING')) return;
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
+      if (!game || game.activePhase !== 'VOTING') return;
 
-      if (votedPlayerName === name) {
-        return;
-      }
+      const target = sanitizeName(votedPlayerName);
+      if (!target || target === name) return;
+      if (!game.players.some(p => p.name === target)) return;
 
-      game.votes[name] = votedPlayerName;
+      game.votes[name] = target;
 
       const currentVotes = {};
       game.players.forEach(p => {
         currentVotes[p.name] = 0;
       });
       Object.values(game.votes).forEach(voted => {
-        if (currentVotes.hasOwnProperty(voted)) {
-          currentVotes[voted]++;
+        if (Object.prototype.hasOwnProperty.call(currentVotes, voted)) {
+          currentVotes[voted] += 1;
         }
       });
 
       io.to(room).emit('voteUpdate', currentVotes);
+      markRoomsDirty();
     });
 
     socket.on('lockVote', () => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const game = rooms[room].gameState;
-      if (!game || (game.activePhase !== 'VOTING' && game.activePhase !== 'FINAL_VOTING')) return;
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
+      if (!game || game.activePhase !== 'VOTING') return;
 
       game.voteLocks[name] = true;
 
       const allLocked = game.players.every(p => game.voteLocks[p.name] === true);
-
       if (allLocked) {
         clearTimeout(voteTimeouts[room]);
-        if (game.activePhase === 'VOTING') {
-          tallyResults(io, room);
-        } else {
-          tallyFinalResults(io, room);
-        }
+        tallyResults(io, room);
       } else {
         io.to(room).emit('voteLockUpdate', {
           lockedPlayers: Object.keys(game.voteLocks),
           totalPlayers: game.players.length
         });
       }
+      markRoomsDirty();
     });
 
-    // NEW: Round 4 AI Evaluation Handler
-    socket.on('evaluateRound4', async (data) => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+    socket.on('evaluateRound4', async () => {
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      console.log(`🎮 Round 4 evaluation request from ${name} in room ${room}`);
-
-      const roomData = rooms[room];
-      const game = roomData ? roomData.gameState : null;
-      if (!game) return;
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
+      if (!game || game.activePhase !== 'AI_EVALUATION') {
+        socket.emit('round4EvaluationError', { message: 'Round 4 is not active.' });
+        return;
+      }
 
       if (game.round4Results && game.round4Results.payload) {
-        console.log(`↩️ Re-sending cached Round 4 results to ${name}`);
         socket.emit('round4Evaluated', game.round4Results.payload);
         return;
       }
 
       if (game.round4InProgress) {
-        console.log(`⏳ Round 4 evaluation already in progress for room ${room}`);
         return;
       }
 
-      const { scenario, twist, finalTeams } = data;
-      // finalTeams = { 'Player1': ['Batman', 'Superman', ...], 'Player2': [...], ... }
-
-      console.log(`📊 Evaluating ${Object.keys(finalTeams).length} teams with ${Object.values(finalTeams).reduce((sum, team) => sum + team.length, 0)} total characters`);
+      console.log(`🎮 Server-authoritative Round 4 evaluation requested by ${name} in room ${room}`);
 
       try {
         game.round4InProgress = true;
         const evaluationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const teamEvaluations = {};
-        const roundPoints = {};
-        const pointBreakdown = {};
-        const round4Weight = getRoundWeight(4);
-
-        // Evaluate each team's roster
-        for (const [playerName, roster] of Object.entries(finalTeams)) {
-          console.log(`⚙️ Evaluating ${playerName}'s team: ${roster.join(', ')}`);
-          
-          // Score all characters in this roster (up to 6)
-          const evaluations = await Promise.all(
-            roster.map(char => {
-              const playerData = game.players.find(p => p.name === playerName);
-              const draftMetaList = playerData && Array.isArray(playerData.finalTeamDraftMeta)
-                ? playerData.finalTeamDraftMeta
-                : [];
-              const draftedMeta = draftMetaList.find(entry =>
-                entry &&
-                entry.character &&
-                entry.character.toLowerCase() === String(char).toLowerCase()
-              );
-
-              return scoreCharacter(char, scenario, twist, {
-                originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
-                originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist
-              });
-            })
-          );
-
-          console.log(`✅ ${playerName} evaluations complete`);
-
-          // Add phrases to each character eval
-          evaluations.forEach(evalData => {
-            evalData.phrase = getRandomPhrase(evalData.emotion);
-          });
-
-          // Calculate chemistry bonus for this team
-          const chemistryInfo = calculateChemistryDetails(roster);
-          const chemistryBonus = chemistryInfo.bonus;
-          const averageOVR = Math.round(
-            evaluations.reduce((sum, e) => sum + e.ovr, 0) / evaluations.length
-          );
-          const teamOVR = Math.round(averageOVR + chemistryBonus);
-          const topPickEval = evaluations.reduce((best, current) => {
-            if (!best || current.ovr > best.ovr) return current;
-            return best;
-          }, null);
-          const highestOVR = topPickEval ? topPickEval.ovr : 0;
-
-          console.log(`📈 ${playerName}: Avg OVR=${averageOVR}, Chemistry=${chemistryBonus}, Total=${teamOVR}`);
-
-          const weightedRoundPoints = calculateRound4Points(teamOVR);
-          roundPoints[playerName] = weightedRoundPoints;
-          pointBreakdown[playerName] = [
-            `Team OVR: ${teamOVR}`,
-            `Average OVR: ${averageOVR}`,
-            `Chemistry Bonus: +${chemistryBonus}`,
-            `Round 4 Weight (x${round4Weight.toFixed(2)}): ${teamOVR} → ${weightedRoundPoints}`,
-            `Top Pick: ${topPickEval ? topPickEval.character : 'N/A'}`
-          ];
-
-          // Store this team's results
-          teamEvaluations[playerName] = {
-            evaluations,
-            teamSummary: {
-              totalOVR: teamOVR,
-              chemistryBonus,
-              chemistryDetails: chemistryInfo.details,
-              averageOVR,
-              topPick: topPickEval ? topPickEval.character : 'N/A',
-              highestOVR,
-              evaluationCount: evaluations.length
-            }
-          };
-        }
-
-        // Rank teams by totalOVR
-        const finalLeaderboard = Object.entries(teamEvaluations)
-          .map(([playerName, teamData]) => ({
-            playerName,
-            totalOVR: teamData.teamSummary.totalOVR,
-            chemistryBonus: teamData.teamSummary.chemistryBonus,
-            topPick: teamData.teamSummary.topPick
-          }))
-          .sort((a, b) => b.totalOVR - a.totalOVR);
-
-        console.log(`🏆 Final leaderboard:`, finalLeaderboard.map(t => `${t.playerName}: ${t.totalOVR}`).join(', '));
+        const scored = await evaluateRound4FromGame(game);
 
         if (!game.round4Applied) {
           game.players.forEach(p => {
-            const earned = roundPoints[p.name] || 0;
+            const earned = scored.roundPoints[p.name] || 0;
             p.roundScores[3] = earned;
             p.totalScore += earned;
           });
@@ -473,35 +435,36 @@ function registerSocketHandlers(io) {
           .map(p => ({
             name: p.name,
             score: p.totalScore,
-            roundScore: roundPoints[p.name] || 0,
-            breakdown: pointBreakdown[p.name] || []
+            roundScore: scored.roundPoints[p.name] || 0,
+            breakdown: scored.pointBreakdown[p.name] || []
           }));
 
-        // Detect winner/tie from actual Round 4 points awarded
-        const roundPointEntries = Object.entries(roundPoints);
+        const roundPointEntries = Object.entries(scored.roundPoints);
         const maxRoundPoints = roundPointEntries.length
           ? Math.max(...roundPointEntries.map(([, pts]) => pts))
           : 0;
+
         const tiedTeams = roundPointEntries
           .filter(([, pts]) => pts === maxRoundPoints)
           .map(([playerName]) => playerName);
+
         const isTie = tiedTeams.length > 1;
         const roundWinner = tiedTeams[0] || null;
 
         game.results[3] = {
           winner: roundWinner,
-          isTie: isTie,
+          isTie,
           tiedPlayers: tiedTeams,
-          scenario: scenario,
-          twist: twist,
+          scenario: scored.scenario,
+          twist: scored.twist,
           leaderboard: leaderboardData
         };
 
         const payload = {
           evaluationId,
-          allTeamEvaluations: teamEvaluations,
-          finalLeaderboard,
-          isTie: isTie,
+          allTeamEvaluations: scored.teamEvaluations,
+          finalLeaderboard: scored.finalLeaderboard,
+          isTie,
           tiedPlayers: tiedTeams
         };
 
@@ -511,42 +474,39 @@ function registerSocketHandlers(io) {
           winner: roundWinner,
           isTie,
           tiedPlayers: tiedTeams,
-          roundPoints,
-          pointBreakdown,
+          roundPoints: scored.roundPoints,
+          pointBreakdown: scored.pointBreakdown,
           leaderboardData
         };
 
-        // Emit all teams' results back to ALL players in the room
         io.to(room).emit('round4Evaluated', payload);
-
-        console.log(`✅ Round 4 evaluation completed for room ${room}`);
-        game.round4InProgress = false;
       } catch (error) {
         console.error('❌ Round 4 evaluation error:', error);
-        game.round4InProgress = false;
-        socket.emit('round4EvaluationError', { message: error.message });
+        socket.emit('round4EvaluationError', { message: 'Failed to evaluate Round 4 teams.' });
+      } finally {
+        if (game) game.round4InProgress = false;
+        markRoomsDirty();
       }
     });
 
     socket.on('requestFinalResults', () => {
-      const room = socket.data.room;
-      const name = socket.data.name;
-      if (!room || !name) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const roomData = rooms[room];
-      const game = roomData ? roomData.gameState : null;
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
       if (!game || !game.round4Results) return;
 
       game.finalResultsReady = game.finalResultsReady || {};
       game.finalResultsReady[name] = true;
 
       const allReady = game.players.every(p => game.finalResultsReady[p.name] === true);
-
       if (!allReady) {
         io.to(room).emit('finalResultsWaiting', {
           readyCount: Object.keys(game.finalResultsReady).length,
           totalPlayers: game.players.length
         });
+        markRoomsDirty();
         return;
       }
 
@@ -563,26 +523,24 @@ function registerSocketHandlers(io) {
         pointBreakdown: game.round4Results.pointBreakdown
       });
 
+      markRoomsDirty();
       setTimeout(() => endGame(io, room), 3000);
     });
 
     socket.on('playAgain', () => {
-      const room = socket.data.room;
-      if (!room) return;
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
 
-      const roomData = rooms[room];
+      const { room, roomData } = joined;
       roomData.gameState = null;
       roomData.isGameActive = false;
-      roomData.players.forEach(p => p.ready = false);
+      roomData.players.forEach(p => {
+        p.ready = false;
+      });
       roomData.messages = [];
 
-      io.to(room).emit('roomData', {
-        players: roomData.players,
-        isGameActive: roomData.isGameActive,
-        host: roomData.host,
-        settings: roomData.settings,
-        messages: roomData.messages
-      });
+      emitRoomData(io, room, roomData);
+      markRoomsDirty();
     });
 
     socket.on('disconnect', () => {
@@ -590,26 +548,27 @@ function registerSocketHandlers(io) {
       const name = socket.data.name;
       if (!room || !name) return;
 
-      const roomData = rooms[room];
+      const roomData = getRoomData(room);
+      if (!roomData) return;
+
       roomData.players = roomData.players.filter(p => p.name !== name);
+
+      if (roomData.gameState && Array.isArray(roomData.gameState.players)) {
+        roomData.gameState.players = roomData.gameState.players.filter(p => p.name !== name);
+      }
 
       if (roomData.host === name && roomData.players.length > 0) {
         roomData.host = roomData.players[0].name;
       }
 
-      io.to(room).emit('roomData', {
-        players: roomData.players,
-        isGameActive: roomData.isGameActive,
-        host: roomData.host,
-        settings: roomData.settings,
-        messages: roomData.messages
-      });
-
-      console.log(`${name} left room ${room}`);
-
       if (roomData.players.length === 0) {
         delete rooms[room];
+      } else {
+        emitRoomData(io, room, roomData);
       }
+
+      console.log(`${name} left room ${room}`);
+      markRoomsDirty();
     });
   });
 }

@@ -191,7 +191,7 @@ For Each Character Across All Teams:
     ↓
 Calculate Chemistry Bonus per Team
     ↓
-Display Evaluations Sequentially (2.5s delay per character)
+Display Evaluations Sequentially (adaptive delay per character)
     ↓
 Display Team Summary for Each Team (OVR, chemistry, verdict)
     ↓
@@ -1574,7 +1574,7 @@ Round 4 starts. All teams are already built (6 players × 6 characters = up to 3
 ### 2. Evaluation Trigger
 When Round 4 phase begins:
 ```
-Client → Server: 'evaluateRound4' event with finalTeams + scenario + twist
+Client → Server: 'evaluateRound4' request (server derives scenario, twist, and final teams)
 finalTeams = { 'Player1': [...6 chars...], 'Player2': [...6 chars...], ..., 'Player6': [...6 chars...] }
 ```
 
@@ -1588,7 +1588,7 @@ For EACH character across ALL teams (up to 36 total):
 6. Calculate chemistry bonus for team
 
 ### 4. Results Display
-Client displays evaluation cards sequentially (2.5s delay per character, ~90 seconds for 36 chars)
+Client displays evaluation cards sequentially with adaptive pacing (faster at high player counts)
 - Team 1: 6 characters × 2.5s = 15 seconds
 - Team 2: 6 characters × 2.5s = 15 seconds
 - Team 3: 6 characters × 2.5s = 15 seconds

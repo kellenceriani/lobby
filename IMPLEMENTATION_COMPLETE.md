@@ -2,7 +2,7 @@
 
 ## ✅ Implementation Summary
 
-The Round 4 AI Evaluator system has been **fully implemented** according to the ROUND4_AI_EVALUATOR_SPEC.md. The old voting-based Round 4 system has been **replaced** with an AI-driven evaluation system.
+The Round 4 AI Evaluator system has been implemented as the canonical flow. Legacy final voting/drafting paths are now removed from active client/server execution.
 
 ---
 
@@ -34,7 +34,7 @@ The Round 4 AI Evaluator system has been **fully implemented** according to the 
 
 #### Created: `public/js/round4Eval.js`
 - Round 4 evaluation screen controller
-- Sequential character display (2.5s delay per character)
+- Sequential character display with adaptive pacing (fast reveal under high team counts)
 - Team summary rendering
 - Final leaderboard display
 - Socket event handlers for `round4Evaluated`
@@ -63,14 +63,14 @@ The Round 4 AI Evaluator system has been **fully implemented** according to the 
   - Collects final teams from Rounds 1-3
   - Generates scenario + twist for evaluation
   - Emits `round4Start` event (NEW)
-- **Kept**: `startFinalVoting()` function exists but is no longer called
+- **Removed**: `startFinalVoting()` legacy path
 
 #### Modified: `public/js/app.js`
 - **Added**: `socket.on('round4Start')` handler
   - Displays epic transition message ("THE ARENA TRANSFORMS")
   - 5-second countdown with dramatic messaging
   - Auto-triggers `initRound4Evaluation()`
-- **Commented Out**: `socket.on('finalVotingPhaseStart')` (old Round 4 voting - no longer used)
+- **Removed**: `socket.on('finalVotingPhaseStart')` legacy client block
 
 #### Modified: `public/js/state.js`
 - **Added**: `round4State` object
@@ -112,7 +112,7 @@ Collect Final Teams (from R1-3)
    ↓
 Show Transition Message (5 seconds)
    ↓
-AI Evaluation Screen (2.5s × characters)
+AI Evaluation Screen (adaptive pacing)
    ↓
 Display All Character Evaluations Sequentially
    ↓
@@ -135,7 +135,7 @@ Game End
    - After 5 seconds, calls `initRound4Evaluation()`
 
 3. **Client: round4Eval.js requests evaluation**
-   - Emits `evaluateRound4` with scenario, twist, finalTeams
+   - Emits `evaluateRound4` request only
 
 4. **Server: socketHandlers.js evaluates**
    - For each team's 6 characters:
@@ -150,7 +150,7 @@ Game End
    - Emits `round4Evaluated` to all clients
 
 5. **Client: round4Eval.js displays results**
-   - Sequentially displays each character card (2.5s delay)
+   - Sequentially displays each character card with adaptive delays
    - Shows team summaries after each team's characters
    - Displays final leaderboard ranked by Team OVR
 
@@ -219,7 +219,7 @@ For better character recognition (movies/TV shows):
 
 - **Round 4 has NO voting** (completely removed)
 - **Round 4 has NO drafting** (teams auto-collected from R1-3)
-- **Evaluation takes ~90 seconds** for 6 teams × 6 characters
+- **Evaluation display is paced adaptively** (substantially shorter than fixed 90s worst-case)
 - **Progress counter updates** (e.g., "15 / 36")
 - **Scenario is collapsible** (click to toggle)
 - **Final leaderboard ranks by Team OVR** (average character OVR + chemistry bonus)
@@ -240,8 +240,8 @@ For better character recognition (movies/TV shows):
 - **API Calls**: Up to 36 characters × 3 APIs = potential 108 calls
   - **Cache hit rate**: ~40-50% (same characters across teams)
   - **Actual time**: ~5-10 seconds total (most are cached)
-- **Display Time**: 2.5s × 36 characters = ~90 seconds (intentional pacing)
-- **Total Round 4**: ~100 seconds from start to final leaderboard
+- **Display Time**: adaptive pacing based on total characters (shorter for full lobbies)
+- **Total Round 4**: reduced from fixed long waits while preserving sequential reveal
 - **Memory**: Cache persists 1 hour (automatic cleanup)
 
 ---
@@ -307,7 +307,7 @@ No new npm packages required - uses Node.js built-in `https` module.
 
 ✅ All 8 implementation tasks completed  
 ✅ No compile errors (`get_errors` returned clean)  
-✅ Old Round 4 voting system removed/commented out  
+✅ Old Round 4 voting system removed from active paths  
 ✅ New AI evaluation system fully integrated  
 ✅ Socket events connected (server ↔ client)  
 ✅ Mobile-responsive UI implemented  

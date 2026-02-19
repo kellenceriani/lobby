@@ -14,6 +14,21 @@ let round4State = {
   finalResultsRequested: false
 };
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getCharacterRevealDelay(totalCharacters) {
+  if (totalCharacters >= 30) return 180;
+  if (totalCharacters >= 18) return 260;
+  return 360;
+}
+
 function updateEvalProgress(current, total) {
   const progress = document.getElementById('evalProgress');
   const bar = document.getElementById('evalProgressBar');
@@ -91,11 +106,7 @@ function initRound4Evaluation(data) {
   // Emit to server
   if (window.socket) {
     console.log('📡 Emitting evaluateRound4 to server...');
-    window.socket.emit('evaluateRound4', {
-      scenario,
-      twist,
-      finalTeams
-    });
+    window.socket.emit('evaluateRound4');
   } else {
     console.error('❌ window.socket not available!');
   }
@@ -158,6 +169,9 @@ async function displayAllTeamEvaluationsSequentially() {
   
   let charIndex = 0;
   const allTeams = Object.entries(round4State.allTeamEvaluations);
+  const charDelay = getCharacterRevealDelay(round4State.totalCharacters);
+  const summaryDelay = 220;
+  const leaderboardDelay = 220;
   
   // For each team
   for (const [playerName, teamData] of allTeams) {
@@ -167,7 +181,9 @@ async function displayAllTeamEvaluationsSequentially() {
     // Add team header
     const teamHeader = document.createElement('div');
     teamHeader.className = 'eval-team-header';
-    teamHeader.innerHTML = `<h2>🎮 ${playerName}'s Team</h2>`;
+    const heading = document.createElement('h2');
+    heading.textContent = `🎮 ${playerName}'s Team`;
+    teamHeader.appendChild(heading);
     teamBlock.appendChild(teamHeader);
 
     const teamCards = document.createElement('div');
@@ -180,19 +196,18 @@ async function displayAllTeamEvaluationsSequentially() {
       charIndex++;
       updateEvalProgress(charIndex, round4State.totalCharacters);
       
-      // 2.5s delay between characters
-      await new Promise(resolve => setTimeout(resolve, 2500));
+      await new Promise(resolve => setTimeout(resolve, charDelay));
     }
     
     // Add team summary after all characters
     renderTeamSummary(playerName, teamData.teamSummary, teamBlock);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, summaryDelay));
 
     container.appendChild(teamBlock);
   }
   
   // Display final leaderboard after all character evals
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  await new Promise(resolve => setTimeout(resolve, leaderboardDelay));
   displayFinalLeaderboard();
   updateEvalProgress(round4State.totalCharacters, round4State.totalCharacters);
   if (loading) loading.style.display = 'none';
@@ -208,7 +223,7 @@ function renderEvalCard(evalData, container) {
   const notes = Array.isArray(evalData.notes) 
     ? evalData.notes.filter(note => !note.toLowerCase().includes('low relevance')).slice(0, 2) 
     : [];
-  const notesHtml = notes.map(note => `<li>${note}</li>`).join('');
+  const notesHtml = notes.map(note => `<li>${escapeHtml(note)}</li>`).join('');
   
   // Determine OVR tier and color
   const ovrTier = evalData.ovrTier || getOVRTierFromValue(evalData.ovr);
@@ -220,9 +235,9 @@ function renderEvalCard(evalData, container) {
   card.className = `eval-card eval-card-${evalData.emotion}`;
   card.innerHTML = `
     <div class="eval-card-header">
-      <h3 class="eval-card-name">${evalData.character}</h3>
+      <h3 class="eval-card-name">${escapeHtml(evalData.character)}</h3>
       <div class="eval-card-emotion">
-        <img src="/img/emotions/${evalData.emotion}.png" alt="${evalData.emotion}" 
+        <img src="/img/emotions/${encodeURIComponent(evalData.emotion)}.png" alt="${escapeHtml(evalData.emotion)}" 
              class="eval-emotion-icon" width="64" height="64" decoding="async">
       </div>
     </div>
@@ -231,15 +246,15 @@ function renderEvalCard(evalData, container) {
         <span class="eval-score-value">${evalData.score}</span>
         <span class="eval-score-max">/30</span>
       </div>
-      <div class="eval-ovr ${ovrClass} eval-ovr-clickable" title="Click for detailed breakdown" role="button" tabindex="0" aria-label="View OVR breakdown for ${evalData.character}">
+      <div class="eval-ovr ${ovrClass} eval-ovr-clickable" title="Click for detailed breakdown" role="button" tabindex="0" aria-label="View OVR breakdown for ${escapeHtml(evalData.character)}">
         <div class="eval-ovr-label">OVR</div>
         <div class="eval-ovr-value">${evalData.ovr}</div>
         <div class="eval-ovr-tier">${ovrTier.label}</div>
       </div>
     </div>
     <div class="eval-card-meta">
-      <span class="eval-rarity" title="Rarity">${rarity}</span>
-      <span class="eval-type" title="Character Type">${characterType}</span>
+      <span class="eval-rarity" title="Rarity">${escapeHtml(rarity)}</span>
+      <span class="eval-type" title="Character Type">${escapeHtml(characterType)}</span>
     </div>
     <div class="eval-card-notes" aria-label="Evaluation notes">
       <ul>
@@ -247,7 +262,7 @@ function renderEvalCard(evalData, container) {
       </ul>
     </div>
     <div class="eval-card-phrase">
-      <p>"${evalData.phrase}"</p>
+      <p>"${escapeHtml(evalData.phrase)}"</p>
     </div>
   `;
   
@@ -284,16 +299,16 @@ function renderTeamSummary(playerName, summary, container) {
   const chemistryDetails = Array.isArray(summary.chemistryDetails) ? summary.chemistryDetails : [];
   const chemistryLines = chemistryDetails.length
     ? chemistryDetails.map(detail => {
-      const matches = Array.isArray(detail.matches) ? detail.matches.join(', ') : 'N/A';
+      const matches = Array.isArray(detail.matches) ? detail.matches.map(escapeHtml).join(', ') : 'N/A';
       const sign = detail.bonus >= 0 ? '+' : '';
-      return `<li><strong>${detail.label}</strong> (${sign}${detail.bonus}): ${matches}</li>`;
+      return `<li><strong>${escapeHtml(detail.label)}</strong> (${sign}${detail.bonus}): ${matches}</li>`;
     }).join('')
     : '<li>No clear chemistry patterns detected.</li>';
 
   const summaryDiv = document.createElement('div');
   summaryDiv.className = 'eval-team-summary';
   summaryDiv.innerHTML = `
-    <h3>📊 ${playerName}'s Team Summary</h3>
+    <h3>📊 ${escapeHtml(playerName)}'s Team Summary</h3>
     <div class="summary-stats">
       <div class="summary-stat">
         <label>Team OVR</label>
@@ -309,7 +324,7 @@ function renderTeamSummary(playerName, summary, container) {
       </div>
       <div class="summary-stat">
         <label>Top Pick</label>
-        <span class="summary-value-text">${summary.topPick}</span>
+        <span class="summary-value-text">${escapeHtml(summary.topPick)}</span>
       </div>
       <div class="summary-stat">
         <label>Highest OVR</label>
@@ -357,10 +372,10 @@ function displayFinalLeaderboard() {
       ${round4State.finalLeaderboard.map((team, idx) => `
         <tr class="rank-${idx + 1}">
           <td>${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '#' + (idx + 1)}</td>
-          <td><strong>${team.playerName}</strong></td>
+          <td><strong>${escapeHtml(team.playerName)}</strong></td>
           <td><strong>${team.totalOVR}</strong></td>
           <td>${team.chemistryBonus >= 0 ? '+' : ''}${team.chemistryBonus}</td>
-          <td>${team.topPick}</td>
+          <td>${escapeHtml(team.topPick)}</td>
         </tr>
       `).join('')}
     </tbody>
@@ -425,7 +440,7 @@ function openOVRBreakdown(evalData) {
       ? evalData.breakdown.keywordMatches.scenario || []
       : [];
     scenarioKeywordsEl.innerHTML = scenarioKeywords.length
-      ? `<span class="ovr-keywords-label">Keywords:</span>${scenarioKeywords.map(kw => `<span class="ovr-keyword-chip">${kw}</span>`).join('')}`
+      ? `<span class="ovr-keywords-label">Keywords:</span>${scenarioKeywords.map(kw => `<span class="ovr-keyword-chip">${escapeHtml(kw)}</span>`).join('')}`
       : '<span class="ovr-keywords-empty">No keyword matches</span>';
   }
 
@@ -440,7 +455,7 @@ function openOVRBreakdown(evalData) {
       ? evalData.breakdown.keywordMatches.twist || []
       : [];
     twistKeywordsEl.innerHTML = twistKeywords.length
-      ? `<span class="ovr-keywords-label">Keywords:</span>${twistKeywords.map(kw => `<span class="ovr-keyword-chip">${kw}</span>`).join('')}`
+      ? `<span class="ovr-keywords-label">Keywords:</span>${twistKeywords.map(kw => `<span class="ovr-keyword-chip">${escapeHtml(kw)}</span>`).join('')}`
       : '<span class="ovr-keywords-empty">No keyword matches</span>';
   }
 
@@ -464,19 +479,19 @@ function openOVRBreakdown(evalData) {
 
     const positiveSegments = positiveSteps.map((step, index) => {
       const width = Math.max(6, (step.points / positiveScale) * 100);
-      return `<span class="score-mini-segment pos" style="width:${width}%;--segment-hue:${(index * 38) % 360};" title="${step.step}: +${step.points}${step.description ? ` — ${step.description}` : ''}"></span>`;
+      return `<span class="score-mini-segment pos" style="width:${width}%;--segment-hue:${(index * 38) % 360};" title="${escapeHtml(step.step)}: +${step.points}${step.description ? ` — ${escapeHtml(step.description)}` : ''}"></span>`;
     }).join('');
 
     const negativeSegments = negativeSteps.map((step, index) => {
       const width = Math.max(8, (Math.abs(step.points) / negativeScale) * 100);
-      return `<span class="score-mini-segment neg" style="width:${width}%;--segment-hue:${(index * 22) % 360};" title="${step.step}: ${step.points}${step.description ? ` — ${step.description}` : ''}"></span>`;
+      return `<span class="score-mini-segment neg" style="width:${width}%;--segment-hue:${(index * 22) % 360};" title="${escapeHtml(step.step)}: ${step.points}${step.description ? ` — ${escapeHtml(step.description)}` : ''}"></span>`;
     }).join('');
 
     const legendChips = steps.map((step) => {
       const pointsClass = step.points > 0 ? 'positive' : step.points < 0 ? 'negative' : 'neutral';
       const pointsSign = step.points > 0 ? '+' : '';
       const tag = buildAcronym(step.step) || 'STEP';
-      return `<span class="score-mini-chip ${pointsClass}" title="${step.step}${step.description ? ` — ${step.description}` : ''}"><strong>${tag}</strong> ${pointsSign}${step.points}</span>`;
+      return `<span class="score-mini-chip ${pointsClass}" title="${escapeHtml(step.step)}${step.description ? ` — ${escapeHtml(step.description)}` : ''}"><strong>${escapeHtml(tag)}</strong> ${pointsSign}${step.points}</span>`;
     }).join('');
 
     scoreBreakdownEl.innerHTML = `

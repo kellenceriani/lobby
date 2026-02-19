@@ -648,7 +648,6 @@ function determineRoundWinner(points) {
 
 **Affected Systems**:
 - `tallyResults()` - Rounds 1-3 voting-based
-- `tallyFinalResults()` - Final voting round  
 - `evaluateRound4()` - AI evaluation with chemistry bonuses
 
 ---

@@ -145,10 +145,53 @@ function extractMatches(characterNames, predicate) {
   return characterNames.filter(name => predicate(name.toLowerCase()));
 }
 
-function addDetail(details, label, bonus, matches) {
+function normalizeRosterName(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+function calculateSetOverlapRatio(setA, setB) {
+  if (!setA.size || !setB.size) return 0;
+  let intersection = 0;
+  setA.forEach(item => {
+    if (setB.has(item)) intersection += 1;
+  });
+  return intersection / Math.min(setA.size, setB.size);
+}
+
+function getOverlapFactor(overlapRatio) {
+  if (overlapRatio >= 0.8) return 0.35;
+  if (overlapRatio >= 0.6) return 0.55;
+  if (overlapRatio >= 0.4) return 0.75;
+  return 1;
+}
+
+function addDetail(details, label, bonus, matches, overlapTracker = null) {
   if (!matches || matches.length === 0) return 0;
-  details.push({ label, bonus, matches });
-  return bonus;
+
+  let adjustedBonus = bonus;
+  const normalizedMatches = matches.map(normalizeRosterName);
+
+  if (overlapTracker && bonus > 0) {
+    const currentSet = new Set(normalizedMatches);
+    const maxOverlap = overlapTracker.positiveSets.reduce((highest, previousSet) => {
+      return Math.max(highest, calculateSetOverlapRatio(currentSet, previousSet));
+    }, 0);
+
+    const overlapFactor = getOverlapFactor(maxOverlap);
+    adjustedBonus = Math.round((bonus * overlapFactor) * 10) / 10;
+
+    if (adjustedBonus < 1) {
+      return 0;
+    }
+
+    overlapTracker.positiveSets.push(currentSet);
+    if (overlapFactor < 1) {
+      label = `${label} (overlap-adjusted)`;
+    }
+  }
+
+  details.push({ label, bonus: adjustedBonus, matches });
+  return adjustedBonus;
 }
 
 function matchByKeywords(names, keywords) {
@@ -159,6 +202,7 @@ function calculateChemistryDetails(characterNames) {
   const normalized = characterNames.map(name => name.toLowerCase());
   const details = [];
   let bonus = CHEMISTRY_BASE;
+  const overlapTracker = { positiveSets: [] };
 
   // ===== PHASE 1: RELATIONSHIP DETECTION =====
   // Check for known allies
@@ -167,7 +211,7 @@ function calculateChemistryDetails(characterNames) {
       names.some(allyName => char.toLowerCase().includes(allyName))
     );
     if (foundMembers.length >= 2) {
-      bonus += addDetail(details, label, allyBonus, foundMembers);
+      bonus += addDetail(details, label, allyBonus, foundMembers, overlapTracker);
     }
   });
 
@@ -177,7 +221,7 @@ function calculateChemistryDetails(characterNames) {
       names.some(rivalName => char.toLowerCase().includes(rivalName))
     );
     if (foundRivals.length >= 2) {
-      bonus += addDetail(details, label, rivalBonus, foundRivals);
+      bonus += addDetail(details, label, rivalBonus, foundRivals, overlapTracker);
     }
   });
 
@@ -195,7 +239,7 @@ function calculateChemistryDetails(characterNames) {
   FEATURE_RULES.forEach(rule => {
     const matches = characterNames.filter(name => rule.regex.test(name));
     if (matches.length >= rule.min) {
-      bonus += addDetail(details, rule.label, rule.bonus, matches);
+      bonus += addDetail(details, rule.label, rule.bonus, matches, overlapTracker);
     }
   });
 
@@ -207,7 +251,7 @@ function calculateChemistryDetails(characterNames) {
     if (franchiseMatches.length >= 2) {
       // Scale bonus with team size
       const scaledBonus = franchiseMatches.length >= 4 ? franchiseBonus + 1 : franchiseBonus;
-      bonus += addDetail(details, `${name} Universe`, scaledBonus, franchiseMatches);
+      bonus += addDetail(details, `${name} Universe`, scaledBonus, franchiseMatches, overlapTracker);
     }
   });
 
@@ -218,7 +262,8 @@ function calculateChemistryDetails(characterNames) {
       details,
       'Good-aligned synergy',
       goodMatches.length >= 3 ? 3 : 2,
-      characterNames.filter(name => goodMatches.includes(name.toLowerCase()))
+      characterNames.filter(name => goodMatches.includes(name.toLowerCase())),
+      overlapTracker
     );
   }
 
@@ -228,7 +273,8 @@ function calculateChemistryDetails(characterNames) {
       details,
       'Villain synergy',
       evilMatches.length >= 3 ? 3 : 2,
-      characterNames.filter(name => evilMatches.includes(name.toLowerCase()))
+      characterNames.filter(name => evilMatches.includes(name.toLowerCase())),
+      overlapTracker
     );
   }
 
@@ -248,7 +294,7 @@ function calculateChemistryDetails(characterNames) {
         ROLE_KEYWORDS.brawn.some(kw => lower.includes(kw)) ||
         ROLE_KEYWORDS.support.some(kw => lower.includes(kw));
     });
-    bonus += addDetail(details, 'Balanced roles (brains + brawn + support)', 4, comboMatches);
+    bonus += addDetail(details, 'Balanced roles (brains + brawn + support)', 4, comboMatches, overlapTracker);
   }
 
   // ===== PHASE 6: ERA/TIME PERIOD SYNERGY =====
@@ -257,7 +303,7 @@ function calculateChemistryDetails(characterNames) {
       keywords.some(kw => char.toLowerCase().includes(kw))
     );
     if (eraMatches.length >= 3) {
-      bonus += addDetail(details, `${label} Cohesion`, 3, eraMatches);
+      bonus += addDetail(details, `${label} Cohesion`, 3, eraMatches, overlapTracker);
     }
   });
 
@@ -267,7 +313,7 @@ function calculateChemistryDetails(characterNames) {
       keywords.some(kw => char.toLowerCase().includes(kw))
     );
     if (arcMatches.length >= min) {
-      bonus += addDetail(details, label, arcBonus, arcMatches);
+      bonus += addDetail(details, label, arcBonus, arcMatches, overlapTracker);
     }
   });
 
@@ -282,7 +328,7 @@ function calculateChemistryDetails(characterNames) {
   // Bonus for power diversity
   const tierCount = Object.values(powerDistribution).filter(arr => arr.length > 0).length;
   if (tierCount >= 3) {
-    bonus += addDetail(details, 'Power tier diversity', 2, characterNames);
+    bonus += addDetail(details, 'Power tier diversity', 2, characterNames, overlapTracker);
   }
 
   // Penalty for extreme power imbalance
@@ -296,17 +342,17 @@ function calculateChemistryDetails(characterNames) {
   const riderMatches = extractMatches(characterNames, name => /rider|tamer|trainer|ranger/i.test(name));
   const beastMatches = extractMatches(characterNames, name => /dragon|wolf|beast|horse|lion|tiger|hawk|bear/i.test(name));
   if (riderMatches.length >= 1 && beastMatches.length >= 1) {
-    bonus += addDetail(details, 'Rider/animal bond', 3, [...new Set([...riderMatches, ...beastMatches])]);
+    bonus += addDetail(details, 'Rider/animal bond', 3, [...new Set([...riderMatches, ...beastMatches])], overlapTracker);
   }
 
   const prostheticMatches = extractMatches(characterNames, name => PROSTHETIC_KEYWORDS.some(kw => name.includes(kw)));
   if (prostheticMatches.length >= 2) {
-    bonus += addDetail(details, 'Shared prosthetic/augments', 2, prostheticMatches);
+    bonus += addDetail(details, 'Shared prosthetic/augments', 2, prostheticMatches, overlapTracker);
   }
 
   const animalBondMatches = extractMatches(characterNames, name => ANIMAL_BOND_NAMES.some(kw => name.includes(kw)));
   if (animalBondMatches.length >= 2) {
-    bonus += addDetail(details, 'Known animal-bond heroes', 2, animalBondMatches);
+    bonus += addDetail(details, 'Known animal-bond heroes', 2, animalBondMatches, overlapTracker);
   }
 
   // ===== PHASE 10: SURNAME/IDENTITY PATTERNS =====
@@ -320,7 +366,7 @@ function calculateChemistryDetails(characterNames) {
   Object.entries(surnameCounts).forEach(([surname, count]) => {
     if (count >= 2) {
       const matched = characterNames.filter(name => name.toLowerCase().endsWith(` ${surname}`));
-      bonus += addDetail(details, 'Shared surname/family', 2, matched);
+      bonus += addDetail(details, 'Shared surname/family', 2, matched, overlapTracker);
     }
   });
 

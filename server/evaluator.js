@@ -83,8 +83,162 @@ const OFFENSIVE_WORDS = [
   'fuck', 'shit', 'nazi', 'hitler', 'n1gger', 'f4ggot', 'c0nt', 'whore', 'slut'
 ];
 
+const KEYWORD_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'onto', 'over', 'under', 'above', 'below',
+  'about', 'your', 'their', 'there', 'they', 'them', 'when', 'where', 'while', 'would', 'could', 'should',
+  'have', 'has', 'had', 'were', 'was', 'are', 'is', 'been', 'being', 'not', 'but', 'can', 'will', 'just',
+  'than', 'then', 'also', 'very', 'more', 'most', 'some', 'such', 'only', 'other', 'many', 'each', 'both',
+  'into', 'within', 'through', 'because', 'across', 'after', 'before', 'during', 'against', 'without', 'between',
+  'character', 'characters', 'story', 'series', 'movie', 'film', 'episode', 'season', 'comic', 'fictional'
+]);
+
+const CONTEXT_KEYWORD_GROUPS = {
+  combat: ['fight', 'battle', 'war', 'duel', 'melee', 'weapon', 'martial', 'punch', 'strike', 'combat', 'assault', 'siege'],
+  stealth: ['stealth', 'shadow', 'sneak', 'infiltrate', 'covert', 'silent', 'assassin', 'spy', 'cloak', 'heist', 'invisible', 'invisibility', 'camouflage'],
+  mobility: ['climb', 'climbing', 'wall', 'wallcrawl', 'wallcrawler', 'crawl', 'swing', 'parkour', 'acrobat', 'agile', 'agility'],
+  strategy: ['strategy', 'tactic', 'plan', 'analyze', 'intelligence', 'deduce', 'investigate', 'command', 'leadership'],
+  science: ['science', 'scientist', 'lab', 'quantum', 'engineer', 'inventor', 'technology', 'robotics', 'ai', 'cyber'],
+  magic: ['magic', 'wizard', 'sorcerer', 'spell', 'enchanted', 'arcane', 'mythic', 'rune', 'witch', 'artifact'],
+  survival: ['survive', 'survival', 'resource', 'scarcity', 'wilderness', 'endure', 'escape', 'resilience'],
+  leadership: ['leader', 'captain', 'commander', 'chief', 'king', 'queen', 'general', 'rally', 'organize'],
+  rescue: ['rescue', 'protect', 'save', 'evacuate', 'defend', 'guardian', 'shelter', 'aid'],
+  chaos: ['chaos', 'anarchy', 'disaster', 'catastrophe', 'breakdown', 'collapse', 'panic', 'crisis'],
+  space: ['space', 'cosmic', 'galaxy', 'planet', 'starship', 'alien', 'orbit', 'astronaut', 'interstellar'],
+  time: ['time', 'timeline', 'temporal', 'future', 'past', 'paradox', 'loop', 'history'],
+  social: ['diplomacy', 'politics', 'negotiate', 'alliance', 'persuade', 'influence', 'public', 'crowd', 'society']
+};
+
+const INTENT_KEYWORD_GROUPS = {
+  investigation: ['solve', 'mystery', 'secret', 'identity', 'detective', 'investigate', 'deduce', 'clue', 'evidence', 'uncover', 'reveal', 'suspect', 'spy', 'infiltrate', 'deception', 'disguise', 'mask', 'double', 'alias', 'hidden'],
+  strategy: ['strategy', 'tactic', 'plan', 'counter', 'predict', 'outsmart', 'analyze', 'genius', 'mind', 'logic'],
+  science: ['science', 'engineer', 'inventor', 'technology', 'lab', 'experiment', 'quantum', 'device', 'gadget', 'robot', 'ai'],
+  leadership: ['leader', 'captain', 'commander', 'chief', 'organize', 'coordinate', 'rally', 'command'],
+  combat: ['fight', 'battle', 'war', 'defeat', 'duel', 'weapon', 'combat', 'assault'],
+  stealth: ['stealth', 'sneak', 'covert', 'silent', 'shadow', 'assassin', 'heist', 'invisible', 'invisibility', 'camouflage'],
+  mobility: ['climb', 'climbing', 'wall', 'wallcrawl', 'wallcrawler', 'crawl', 'swing', 'parkour', 'agile', 'agility'],
+  survival: ['survive', 'escape', 'endure', 'resource', 'resilience', 'wilderness', 'adapt'],
+  magic: ['magic', 'wizard', 'sorcerer', 'spell', 'arcane', 'rune', 'witch'],
+  time: ['time', 'timeline', 'temporal', 'paradox', 'future', 'past', 'loop'],
+  social: ['diplomacy', 'negotiate', 'persuade', 'alliance', 'influence', 'politics']
+};
+
+const CAPABILITY_TRAIT_KEYWORDS = {
+  combat: ['combat', 'battle', 'fighter', 'warrior', 'soldier', 'martial', 'duel', 'assassin', 'ninja', 'hero', 'superhero'],
+  power: ['strength', 'strong', 'power', 'smash', 'force', 'godlike', 'cosmic', 'flight', 'laser', 'superhuman'],
+  durability: ['durable', 'invulnerable', 'invulnerability', 'resilient', 'tank', 'endure', 'immortal', 'regen', 'bulletproof', 'superhuman'],
+  mobility: ['agile', 'agility', 'acrobatic', 'parkour', 'swing', 'climb', 'wallcrawl', 'dash', 'runner'],
+  speed: ['speed', 'speedster', 'fast', 'rapid', 'quicksilver', 'flash'],
+  stealth: ['stealth', 'shadow', 'sneak', 'covert', 'infiltrate', 'invisible', 'camouflage', 'silent'],
+  intelligence: ['genius', 'intelligent', 'detective', 'analyze', 'deduce', 'strategist', 'logic', 'investigate'],
+  engineering: ['engineer', 'inventor', 'scientist', 'technology', 'robotics', 'gadget', 'lab', 'ai'],
+  magic: ['magic', 'wizard', 'sorcerer', 'spell', 'arcane', 'witch', 'rune'],
+  social: ['charisma', 'persuade', 'diplomacy', 'negotiate', 'influence', 'politics', 'public'],
+  leadership: ['leader', 'captain', 'commander', 'chief', 'king', 'queen', 'general', 'rally'],
+  space: ['space', 'cosmic', 'galaxy', 'orbit', 'starship', 'astronaut', 'interstellar'],
+  time: ['time', 'timeline', 'temporal', 'future', 'past', 'paradox', 'loop'],
+  aquatic: ['water', 'underwater', 'ocean', 'sea', 'swim', 'aquatic', 'submarine'],
+  adaptability: ['adapt', 'versatile', 'multi', 'transform', 'improvise', 'resourceful'],
+  control: ['control', 'precision', 'focus', 'discipline', 'mastery', 'balanced'],
+  communication: ['speak', 'speech', 'language', 'translator', 'signal', 'sign', 'emoji']
+};
+
+const INTENT_TO_TRAITS = {
+  combat: ['combat', 'power', 'durability'],
+  stealth: ['stealth', 'mobility', 'control'],
+  mobility: ['mobility', 'speed', 'adaptability'],
+  strategy: ['intelligence', 'leadership', 'control'],
+  science: ['engineering', 'intelligence', 'adaptability'],
+  leadership: ['leadership', 'social', 'communication'],
+  investigation: ['intelligence', 'stealth', 'control'],
+  survival: ['durability', 'adaptability', 'control'],
+  magic: ['magic', 'control', 'adaptability'],
+  time: ['time', 'intelligence', 'adaptability'],
+  social: ['social', 'communication', 'leadership']
+};
+
+const TWIST_EFFECT_RULES = [
+  { keywords: ['underwater', 'ocean', 'deep sea'], helps: ['aquatic', 'durability'], hurts: ['communication', 'mobility'], severity: 2, label: 'underwater environment' },
+  { keywords: ['zero gravity', 'on the moon', 'space', 'orbit'], helps: ['space', 'adaptability', 'control'], hurts: ['mobility'], severity: 2, label: 'low-gravity/space conditions' },
+  { keywords: ['blindfolded', 'complete darkness', 'darkness'], helps: ['control', 'stealth'], hurts: ['precision', 'mobility'], severity: 2, label: 'reduced visibility' },
+  { keywords: ['without speaking', 'different language', 'sign language', 'emojis', 'translator'], helps: ['communication', 'social'], hurts: ['communication'], severity: 1, label: 'communication constraint' },
+  { keywords: ['30 seconds', 'against the clock', 'being timed', 'super speed'], helps: ['speed', 'control'], hurts: ['speed'], severity: 2, label: 'time pressure' },
+  { keywords: ['earthquake', 'ice', 'quicksand', 'tightrope', 'moving train'], helps: ['mobility', 'durability', 'control'], hurts: ['mobility'], severity: 2, label: 'unstable terrain' },
+  { keywords: ['time moves backwards', 'paradox', 'recursive loop', 'flat circle'], helps: ['time', 'intelligence', 'adaptability'], hurts: ['adaptability'], severity: 3, label: 'temporal distortion' },
+  { keywords: ['dream', 'subjective reality', 'metaphorical', 'void', 'dimension', 'quantum realm'], helps: ['magic', 'adaptability', 'intelligence'], hurts: ['control'], severity: 2, label: 'abstract-reality conditions' }
+];
+
+const WIKI_SEARCH_HINTS = [
+  'character', 'fictional character', 'hero', 'villain', 'comic', 'anime', 'manga', 'video game', 'film', 'tv',
+  'mythology', 'legend', 'historical figure'
+];
+
+const CHARACTER_NAME_ALIASES = {
+  spiderman: ['spider-man', 'peter parker'],
+  superman: ['clark kent'],
+  batman: ['bruce wayne'],
+  ironman: ['iron man', 'tony stark'],
+  naruto: ['naruto uzumaki'],
+  'naruto uzamaki': ['naruto uzumaki'],
+  'doctor strange': ['dr strange'],
+  'dr strange': ['doctor strange']
+};
+
+const CHARACTER_ABILITY_HINTS = {
+  spiderman: ['climb', 'climbing', 'wall-crawling', 'wall crawler', 'swing', 'web-slinging', 'stealth', 'invisible', 'invisibility'],
+  'spider-man': ['climb', 'climbing', 'wall-crawling', 'wall crawler', 'swing', 'web-slinging', 'stealth', 'invisible', 'invisibility'],
+  superman: ['flight', 'strength', 'x-ray', 'heat vision', 'space'],
+  batman: ['stealth', 'detective', 'gadgets', 'infiltrate', 'strategy'],
+  wonderwoman: ['combat', 'flight', 'warrior', 'leadership', 'lasso'],
+  'wonder woman': ['combat', 'flight', 'warrior', 'leadership', 'lasso'],
+  naruto: ['ninja', 'stealth', 'clone', 'chakra', 'speed']
+};
+
 function normalizeName(name) {
   return name.trim().replace(/\s+/g, ' ');
+}
+
+function canonicalizeName(name) {
+  return normalizeName(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function getCharacterNameVariants(name) {
+  const normalized = normalizeName(name || '');
+  if (!normalized) return [];
+
+  const lower = normalized.toLowerCase();
+  const compact = canonicalizeName(normalized);
+  const variants = new Set([normalized]);
+
+  const aliasCandidates = [
+    ...(CHARACTER_NAME_ALIASES[lower] || []),
+    ...(CHARACTER_NAME_ALIASES[compact] || [])
+  ];
+
+  aliasCandidates.forEach(alias => variants.add(normalizeName(alias)));
+
+  if (normalized.includes('-')) variants.add(normalized.replace(/-/g, ' '));
+  if (normalized.includes(' ')) variants.add(normalized.replace(/\s+/g, '-'));
+
+  return Array.from(variants);
+}
+
+function getCharacterAbilityHints(character = '', info = null) {
+  const candidates = new Set([
+    canonicalizeName(character),
+    canonicalizeName(info && info.title ? info.title : ''),
+    ...(Array.isArray(info && info.aliases) ? info.aliases.map(canonicalizeName) : [])
+  ]);
+
+  const hints = new Set();
+  candidates.forEach(candidate => {
+    if (!candidate) return;
+    const mapped = CHARACTER_ABILITY_HINTS[candidate];
+    if (Array.isArray(mapped)) {
+      mapped.forEach(hint => hints.add(hint));
+    }
+  });
+
+  return Array.from(hints);
 }
 
 // Enhanced: Extract profession/role from Wikipedia content
@@ -107,11 +261,35 @@ function extractProfessionFromWikipedia(extract) {
   return null;
 }
 
+async function fetchWikidataMetadata(entityId) {
+  if (!entityId) return null;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(entityId)}&languages=en&props=labels|descriptions|aliases&format=json&origin=*`;
+
+  try {
+    const json = await getJson(url);
+    const entity = json && json.entities ? json.entities[entityId] : null;
+    if (!entity) return null;
+
+    const aliases = entity.aliases && entity.aliases.en
+      ? entity.aliases.en.map(item => item && item.value).filter(Boolean).slice(0, 10)
+      : [];
+
+    return {
+      wikidataId: entityId,
+      wikidataLabel: entity.labels && entity.labels.en ? entity.labels.en.value : null,
+      wikidataDescription: entity.descriptions && entity.descriptions.en ? entity.descriptions.en.value : null,
+      aliases
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 // Enhanced Wikipedia fetch with better structured data extraction
 async function fetchFromWikipediaEnhanced(character) {
   const normalized = normalizeName(character);
   const query = encodeURIComponent(normalized);
-  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${query}&prop=extracts|pageprops&explaintext=true&format=json&origin=*`;
+  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${query}&prop=extracts|pageprops|categories&cllimit=24&exintro=false&exchars=3600&explaintext=true&format=json&origin=*`;
   
   try {
     const json = await getJson(url);
@@ -122,12 +300,21 @@ async function fetchFromWikipediaEnhanced(character) {
 
     if (firstPage && firstPage.extract && !firstPage.extract.includes('Disambiguation') && !firstPage.extract.includes('may refer to')) {
       const profession = extractProfessionFromWikipedia(firstPage.extract);
+      const categories = Array.isArray(firstPage.categories)
+        ? firstPage.categories.map(c => (c && c.title ? c.title.replace(/^Category:/, '') : '')).filter(Boolean).slice(0, 12)
+        : [];
+      const wikidataMeta = await fetchWikidataMetadata(firstPage.pageprops && firstPage.pageprops.wikibase_item);
+
       return {
         source: 'wikipedia',
-        description: firstPage.extract.substring(0, 500),
+        description: firstPage.extract.substring(0, 3000),
         title: firstPage.title,
         profession: profession,
-        pageprops: firstPage.pageprops || {}
+        pageprops: firstPage.pageprops || {},
+        categories,
+        aliases: wikidataMeta && wikidataMeta.aliases ? wikidataMeta.aliases : [],
+        wikidataDescription: wikidataMeta ? wikidataMeta.wikidataDescription : null,
+        wikidataId: wikidataMeta ? wikidataMeta.wikidataId : null
       };
     }
   } catch (e) {
@@ -141,13 +328,13 @@ async function fetchFromWikipediaEnhanced(character) {
 async function fetchFromWikipediaSearchEnhanced(character) {
   const normalized = normalizeName(character);
   const query = encodeURIComponent(normalized);
-  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&srlimit=3&format=json&origin=*`;
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&srlimit=5&format=json&origin=*`;
 
   try {
     const json = await getJson(url);
     const results = json && json.query && json.query.search ? json.query.search : [];
     
-    // Try top 3 results
+    // Try top search results
     for (const result of results) {
       if (result.title) {
         const pageResult = await fetchFromWikipediaEnhanced(result.title);
@@ -155,24 +342,23 @@ async function fetchFromWikipediaSearchEnhanced(character) {
       }
     }
 
-    // Refined fallback: search with "character" context
-    if (normalized.split(/\s+/).length <= 2 && results.length === 0) {
-      const charQuery = encodeURIComponent(`${normalized} character fictional`);
-      const charUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${charQuery}&srlimit=3&format=json&origin=*`;
-      const charJson = await getJson(charUrl);
-      const charResults = charJson && charJson.query && charJson.query.search ? charJson.query.search : [];
-      
-      for (const result of charResults) {
-        if (result.title) {
-          const pageResult = await fetchFromWikipediaEnhanced(result.title);
-          if (pageResult) return pageResult;
-        }
+    // Expanded keyword fallbacks
+    for (const hint of WIKI_SEARCH_HINTS) {
+      const hintQuery = encodeURIComponent(`${normalized} ${hint}`);
+      const hintUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${hintQuery}&srlimit=3&format=json&origin=*`;
+      const hintJson = await getJson(hintUrl);
+      const hintResults = hintJson && hintJson.query && hintJson.query.search ? hintJson.query.search : [];
+
+      for (const result of hintResults) {
+        if (!result.title) continue;
+        const pageResult = await fetchFromWikipediaEnhanced(result.title);
+        if (pageResult) return pageResult;
       }
     }
 
     // Try with quotes for exact phrase
     const exactQuery = encodeURIComponent(`"${normalized}"`);
-    const exactUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${exactQuery}&srlimit=2&format=json&origin=*`;
+    const exactUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${exactQuery}&srlimit=4&format=json&origin=*`;
     const exactJson = await getJson(exactUrl);
     const exactResults = exactJson && exactJson.query && exactJson.query.search ? exactJson.query.search : [];
     
@@ -240,15 +426,6 @@ function buildNotes({ validation, info, scenario, twist, score, scoreMeta }) {
   if (info) {
     const titleNote = info.title ? ` (${info.title})` : '';
     notes.push(`Source: ${info.source}${titleNote}.`);
-    const description = (info.description + (info.title || '')).toLowerCase();
-    const scenarioLower = scenario.toLowerCase();
-    const twistLower = twist.toLowerCase();
-    const keywords = description.split(/\s+/).filter(kw => kw.length > 4).slice(0, 60);
-    const matchCount = keywords.filter(kw => scenarioLower.includes(kw) || twistLower.includes(kw)).length;
-    // Removed "Low relevance" text - now in detailed breakdown modal
-    const matchNote = matchCount >= 3 ? 'Strong match to scenario/twist.' : matchCount >= 1 ? 'Some relevance to scenario/twist.' : '';
-    if (matchNote) notes.push(matchNote);
-    notes.push(`Name signal: ${wordCount}-word pick.`);
     if (scoreMeta && scoreMeta.relevanceNote) {
       notes.push(scoreMeta.relevanceNote);
     }
@@ -285,11 +462,117 @@ function countOverlap(tokensA, tokensB) {
   return count;
 }
 
-function buildBreakdown({ validation, info, scenario, twist, score, nameSignals, relevance, ovrData, scoreBreakdownSteps }) {
+function normalizeKeywordToken(token) {
+  if (!token) return '';
+  const cleaned = String(token).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!cleaned) return '';
+  if (cleaned.length <= 3) return cleaned;
+  return cleaned
+    .replace(/(ing|ers|ies|ied|ed|es|s)$/i, '')
+    .replace(/(tion|ment|ness)$/i, '');
+}
+
+function getMeaningfulTokens(text, maxTokens = 120) {
+  const raw = tokenize(text);
+  const normalized = raw
+    .map(normalizeKeywordToken)
+    .filter(token => token.length >= 3 && !KEYWORD_STOPWORDS.has(token));
+  return Array.from(new Set(normalized)).slice(0, maxTokens);
+}
+
+function expandKeywords(tokens) {
+  const expanded = new Set(tokens);
+  for (const [group, groupKeywords] of Object.entries(CONTEXT_KEYWORD_GROUPS)) {
+    const normalizedGroupKeywords = groupKeywords.map(normalizeKeywordToken);
+    if (tokens.some(token => normalizedGroupKeywords.includes(token))) {
+      expanded.add(normalizeKeywordToken(group));
+      normalizedGroupKeywords.forEach(keyword => expanded.add(keyword));
+    }
+  }
+  return Array.from(expanded);
+}
+
+function buildKeywordFitDetails(sourceText, targetText) {
+  const sourceTokens = getMeaningfulTokens(sourceText);
+  const targetTokens = getMeaningfulTokens(targetText);
+  const expandedSource = expandKeywords(sourceTokens);
+  const expandedTargetSet = new Set(expandKeywords(targetTokens));
+
+  const directMatches = sourceTokens.filter(token => targetTokens.includes(token));
+  const expandedMatches = expandedSource.filter(token => expandedTargetSet.has(token));
+  const uniqueMatches = Array.from(new Set([...directMatches, ...expandedMatches]))
+    .filter(token => token.length >= 3)
+    .slice(0, 12);
+
+  return {
+    directCount: directMatches.length,
+    expandedCount: expandedMatches.length,
+    totalCount: uniqueMatches.length,
+    matchedKeywords: uniqueMatches
+  };
+}
+
+function inferIntentGroups(text) {
+  const normalizedText = String(text || '').toLowerCase();
+  const tokens = getMeaningfulTokens(normalizedText, 180);
+  const tokenSet = new Set(tokens);
+  const intents = [];
+
+  for (const [intent, keywords] of Object.entries(INTENT_KEYWORD_GROUPS)) {
+    const hasIntent = keywords.some(keyword => {
+      const key = normalizeKeywordToken(keyword);
+      return key && tokenSet.has(key);
+    });
+    if (hasIntent) intents.push(intent);
+  }
+
+  return intents;
+}
+
+function buildInfoCorpus(info, character = '') {
+  if (!info && !character) return '';
+
+  const abilityHints = getCharacterAbilityHints(character, info);
+
+  return [
+    character || '',
+    info && info.title ? info.title : '',
+    info && info.description ? info.description : '',
+    info && info.profession ? info.profession : '',
+    info && info.wikidataDescription ? info.wikidataDescription : '',
+    info && Array.isArray(info.aliases) ? info.aliases.join(' ') : '',
+    info && Array.isArray(info.categories) ? info.categories.join(' ') : '',
+    abilityHints.join(' ')
+  ].join(' ');
+}
+
+function mapFitCountToPoints(count) {
+  if (count >= 14) return 10;
+  if (count >= 10) return 8;
+  if (count >= 7) return 6;
+  if (count >= 4) return 4;
+  if (count >= 2) return 2;
+  if (count >= 1) return 1;
+  return 0;
+}
+
+function mapFitCountToDraftBonus(count) {
+  if (count >= 7) return 3;
+  if (count >= 3) return 2;
+  if (count >= 1) return 1;
+  return 0;
+}
+
+function buildBreakdown({ character, validation, info, scenario, twist, score, nameSignals, relevance, draftedFitBonus, ovrData, scoreBreakdownSteps }) {
   const breakdown = {
     characterSummary: '',
     scenarioRelevance: '',
     twistRelevance: '',
+    keywordMatches: {
+      scenario: [],
+      twist: []
+    },
+    draftedFitBonus: draftedFitBonus || { scenario: 0, twist: 0 },
     scoreBreakdown: scoreBreakdownSteps || [],
     ovrBreakdown: {
       baseFromScore: 0,
@@ -317,20 +600,43 @@ function buildBreakdown({ validation, info, scenario, twist, score, nameSignals,
   }
 
   // Scenario Relevance
-  if (relevance && relevance.points > 0) {
-    const description = info ? `${info.description || ''} ${info.title || ''}`.toLowerCase() : '';
-    const scenarioTokens = tokenize(scenario);
-    const descriptionTokens = tokenize(description);
-    const overlap = countOverlap(descriptionTokens, scenarioTokens);
-    
-    if (overlap >= 5) {
-      breakdown.scenarioRelevance = `Excellent fit! Found ${overlap} keyword matches between character description and scenario. ${relevance.note || ''}`;
-    } else if (overlap >= 3) {
-      breakdown.scenarioRelevance = `Good fit. Found ${overlap} keyword matches with the scenario. ${relevance.note || ''}`;
-    } else if (overlap >= 1) {
-      breakdown.scenarioRelevance = `Moderate fit. Found ${overlap} keyword match(es) with the scenario. ${relevance.note || ''}`;
+  if (relevance && relevance.scenario) {
+    const scenarioMatchCount = relevance.scenario.matchCount || 0;
+    const scenarioKeywords = relevance.scenario.matchedKeywords || [];
+    const scenarioCapability = relevance.scenario.capabilityScore || 0;
+    const feasibilityScore = relevance.scenario.feasibilityScore || 0;
+    const canDoScenario = Boolean(relevance.scenario.canDo);
+    const thrivesScenario = Boolean(relevance.scenario.thrive);
+    breakdown.keywordMatches.scenario = scenarioKeywords;
+
+    if (thrivesScenario) {
+      breakdown.scenarioRelevance = `Can do scenario confidently and likely thrives (${feasibilityScore}/10 feasibility).`;
+    } else if (canDoScenario) {
+      breakdown.scenarioRelevance = `Can do scenario with workable fit (${feasibilityScore}/10 feasibility).`;
+    } else if (scenarioMatchCount >= 1 || scenarioCapability >= 3) {
+      breakdown.scenarioRelevance = `Partial scenario fit but likely struggles (${feasibilityScore}/10 feasibility).`;
     } else {
-      breakdown.scenarioRelevance = `Limited direct connection to scenario keywords, but may have thematic relevance. ${relevance.note || ''}`;
+      breakdown.scenarioRelevance = `Likely cannot execute scenario reliably (${feasibilityScore}/10 feasibility).`;
+    }
+
+    if (Array.isArray(relevance.scenario.requiredTraits) && relevance.scenario.requiredTraits.length) {
+      breakdown.scenarioRelevance += ` Required: ${relevance.scenario.requiredTraits.slice(0, 3).join(', ')}.`;
+    }
+
+    if (Array.isArray(relevance.scenario.matchedTraits) && relevance.scenario.matchedTraits.length) {
+      breakdown.scenarioRelevance += ` Matches: ${relevance.scenario.matchedTraits.slice(0, 3).join(', ')}.`;
+    }
+
+    if (Array.isArray(relevance.scenario.missingTraits) && relevance.scenario.missingTraits.length) {
+      breakdown.scenarioRelevance += ` Missing: ${relevance.scenario.missingTraits.slice(0, 2).join(', ')}.`;
+    }
+
+    if (scenarioCapability > 0 && Array.isArray(relevance.scenario.capabilityReasons) && relevance.scenario.capabilityReasons.length) {
+      breakdown.scenarioRelevance += ` Capability alignment: ${relevance.scenario.capabilityReasons.slice(0, 2).join(' | ')}.`;
+    }
+
+    if ((draftedFitBonus && draftedFitBonus.scenario) > 0) {
+      breakdown.scenarioRelevance += ` Drafted-fit bonus: +${draftedFitBonus.scenario}/3.`;
     }
   } else if (nameSignals && nameSignals.note && nameSignals.note.includes('name matches scenario')) {
     breakdown.scenarioRelevance = `Character name directly references scenario keywords, showing strong selection strategy.`;
@@ -341,25 +647,47 @@ function buildBreakdown({ validation, info, scenario, twist, score, nameSignals,
   }
 
   // Twist Relevance
-  if (relevance && relevance.points > 0) {
-    const description = info ? `${info.description || ''} ${info.title || ''}`.toLowerCase() : '';
-    const twistTokens = tokenize(twist);
-    const descriptionTokens = tokenize(description);
-    const overlap = countOverlap(descriptionTokens, twistTokens);
-    
-    if (overlap >= 5) {
-      breakdown.twistRelevance = `Excellent twist synergy! Found ${overlap} keyword matches with the plot twist.`;
-    } else if (overlap >= 3) {
-      breakdown.twistRelevance = `Good twist alignment. Found ${overlap} keyword matches that complement the twist.`;
-    } else if (overlap >= 1) {
-      breakdown.twistRelevance = `Some twist relevance. Found ${overlap} keyword match(es) with the twist element.`;
+  if (relevance && relevance.twist) {
+    const twistMatchCount = relevance.twist.matchCount || 0;
+    const twistKeywords = relevance.twist.matchedKeywords || [];
+    const twistCapability = relevance.twist.capabilityScore || 0;
+    const twistImpactScore = relevance.twist.impactScore || 0;
+    const twistHelps = Boolean(relevance.twist.helps);
+    const twistHurts = Boolean(relevance.twist.hurts);
+    breakdown.keywordMatches.twist = twistKeywords;
+
+    if (twistHelps) {
+      breakdown.twistRelevance = `Twist helps this character (${twistImpactScore} impact).`;
+    } else if (twistHurts) {
+      breakdown.twistRelevance = `Twist hurts this character (${twistImpactScore} impact).`;
+    } else if (twistMatchCount >= 1 || twistCapability >= 3) {
+      breakdown.twistRelevance = `Twist impact is mostly neutral with some overlap (${twistImpactScore} impact).`;
     } else {
+      const description = info ? `${info.description || ''} ${info.title || ''}`.toLowerCase() : '';
       const domains = getDomainMatches(scenario, twist, description);
-      if (domains.length > 0) {
-        breakdown.twistRelevance = `Thematic connection through ${domains.join(', ')} elements.`;
-      } else {
-        breakdown.twistRelevance = `No direct keyword overlap with twist, but character may adapt based on abilities.`;
-      }
+      breakdown.twistRelevance = domains.length > 0
+        ? `Thematic alignment through ${domains.join(', ')} domains; twist impact ${twistImpactScore}.`
+        : `No direct twist keyword match found; twist impact ${twistImpactScore}.`;
+    }
+
+    if (Array.isArray(relevance.twist.helpTraits) && relevance.twist.helpTraits.length) {
+      breakdown.twistRelevance += ` Help traits: ${relevance.twist.helpTraits.slice(0, 3).join(', ')}.`;
+    }
+
+    if (Array.isArray(relevance.twist.hurtTraits) && relevance.twist.hurtTraits.length) {
+      breakdown.twistRelevance += ` Risk traits: ${relevance.twist.hurtTraits.slice(0, 3).join(', ')}.`;
+    }
+
+    if (Array.isArray(relevance.twist.impactReasons) && relevance.twist.impactReasons.length) {
+      breakdown.twistRelevance += ` ${relevance.twist.impactReasons.slice(0, 2).join(' | ')}.`;
+    }
+
+    if (twistCapability > 0 && Array.isArray(relevance.twist.capabilityReasons) && relevance.twist.capabilityReasons.length) {
+      breakdown.twistRelevance += ` Capability alignment: ${relevance.twist.capabilityReasons.slice(0, 2).join(' | ')}.`;
+    }
+
+    if ((draftedFitBonus && draftedFitBonus.twist) > 0) {
+      breakdown.twistRelevance += ` Drafted-fit bonus: +${draftedFitBonus.twist}/3.`;
     }
   } else {
     breakdown.twistRelevance = info
@@ -370,14 +698,14 @@ function buildBreakdown({ validation, info, scenario, twist, score, nameSignals,
   // OVR Breakdown with percentages
   if (ovrData) {
     const baseOVR = Math.round((score / SCORE_MAX) * 70);
-    const rarityBonus = detectRarity(ovrData.rarity);
+    const rarityBonus = getRarityBonusFromTier(ovrData.rarity);
     
     // Calculate attribute bonus
     const attributeValues = Object.values(ovrData.attributes || {});
     const topStats = attributeValues.sort((a, b) => b - a).slice(0, 3);
     const attributeBonus = topStats.length > 0 ? Math.round(topStats.reduce((sum, val) => sum + val, 0) / 3 * 0.15) : 0;
     
-    const scenarioFit = calculateScenarioFitValue(info, scenario, twist);
+    const scenarioFit = calculateScenarioFitValue(character, info, scenario, twist);
     
     // Calculate contributions before multiplier
     const preMultiplier = baseOVR + rarityBonus + attributeBonus;
@@ -406,7 +734,7 @@ function buildBreakdown({ validation, info, scenario, twist, score, nameSignals,
   return breakdown;
 }
 
-function detectRarity(rarityTier) {
+function getRarityBonusFromTier(rarityTier) {
   const rarityMap = {
     'Icon': 15,
     'Legendary': 12,
@@ -423,28 +751,43 @@ function getRarityExplanation(rarityTier, bonus) {
     'Icon': `Icon-tier character from legendary franchise/history (+${bonus})`,
     'Legendary': `Legendary character with massive cultural impact (+${bonus})`,
     'Epic': `Epic-tier character, well-known and powerful (+${bonus})`,
-    'Rare': `Rare character with notable recognition (+${bonus})`,
+    'Rare': `Rare or niche pull with standout uniqueness (+${bonus})`,
     'Common': `Common/known character (+${bonus})`,
     'Bronze': `Unknown or unrecognized character (no bonus)`
   };
   return explanations[rarityTier] || `Character rarity: ${rarityTier} (+${bonus})`;
 }
 
-function calculateScenarioFitValue(info, scenario, twist) {
-  if (!info) return 0.9;
+function calculateScenarioFitValue(character, info, scenario, twist) {
+  if (!info) return 0.92;
   
-  const description = `${info.description || ''} ${info.title || ''}`.toLowerCase();
-  const scenarioTokens = tokenize(scenario);
-  const twistTokens = tokenize(twist);
-  const descriptionTokens = tokenize(description);
-  const combinedTokens = scenarioTokens.concat(twistTokens);
-  const overlap = countOverlap(descriptionTokens, combinedTokens);
-  
-  if (overlap >= 8) return 1.2;
-  if (overlap >= 5) return 1.1;
-  if (overlap >= 3) return 1.05;
-  if (overlap >= 1) return 1.0;
-  return 0.95;
+  const description = buildInfoCorpus(info, character).toLowerCase();
+  const fit = buildKeywordFitDetails(description, `${scenario || ''} ${twist || ''}`);
+  const intentMatches = inferIntentGroups(description)
+    .filter(intent => inferIntentGroups(`${scenario || ''} ${twist || ''}`).includes(intent));
+  const capability = calculateCapabilityFit(character, info, scenario, twist);
+  const assessment = assessScenarioAndTwist(character, info, scenario, twist);
+  const overlap = fit.totalCount;
+
+  let multiplier = 0.95;
+  if (overlap >= 14) multiplier = 1.24;
+  else if (overlap >= 9) multiplier = 1.16;
+  else if (overlap >= 5) multiplier = 1.1;
+  else if (overlap >= 2 || intentMatches.length > 0) multiplier = 1.04;
+
+  if (capability.totalPoints >= 10) multiplier = Math.max(multiplier, 1.2);
+  else if (capability.totalPoints >= 7) multiplier = Math.max(multiplier, 1.14);
+  else if (capability.totalPoints >= 4) multiplier = Math.max(multiplier, 1.08);
+  else if (capability.totalPoints >= 2) multiplier = Math.max(multiplier, 1.02);
+
+  if (assessment.scenarioFeasibility.thrive) multiplier = Math.max(multiplier, 1.24);
+  else if (assessment.scenarioFeasibility.canDo) multiplier = Math.max(multiplier, 1.1);
+  else multiplier = Math.min(multiplier, 0.97);
+
+  if (assessment.twistImpact.helps) multiplier += 0.04;
+  if (assessment.twistImpact.hurts) multiplier -= 0.05;
+
+  return Math.max(0.85, Math.min(1.3, multiplier));
 }
 
 function getScenarioFitExplanation(multiplier) {
@@ -456,8 +799,17 @@ function getScenarioFitExplanation(multiplier) {
   return `Poor scenario fit: ${Math.round((1 - multiplier) * 100)}% penalty`;
 }
 
-const TITLE_KEYWORDS = ['dr', 'doctor', 'professor', 'sir', 'lady', 'captain', 'king', 'queen', 'lord', 'saint', 'detective', 'agent'];
-const ROLE_KEYWORDS = ['wizard', 'mage', 'ninja', 'samurai', 'pirate', 'soldier', 'knight', 'warrior', 'scientist', 'engineer', 'inventor', 'chef', 'pilot', 'spy', 'assassin'];
+const TITLE_KEYWORDS = ['dr', 'doctor', 'professor', 'sir', 'lady', 'captain', 'king', 'queen', 'lord', 'saint', 'detective', 'agent', 'inspector', 'commander'];
+const ROLE_KEYWORDS = ['wizard', 'mage', 'ninja', 'samurai', 'pirate', 'soldier', 'knight', 'warrior', 'scientist', 'engineer', 'inventor', 'chef', 'pilot', 'spy', 'assassin', 'detective', 'strategist', 'genius', 'hacker'];
+const TYPE_INTENT_AFFINITY = {
+  combat: ['combat', 'survival', 'rescue', 'stealth'],
+  intelligence: ['investigation', 'strategy', 'science', 'time', 'leadership'],
+  support: ['rescue', 'leadership', 'social', 'survival'],
+  speed: ['mobility', 'combat', 'stealth', 'rescue'],
+  tank: ['combat', 'survival', 'rescue', 'leadership'],
+  versatile: ['combat', 'strategy', 'science', 'survival', 'social', 'rescue', 'stealth'],
+  balanced: ['strategy', 'survival']
+};
 const DOMAIN_RULES = [
   { label: 'combat', keywords: ['fight', 'battle', 'war', 'combat', 'weapon', 'soldier', 'warrior'] },
   { label: 'science', keywords: ['science', 'experiment', 'lab', 'engineer', 'inventor', 'quantum', 'ai'] },
@@ -481,23 +833,628 @@ function getDomainMatches(scenario, twist, description) {
   ).map(rule => rule.label);
 }
 
-function scoreRelevance(info, scenario, twist) {
+function detectPowerClass(character, info) {
+  const text = `${character || ''} ${info && info.title ? info.title : ''} ${info && info.description ? info.description : ''}`.toLowerCase();
+  if (POWER_LEVELS.cosmic.some(name => text.includes(name))) return 'cosmic';
+  if (POWER_LEVELS.godlike.some(name => text.includes(name))) return 'godlike';
+  if (POWER_LEVELS.superhuman.some(name => text.includes(name))) return 'superhuman';
+  if (POWER_LEVELS.enhanced.some(name => text.includes(name))) return 'enhanced';
+  return 'normal';
+}
+
+function inferThreatDemandLevel(text) {
+  const normalized = String(text || '').toLowerCase();
+  if (/cosmic|universal|multiverse|apocalypse|extinction|planetary|galaxy|god/.test(normalized)) return 3;
+  if (/invasion|catastrophe|war|world|destroy|annihilat|armageddon|disaster/.test(normalized)) return 2;
+  if (/fight|battle|threat|danger|survive|hostile|crisis/.test(normalized)) return 1;
+  return 0;
+}
+
+function getPowerFitPoints(powerClass, threatLevel) {
+  if (threatLevel <= 0) return 0;
+  if (threatLevel === 3) {
+    if (powerClass === 'cosmic') return 3;
+    if (powerClass === 'godlike') return 2;
+    if (powerClass === 'superhuman') return 1;
+    return 0;
+  }
+  if (threatLevel === 2) {
+    if (powerClass === 'cosmic' || powerClass === 'godlike') return 3;
+    if (powerClass === 'superhuman') return 2;
+    if (powerClass === 'enhanced') return 1;
+    return 0;
+  }
+  if (powerClass === 'cosmic' || powerClass === 'godlike' || powerClass === 'superhuman') return 2;
+  if (powerClass === 'enhanced') return 1;
+  return 0;
+}
+
+function getProfessionIntentMatches(professionText, targetIntents) {
+  if (!professionText || !targetIntents.length) return [];
+  const professionIntents = inferIntentGroups(professionText);
+  return targetIntents.filter(intent => professionIntents.includes(intent));
+}
+
+function calculateCapabilityFit(character, info, scenario, twist) {
+  if (!info) {
+    return {
+      scenario: { points: 0, reasons: [] },
+      twist: { points: 0, reasons: [] },
+      totalPoints: 0
+    };
+  }
+
+  const sourceText = buildInfoCorpus(info, character).toLowerCase();
+  const sourceIntents = inferIntentGroups(sourceText);
+  const typeData = detectCharacterType(character, info);
+  const type = typeData && typeData.type ? typeData.type : 'balanced';
+  const typeAffinity = TYPE_INTENT_AFFINITY[type] || TYPE_INTENT_AFFINITY.balanced;
+  const professionText = info.profession ? String(info.profession).toLowerCase() : '';
+  const powerClass = detectPowerClass(character, info);
+
+  const evaluateTarget = (targetText, domainMatches) => {
+    const targetIntents = inferIntentGroups(targetText || '');
+    const intentMatches = targetIntents.filter(intent => sourceIntents.includes(intent));
+    const roleMatches = targetIntents.filter(intent => typeAffinity.includes(intent));
+    const professionMatches = getProfessionIntentMatches(professionText, targetIntents);
+    const threatLevel = inferThreatDemandLevel(targetText || '');
+    const powerFit = getPowerFitPoints(powerClass, threatLevel);
+
+    let points = 0;
+    const reasons = [];
+
+    if (intentMatches.length) {
+      points += Math.min(3, intentMatches.length + 1);
+      reasons.push(`intent alignment: ${intentMatches.join(', ')}`);
+    }
+
+    if (domainMatches.length) {
+      points += Math.min(2, domainMatches.length);
+      reasons.push(`domain alignment: ${domainMatches.join(', ')}`);
+    }
+
+    if (roleMatches.length) {
+      points += Math.min(2, roleMatches.length);
+      reasons.push(`type alignment: ${type}`);
+    }
+
+    if (professionMatches.length) {
+      points += 1;
+      reasons.push(`profession fit: ${professionMatches.join(', ')}`);
+    }
+
+    if (powerFit > 0) {
+      points += Math.min(2, powerFit);
+      reasons.push(`power-level fit (${powerClass})`);
+    }
+
+    return {
+      points: Math.min(8, points),
+      reasons,
+      intentMatches,
+      roleMatches,
+      professionMatches,
+      threatLevel,
+      powerFit
+    };
+  };
+
+  const scenarioDomains = getDomainMatches(scenario, '', sourceText);
+  const twistDomains = getDomainMatches('', twist, sourceText);
+  const scenarioResult = evaluateTarget(scenario || '', scenarioDomains);
+  const twistResult = evaluateTarget(twist || '', twistDomains);
+
+  return {
+    scenario: scenarioResult,
+    twist: twistResult,
+    totalPoints: Math.min(14, scenarioResult.points + twistResult.points)
+  };
+}
+
+function buildCapabilityProfile(character, info) {
+  const corpus = buildInfoCorpus(info, character).toLowerCase();
+  const tokenSet = new Set(getMeaningfulTokens(corpus, 320));
+  const typeData = detectCharacterType(character, info);
+  const powerClass = detectPowerClass(character, info);
+  const traits = {};
+
+  Object.entries(CAPABILITY_TRAIT_KEYWORDS).forEach(([trait, keywords]) => {
+    const matches = keywords.reduce((count, keyword) => {
+      const key = normalizeKeywordToken(keyword);
+      return key && tokenSet.has(key) ? count + 1 : count;
+    }, 0);
+    traits[trait] = Math.min(3, matches);
+  });
+
+  if (typeData.type === 'combat') {
+    traits.combat = Math.min(3, (traits.combat || 0) + 1);
+    traits.power = Math.min(3, (traits.power || 0) + 1);
+  }
+  if (typeData.type === 'speed') {
+    traits.speed = Math.min(3, (traits.speed || 0) + 1);
+    traits.mobility = Math.min(3, (traits.mobility || 0) + 1);
+  }
+  if (typeData.type === 'intelligence') {
+    traits.intelligence = Math.min(3, (traits.intelligence || 0) + 1);
+    traits.engineering = Math.min(3, (traits.engineering || 0) + 1);
+  }
+  if (typeData.type === 'support') {
+    traits.adaptability = Math.min(3, (traits.adaptability || 0) + 1);
+    traits.control = Math.min(3, (traits.control || 0) + 1);
+  }
+  if (typeData.type === 'tank') {
+    traits.durability = Math.min(3, (traits.durability || 0) + 1);
+  }
+  if (typeData.type === 'versatile' || typeData.type === 'balanced') {
+    traits.adaptability = Math.min(3, (traits.adaptability || 0) + 1);
+  }
+
+  if (powerClass === 'cosmic' || powerClass === 'godlike') {
+    traits.power = Math.min(3, (traits.power || 0) + 1);
+    traits.durability = Math.min(3, (traits.durability || 0) + 1);
+    traits.space = Math.min(3, (traits.space || 0) + 1);
+  }
+
+  if ((traits.aquatic || 0) >= 2) {
+    traits.durability = Math.min(3, (traits.durability || 0) + 1);
+    traits.adaptability = Math.min(3, (traits.adaptability || 0) + 1);
+    traits.control = Math.min(3, (traits.control || 0) + 1);
+  }
+
+  if (info) {
+    traits.adaptability = Math.max(1, traits.adaptability || 0);
+    traits.control = Math.max(1, traits.control || 0);
+    traits.intelligence = Math.max(1, traits.intelligence || 0);
+  }
+
+  if ((traits.power || 0) >= 2) {
+    traits.combat = Math.max(1, traits.combat || 0);
+    traits.durability = Math.max(1, traits.durability || 0);
+  }
+  if ((traits.intelligence || 0) >= 2) {
+    traits.control = Math.max(2, traits.control || 0);
+  }
+  if ((traits.mobility || 0) >= 2) {
+    traits.speed = Math.max(1, traits.speed || 0);
+  }
+  if ((traits.social || 0) >= 2) {
+    traits.communication = Math.max(1, traits.communication || 0);
+  }
+  if ((traits.engineering || 0) >= 2) {
+    traits.intelligence = Math.max(2, traits.intelligence || 0);
+  }
+
+  const rankedTraits = Object.entries(traits)
+    .filter(([, value]) => value > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([trait]) => trait);
+
+  return {
+    traits,
+    rankedTraits,
+    type: typeData.type,
+    powerClass
+  };
+}
+
+function inferScenarioRequirements(scenario) {
+  const scenarioText = String(scenario || '').toLowerCase();
+  const intents = inferIntentGroups(scenarioText);
+  const required = new Set();
+  const pathways = [];
+
+  const addPathway = (label, traits) => {
+    const normalizedTraits = Array.from(new Set((traits || []).filter(Boolean)));
+    if (!normalizedTraits.length) return;
+    const signature = `${label}:${normalizedTraits.join('|')}`;
+    if (pathways.some(path => `${path.label}:${path.traits.join('|')}` === signature)) return;
+    pathways.push({ label, traits: normalizedTraits });
+  };
+
+  intents.forEach(intent => {
+    (INTENT_TO_TRAITS[intent] || []).forEach(trait => required.add(trait));
+    addPathway(`${intent} pathway`, INTENT_TO_TRAITS[intent] || []);
+  });
+
+  if (/space|moon|galaxy|planet|orbit/.test(scenarioText)) {
+    required.add('space');
+    required.add('adaptability');
+    addPathway('space specialist', ['space', 'adaptability', 'control']);
+    addPathway('science fallback', ['intelligence', 'engineering', 'adaptability']);
+  }
+  if (/save|defeat|prevent|protect|threat|invasion|apocalypse|dragon|monster|war|battle/.test(scenarioText)) {
+    required.add('combat');
+    required.add('power');
+    required.add('durability');
+    addPathway('frontline fighter', ['combat', 'power', 'durability']);
+    addPathway('tactical commander', ['intelligence', 'leadership', 'control']);
+  }
+  if (/solve|mystery|investigate|uncover|decode|detective|secret/.test(scenarioText)) {
+    required.add('intelligence');
+    required.add('control');
+    required.add('stealth');
+    addPathway('detective analyst', ['intelligence', 'control', 'stealth']);
+    addPathway('social investigator', ['social', 'communication', 'intelligence']);
+  }
+  if (/make|cook|bake|perfect|restaurant|food|recipe|sushi/.test(scenarioText)) {
+    required.add('control');
+    required.add('adaptability');
+    addPathway('craft specialist', ['control', 'adaptability', 'intelligence']);
+    addPathway('performance creator', ['social', 'communication', 'control']);
+  }
+  if (/win|championship|record|race|sport/.test(scenarioText)) {
+    required.add('speed');
+    required.add('control');
+    addPathway('athlete speed path', ['speed', 'mobility', 'control']);
+    addPathway('strategic competitor', ['intelligence', 'control', 'adaptability']);
+  }
+  if (/underwater|ocean|deep sea|submarine/.test(scenarioText)) {
+    required.add('aquatic');
+    required.add('durability');
+    addPathway('aquatic specialist', ['aquatic', 'durability', 'adaptability']);
+    addPathway('tech dive path', ['engineering', 'control', 'durability']);
+  }
+  if (/build|design|construct|repair|invent|create/.test(scenarioText)) {
+    required.add('engineering');
+    required.add('control');
+    addPathway('builder engineer', ['engineering', 'control', 'intelligence']);
+    addPathway('resourceful maker', ['adaptability', 'control', 'mobility']);
+  }
+  if (/survive|escape|wilderness|desert|volcano|apocalypse/.test(scenarioText)) {
+    required.add('durability');
+    required.add('adaptability');
+    addPathway('survival endurance', ['durability', 'adaptability', 'control']);
+    addPathway('escape mobility', ['mobility', 'speed', 'adaptability']);
+  }
+  if (/win|competition|championship|record/.test(scenarioText)) {
+    required.add('control');
+    required.add('speed');
+  }
+
+  if (!required.size) {
+    required.add('adaptability');
+    required.add('control');
+    addPathway('generalist path', ['adaptability', 'control', 'intelligence']);
+  }
+
+  addPathway('universal adaptive path', ['adaptability', 'control', 'intelligence']);
+  addPathway('creative wildcard path', ['versatility', 'social', 'communication']);
+
+  if (pathways.length === 0) {
+    addPathway('default generalist', ['adaptability', 'control', 'intelligence']);
+  }
+
+  return {
+    intents,
+    requiredTraits: Array.from(required),
+    pathways
+  };
+}
+
+function evaluateScenarioFeasibility(profile, requirements) {
+  const traits = profile && profile.traits ? profile.traits : {};
+  const requiredTraits = requirements && Array.isArray(requirements.requiredTraits)
+    ? requirements.requiredTraits
+    : [];
+
+  if (!requiredTraits.length) {
+    return {
+      score: 5,
+      canDo: true,
+      thrive: false,
+      matchedTraits: [],
+      missingTraits: [],
+      reasons: ['insufficient scenario constraints; baseline feasibility applied']
+    };
+  }
+
+  const pathways = requirements && Array.isArray(requirements.pathways)
+    ? requirements.pathways
+    : [];
+
+  const evaluatePath = (pathwayTraits) => {
+    const targetTraits = Array.isArray(pathwayTraits) && pathwayTraits.length
+      ? pathwayTraits
+      : requiredTraits;
+    const traitValues = targetTraits.map(trait => traits[trait] || 0);
+    const achieved = traitValues.reduce((sum, value) => sum + value, 0);
+    const maxPossible = Math.max(1, targetTraits.length * 3);
+    const normalized = achieved / maxPossible;
+    const coveredCount = traitValues.filter(value => value >= 1).length;
+    const strongCount = traitValues.filter(value => value >= 2).length;
+    const flexibility = Math.min(2, ((traits.adaptability || 0) + (traits.control || 0)) / 2);
+    const coverageBonus = targetTraits.length > 0 ? (coveredCount / targetTraits.length) * 2 : 0;
+    const strongBonus = targetTraits.length > 0 ? (strongCount / targetTraits.length) * 1.5 : 0;
+    const score = Math.max(0, Math.min(10, Math.round((normalized * 7) + coverageBonus + strongBonus + flexibility)));
+
+    return {
+      score,
+      targetTraits,
+      coveredCount,
+      strongCount,
+      normalized
+    };
+  };
+
+  const pathEvaluations = (pathways.length ? pathways : [{ label: 'required traits', traits: requiredTraits }])
+    .map(path => ({
+      label: path.label || 'pathway',
+      ...evaluatePath(path.traits)
+    }));
+
+  const bestPath = pathEvaluations.sort((a, b) => b.score - a.score)[0];
+
+  const matchedTraits = [];
+  const missingTraits = [];
+
+  bestPath.targetTraits.forEach(trait => {
+    const traitScore = traits[trait] || 0;
+    if (traitScore >= 2) matchedTraits.push(trait);
+    if (traitScore === 0) missingTraits.push(trait);
+  });
+
+  const baselineFloor = profile ? 2 : 0;
+  const score = Math.max(baselineFloor, bestPath.score);
+  const canDo = score >= 3;
+  const thrive = score >= 7;
+  const reasons = [];
+
+  reasons.push(`best path: ${bestPath.label}`);
+  if (matchedTraits.length) {
+    reasons.push(`strong traits: ${matchedTraits.slice(0, 3).join(', ')}`);
+  }
+  if (missingTraits.length) {
+    reasons.push(`gaps: ${missingTraits.slice(0, 2).join(', ')}`);
+  }
+  if (pathEvaluations.length > 1) {
+    reasons.push(`viable paths checked: ${pathEvaluations.length}`);
+  }
+
+  return {
+    score,
+    canDo,
+    thrive,
+    matchedTraits,
+    missingTraits,
+    reasons
+  };
+}
+
+function inferTwistEffects(twist) {
+  const text = String(twist || '').toLowerCase();
+  const helps = new Set();
+  const hurts = new Set();
+  const labels = [];
+  let severity = 0;
+
+  TWIST_EFFECT_RULES.forEach(rule => {
+    const triggered = rule.keywords.some(keyword => text.includes(keyword));
+    if (!triggered) return;
+
+    (rule.helps || []).forEach(trait => helps.add(trait));
+    (rule.hurts || []).forEach(trait => hurts.add(trait));
+    labels.push(rule.label);
+    severity = Math.max(severity, rule.severity || 1);
+  });
+
+  return {
+    helps: Array.from(helps),
+    hurts: Array.from(hurts),
+    labels,
+    severity: severity || 1,
+    affects: labels.length > 0
+  };
+}
+
+function evaluateTwistImpact(profile, twist) {
+  const traits = profile && profile.traits ? profile.traits : {};
+  const effects = inferTwistEffects(twist);
+  const adaptationBuffer = Math.round(((traits.adaptability || 0) + (traits.control || 0)) / 2);
+
+  let helpScore = 0;
+  effects.helps.forEach(trait => {
+    const traitScore = traits[trait] || 0;
+    helpScore += traitScore >= 2 ? traitScore + 1 : traitScore;
+  });
+
+  let penalty = 0;
+  effects.hurts.forEach(trait => {
+    const traitScore = traits[trait] || 0;
+    penalty += Math.max(0, effects.severity - traitScore);
+  });
+
+  if (effects.helps.includes('aquatic') && (traits.aquatic || 0) >= 2) {
+    helpScore += 2;
+    penalty = Math.max(0, penalty - 1);
+  }
+
+  if (effects.helps.includes('speed') && (traits.speed || 0) >= 2) {
+    helpScore += 1;
+  }
+
+  if (effects.hurts.includes('communication') && (traits.communication || 0) >= 2) {
+    penalty = Math.max(0, penalty - 1);
+  }
+
+  const rawImpact = helpScore - penalty + adaptationBuffer;
+  const impactScore = Math.max(-4, Math.min(4, Math.round(rawImpact / 2)));
+  const helps = impactScore >= 2;
+  const hurts = impactScore <= -2;
+  const neutral = !helps && !hurts;
+  const reasons = [];
+
+  if (effects.labels.length) {
+    reasons.push(`twist factors: ${effects.labels.join(', ')}`);
+  }
+  if (effects.helps.length) {
+    reasons.push(`advantage traits: ${effects.helps.filter(t => (traits[t] || 0) >= 2).slice(0, 3).join(', ') || 'limited'}`);
+  }
+  if (effects.hurts.length) {
+    reasons.push(`risk traits: ${effects.hurts.filter(t => (traits[t] || 0) <= 1).slice(0, 3).join(', ') || 'covered'}`);
+  }
+
+  return {
+    impactScore,
+    affects: effects.affects,
+    helps,
+    hurts,
+    neutral,
+    helpTraits: effects.helps,
+    hurtTraits: effects.hurts,
+    reasons
+  };
+}
+
+function assessScenarioAndTwist(character, info, scenario, twist) {
+  if (!info) {
+    return {
+      profile: null,
+      requirements: inferScenarioRequirements(scenario),
+      scenarioFeasibility: {
+        score: 0,
+        canDo: false,
+        thrive: false,
+        matchedTraits: [],
+        missingTraits: ['unknown profile'],
+        reasons: ['no character data available']
+      },
+      twistImpact: {
+        impactScore: 0,
+        affects: false,
+        helps: false,
+        hurts: false,
+        neutral: true,
+        helpTraits: [],
+        hurtTraits: [],
+        reasons: ['no character data available']
+      }
+    };
+  }
+
+  const profile = buildCapabilityProfile(character, info);
+  const requirements = inferScenarioRequirements(scenario);
+  const scenarioFeasibility = evaluateScenarioFeasibility(profile, requirements);
+  const twistImpact = evaluateTwistImpact(profile, twist);
+
+  return {
+    profile,
+    requirements,
+    scenarioFeasibility,
+    twistImpact
+  };
+}
+
+function scoreRelevance(character, info, scenario, twist) {
   if (!info) return { points: 0, note: null };
-  const description = `${info.description || ''} ${info.title || ''}`.toLowerCase();
-  const scenarioTokens = tokenize(scenario);
-  const twistTokens = tokenize(twist);
-  const descriptionTokens = tokenize(description);
-  const overlap = countOverlap(descriptionTokens, scenarioTokens.concat(twistTokens));
-  const overlapPoints = overlap >= 8 ? 8 : overlap >= 5 ? 6 : overlap >= 3 ? 4 : overlap >= 1 ? 2 : 0;
-  const domains = getDomainMatches(scenario, twist, description);
-  const domainPoints = Math.min(6, domains.length * 2);
-  const total = overlapPoints + domainPoints;
-  const note = domains.length
-    ? `Relevance boost: ${domains.join(', ')} themes.`
-    : overlap > 0
-      ? 'Some direct overlap with scenario/twist.'
-      : 'Limited direct overlap with scenario/twist.';
-  return { points: total, note };
+  const sourceText = buildInfoCorpus(info, character).toLowerCase();
+  const scenarioFit = buildKeywordFitDetails(sourceText, scenario);
+  const twistFit = buildKeywordFitDetails(sourceText, twist);
+
+  const scenarioDomains = getDomainMatches(scenario, '', sourceText);
+  const twistDomains = getDomainMatches('', twist, sourceText);
+
+  const sourceIntents = inferIntentGroups(sourceText);
+  const scenarioIntents = inferIntentGroups(scenario);
+  const twistIntents = inferIntentGroups(twist);
+
+  const matchedScenarioIntents = scenarioIntents.filter(intent => sourceIntents.includes(intent));
+  const matchedTwistIntents = twistIntents.filter(intent => sourceIntents.includes(intent));
+  const uniqueMatchedIntents = Array.from(new Set([...matchedScenarioIntents, ...matchedTwistIntents]));
+  const assessment = assessScenarioAndTwist(character, info, scenario, twist);
+
+  const scenarioPoints = mapFitCountToPoints(scenarioFit.totalCount);
+  const twistPoints = mapFitCountToPoints(twistFit.totalCount);
+  const domainPoints = Math.min(8, (scenarioDomains.length + twistDomains.length) * 2);
+  const intentPoints = Math.min(6, uniqueMatchedIntents.length * 2);
+  const capability = calculateCapabilityFit(character, info, scenario, twist);
+  const capabilityPoints = Math.min(8, capability.totalPoints);
+  const feasibility = assessment.scenarioFeasibility;
+  const twistImpact = assessment.twistImpact;
+  const scenarioFeasibilityPoints = feasibility.score >= 9
+    ? 4
+    : feasibility.score >= 7
+    ? 3
+    : feasibility.score >= 5
+    ? 2
+    : feasibility.score >= 3
+    ? 1
+    : 0;
+  const twistImpactPoints = twistImpact.helps
+    ? Math.min(4, Math.max(1, twistImpact.impactScore))
+    : twistImpact.hurts
+    ? -Math.min(4, Math.abs(twistImpact.impactScore))
+    : 0;
+  const precisionBonus = (scenarioFit.totalCount >= 6 && twistFit.totalCount >= 4) ? 2 : 0;
+  const total = Math.max(-6, Math.min(24, scenarioPoints + twistPoints + domainPoints + intentPoints + precisionBonus + capabilityPoints + scenarioFeasibilityPoints + twistImpactPoints));
+
+  const noteParts = [];
+  if (scenarioFit.totalCount > 0 || twistFit.totalCount > 0) {
+    noteParts.push(`Keyword fit: S${scenarioFit.totalCount}/T${twistFit.totalCount}`);
+  }
+  if (scenarioDomains.length || twistDomains.length) {
+    const mergedDomains = Array.from(new Set([...scenarioDomains, ...twistDomains]));
+    noteParts.push(`Domain fit: ${mergedDomains.join(', ')}`);
+  }
+  if (uniqueMatchedIntents.length) {
+    noteParts.push(`Intent fit: ${uniqueMatchedIntents.join(', ')}`);
+  }
+  if (capability.totalPoints >= 4) {
+    noteParts.push(`Thrive potential: +${capability.totalPoints} capability fit`);
+  }
+  noteParts.push(`Scenario feasibility: ${feasibility.canDo ? 'can do' : 'struggles'} (${feasibility.score}/10)`);
+  if (twistImpact.affects) {
+    noteParts.push(`Twist impact: ${twistImpact.helps ? 'helps' : twistImpact.hurts ? 'hurts' : 'neutral'} (${twistImpact.impactScore})`);
+  }
+
+  return {
+    points: total,
+    note: noteParts.length ? noteParts.join(' | ') : 'Limited direct overlap with scenario/twist.',
+    scenario: {
+      matchCount: scenarioFit.totalCount,
+      matchedKeywords: scenarioFit.matchedKeywords,
+      domains: scenarioDomains,
+      capabilityScore: capability.scenario.points,
+      capabilityReasons: capability.scenario.reasons,
+      feasibilityScore: feasibility.score,
+      canDo: feasibility.canDo,
+      thrive: feasibility.thrive,
+      requiredTraits: assessment.requirements.requiredTraits,
+      matchedTraits: feasibility.matchedTraits,
+      missingTraits: feasibility.missingTraits,
+      feasibilityReasons: feasibility.reasons
+    },
+    twist: {
+      matchCount: twistFit.totalCount,
+      matchedKeywords: twistFit.matchedKeywords,
+      domains: twistDomains,
+      capabilityScore: capability.twist.points,
+      capabilityReasons: capability.twist.reasons,
+      impactScore: twistImpact.impactScore,
+      affects: twistImpact.affects,
+      helps: twistImpact.helps,
+      hurts: twistImpact.hurts,
+      helpTraits: twistImpact.helpTraits,
+      hurtTraits: twistImpact.hurtTraits,
+      impactReasons: twistImpact.reasons
+    },
+    profile: assessment.profile ? {
+      topTraits: assessment.profile.rankedTraits,
+      type: assessment.profile.type,
+      powerClass: assessment.profile.powerClass
+    } : null
+  };
+}
+
+function calculateDraftedFitBonus(info, scenario, twist, character) {
+  const sourceText = buildInfoCorpus(info, character);
+  const scenarioFit = buildKeywordFitDetails(sourceText, scenario || '');
+  const twistFit = buildKeywordFitDetails(sourceText, twist || '');
+
+  return {
+    scenario: mapFitCountToDraftBonus(scenarioFit.totalCount),
+    twist: mapFitCountToDraftBonus(twistFit.totalCount)
+  };
 }
 
 function scoreNameSignals(character, validation, scenario, twist) {
@@ -507,9 +1464,7 @@ function scoreNameSignals(character, validation, scenario, twist) {
   const trimmed = character.trim();
   const lower = trimmed.toLowerCase();
 
-  if (wordCount === 2) { points += 3; signals.push('two-word name'); }
-  else if (wordCount === 3) { points += 2; signals.push('three-word name'); }
-  else if (wordCount >= 4) { points -= 2; signals.push('long name'); }
+  if (wordCount >= 4) { points -= 2; signals.push('long name'); }
 
   if (TITLE_KEYWORDS.some(title => lower.includes(`${title} `) || lower.endsWith(` ${title}`))) {
     points += 2;
@@ -686,50 +1641,61 @@ async function fetchFromOMDb(character) {
 
 // Tier 3: Wikidata (concept lookup)
 async function fetchFromWikidata(character) {
-  const query = encodeURIComponent(normalizeName(character));
-  const url = `https://www.wikidata.org/w/api.php?action=query&titles=${query}&format=json&origin=*`;
-  const json = await getJson(url);
-  if (!json || !json.query || !json.query.pages) return null;
+  const normalized = normalizeName(character);
+  const query = encodeURIComponent(normalized);
+  const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${query}&language=en&format=json&limit=5&origin=*`;
+  const searchJson = await getJson(searchUrl);
+  const results = searchJson && Array.isArray(searchJson.search) ? searchJson.search : [];
+  const candidate = results.find(item => item && item.label && item.description) || results[0];
 
-  const pages = json.query.pages;
-  const firstPage = Object.values(pages)[0];
-  if (firstPage && firstPage.pageid) {
-    return {
-      source: 'wikidata',
-      description: `Wikidata entry: ${normalizeName(character)}`,
-      found: true
-    };
-  }
+  if (!candidate) return null;
 
-  return null;
+  const wikidataMeta = await fetchWikidataMetadata(candidate.id);
+
+  return {
+    source: 'wikidata',
+    description: `${candidate.description || 'Wikidata entity'} (${candidate.label || normalized})`,
+    title: candidate.label || normalized,
+    profession: candidate.description || null,
+    aliases: wikidataMeta && wikidataMeta.aliases ? wikidataMeta.aliases : [],
+    wikidataDescription: wikidataMeta && wikidataMeta.wikidataDescription ? wikidataMeta.wikidataDescription : candidate.description || null,
+    wikidataId: candidate.id || null
+  };
 }
 
 async function fetchFromFandom(character) {
   const normalized = normalizeName(character);
-  const searchUrl = `https://community.fandom.com/api/v1/Search/List?query=${encodeURIComponent(normalized)}&limit=1&ns=0`;
-  const searchJson = await getJson(searchUrl);
-  const item = searchJson && searchJson.items && searchJson.items[0];
-  if (!item || !item.url) return null;
+  const searchQueries = [normalized, ...WIKI_SEARCH_HINTS.slice(0, 6).map(hint => `${normalized} ${hint}`)];
 
-  try {
-    const parsedUrl = new URL(item.url);
-    const wikiIndex = parsedUrl.pathname.indexOf('/wiki/');
-    if (wikiIndex === -1) return null;
-    const articleTitle = decodeURIComponent(parsedUrl.pathname.slice(wikiIndex + 6));
-    const apiUrl = `https://${parsedUrl.hostname}/api.php?action=query&titles=${encodeURIComponent(articleTitle)}&prop=extracts&explaintext=true&format=json&origin=*`;
-    const pageJson = await getJson(apiUrl);
-    if (!pageJson || !pageJson.query || !pageJson.query.pages) return null;
-    const pages = pageJson.query.pages;
-    const firstPage = Object.values(pages)[0];
-    if (firstPage && firstPage.extract) {
-      return {
-        source: 'fandom',
-        description: firstPage.extract.substring(0, 500),
-        title: firstPage.title || articleTitle
-      };
+  for (const searchQuery of searchQueries) {
+    const searchUrl = `https://community.fandom.com/api/v1/Search/List?query=${encodeURIComponent(searchQuery)}&limit=4&ns=0`;
+    const searchJson = await getJson(searchUrl);
+    const items = searchJson && Array.isArray(searchJson.items) ? searchJson.items : [];
+
+    for (const item of items) {
+      if (!item || !item.url) continue;
+
+      try {
+        const parsedUrl = new URL(item.url);
+        const wikiIndex = parsedUrl.pathname.indexOf('/wiki/');
+        if (wikiIndex === -1) continue;
+        const articleTitle = decodeURIComponent(parsedUrl.pathname.slice(wikiIndex + 6));
+        const apiUrl = `https://${parsedUrl.hostname}/api.php?action=query&titles=${encodeURIComponent(articleTitle)}&prop=extracts&explaintext=true&format=json&origin=*`;
+        const pageJson = await getJson(apiUrl);
+        if (!pageJson || !pageJson.query || !pageJson.query.pages) continue;
+        const pages = pageJson.query.pages;
+        const firstPage = Object.values(pages)[0];
+        if (firstPage && firstPage.extract) {
+          return {
+            source: 'fandom',
+            description: firstPage.extract.substring(0, 500),
+            title: firstPage.title || articleTitle
+          };
+        }
+      } catch (e) {
+        // Continue trying next result
+      }
     }
-  } catch (e) {
-    return null;
   }
 
   return null;
@@ -740,27 +1706,35 @@ async function fetchCharacterInfo(character) {
   // Try cache first
   const cached = getCachedCharacter(character);
   if (cached) return cached;
+
+  const variants = getCharacterNameVariants(character);
   
   // Try enhanced tiers in order
-  let result = await fetchFromWikipediaEnhanced(character);
-  if (result) {
-    setCachedCharacter(character, result);
-    return result;
+  for (const variant of variants) {
+    const result = await fetchFromWikipediaEnhanced(variant);
+    if (result) {
+      setCachedCharacter(character, result);
+      return result;
+    }
   }
 
-  result = await fetchFromWikipediaSummary(character);
-  if (result) {
-    setCachedCharacter(character, result);
-    return result;
+  for (const variant of variants) {
+    const result = await fetchFromWikipediaSummary(variant);
+    if (result) {
+      setCachedCharacter(character, result);
+      return result;
+    }
   }
 
-  result = await fetchFromWikipediaSearchEnhanced(character);
-  if (result) {
-    setCachedCharacter(character, result);
-    return result;
+  for (const variant of variants) {
+    const result = await fetchFromWikipediaSearchEnhanced(variant);
+    if (result) {
+      setCachedCharacter(character, result);
+      return result;
+    }
   }
 
-  result = await fetchFromFandom(character);
+  let result = await fetchFromFandom(character);
   if (result) {
     setCachedCharacter(character, result);
     return result;
@@ -783,7 +1757,7 @@ async function fetchCharacterInfo(character) {
 
 // ========== STEP 5: SCORING LOGIC ==========
 // Called for EACH CHARACTER across ALL TEAMS (up to 36 times)
-async function scoreCharacter(character, scenario, twist) {
+async function scoreCharacter(character, scenario, twist, options = {}) {
   console.log(`🔍 Scoring character: "${character}"`);
   
   // Validation
@@ -798,7 +1772,7 @@ async function scoreCharacter(character, scenario, twist) {
         ovr: mapScoreToOVR(0),
         reason: 'Invalid input',
         notes: buildNotes({ validation, info: null, scenario, twist, score: 0 }),
-        breakdown: buildBreakdown({ validation, info: null, scenario, twist, score: 0, nameSignals: null, relevance: null, ovrData: { ovr: mapScoreToOVR(0), tier: getOVRTier(mapScoreToOVR(0)), rarity: 'Bronze', type: 'balanced', attributes: {} } })
+        breakdown: buildBreakdown({ character, validation, info: null, scenario, twist, score: 0, nameSignals: null, relevance: null, ovrData: { ovr: mapScoreToOVR(0), tier: getOVRTier(mapScoreToOVR(0)), rarity: 'Bronze', type: 'balanced', attributes: {} } })
       };
     }
     if (validation.tier === 'disappointed') {
@@ -809,7 +1783,7 @@ async function scoreCharacter(character, scenario, twist) {
         ovr: mapScoreToOVR(4),
         reason: 'Offensive content',
         notes: buildNotes({ validation, info: null, scenario, twist, score: 4 }),
-        breakdown: buildBreakdown({ validation, info: null, scenario, twist, score: 4, nameSignals: null, relevance: null, ovrData: { ovr: mapScoreToOVR(4), tier: getOVRTier(mapScoreToOVR(4)), rarity: 'Bronze', type: 'balanced', attributes: {} } })
+        breakdown: buildBreakdown({ character, validation, info: null, scenario, twist, score: 4, nameSignals: null, relevance: null, ovrData: { ovr: mapScoreToOVR(4), tier: getOVRTier(mapScoreToOVR(4)), rarity: 'Bronze', type: 'balanced', attributes: {} } })
       };
     }
   }
@@ -834,15 +1808,34 @@ async function scoreCharacter(character, scenario, twist) {
     scoreBreakdownSteps.push({ step: 'Name Signals', points: nameSignals.points, description: nameSignals.note });
   }
   
-  const relevance = scoreRelevance(info, scenario, twist);
+  const relevance = scoreRelevance(character, info, scenario, twist);
   score += relevance.points;
   if (relevance.points !== 0) {
     scoreBreakdownSteps.push({ step: 'Scenario/Twist Relevance', points: relevance.points, description: relevance.note });
   }
 
-  if (info && validation.wordCount > 1) {
-    score += 2;
-    scoreBreakdownSteps.push({ step: 'Multi-word Bonus', points: 2, description: 'Character has a multi-word name' });
+  const draftedScenario = options.originalScenario || scenario;
+  const draftedTwist = options.originalTwist || twist;
+  const draftedFitBonus = calculateDraftedFitBonus(info, draftedScenario, draftedTwist, character);
+  const draftedScenarioBonus = Math.min(3, draftedFitBonus.scenario || 0);
+  const draftedTwistBonus = Math.min(3, draftedFitBonus.twist || 0);
+
+  if (draftedScenarioBonus > 0) {
+    score += draftedScenarioBonus;
+    scoreBreakdownSteps.push({
+      step: 'Original Scenario Fit (Drafted)',
+      points: draftedScenarioBonus,
+      description: `Draft-time scenario alignment bonus (+${draftedScenarioBonus}/3)`
+    });
+  }
+
+  if (draftedTwistBonus > 0) {
+    score += draftedTwistBonus;
+    scoreBreakdownSteps.push({
+      step: 'Original Twist Fit (Drafted)',
+      points: draftedTwistBonus,
+      description: `Draft-time twist alignment bonus (+${draftedTwistBonus}/3)`
+    });
   }
 
   if (info && info.source === 'wikipedia') {
@@ -880,6 +1873,7 @@ async function scoreCharacter(character, scenario, twist) {
       scoreMeta: { relevanceNote: relevance.note || nameSignals.note }
     }),
     breakdown: buildBreakdown({
+      character,
       validation,
       info,
       scenario,
@@ -887,6 +1881,10 @@ async function scoreCharacter(character, scenario, twist) {
       score: Math.round(score),
       nameSignals,
       relevance,
+      draftedFitBonus: {
+        scenario: draftedScenarioBonus,
+        twist: draftedTwistBonus
+      },
       ovrData,
       scoreBreakdownSteps
     })
@@ -970,6 +1968,10 @@ function detectRarity(character, info) {
       if (prestige === 'major') return 3;       // Major franchises get +3
     }
   }
+
+  const nicheSignal = calculateNicheSignal(character, info);
+  if (nicheSignal >= 3) return 6;
+  if (nicheSignal >= 2) return 4;
   
   // Wikipedia found: +4
   if (info && info.source === 'wikipedia') return 4;
@@ -979,6 +1981,37 @@ function detectRarity(character, info) {
   
   // Common/Unknown: +0
   return 0;
+}
+
+function calculateNicheSignal(character, info) {
+  if (!info) return 0;
+
+  const lower = String(character || '').toLowerCase();
+  const compact = canonicalizeName(character);
+  const isKnownTopTier = Object.values(RARITY_KEYWORDS)
+    .flat()
+    .some(name => lower.includes(name));
+
+  if (isKnownTopTier) return 0;
+
+  const inKnownFranchise = Object.values(FRANCHISE_DATABASE).some(franchiseData => {
+    const members = Array.isArray(franchiseData) ? franchiseData : franchiseData.members;
+    return members.some(member => lower.includes(member) || compact.includes(canonicalizeName(member)));
+  });
+
+  let signal = 0;
+  if (!inKnownFranchise) signal += 1;
+
+  const categoryCount = Array.isArray(info.categories) ? info.categories.length : 0;
+  if (categoryCount >= 3) signal += 1;
+
+  const aliasCount = Array.isArray(info.aliases) ? info.aliases.length : 0;
+  if (aliasCount >= 2) signal += 1;
+
+  const titleWordCount = normalizeName(info.title || character).split(/\s+/).filter(Boolean).length;
+  if (titleWordCount >= 2) signal += 1;
+
+  return Math.min(4, signal);
 }
 
 function getRarityTier(bonus) {
@@ -1065,27 +2098,49 @@ function calculateAttributes(character, info, scenario, twist, typeData) {
 
 function calculateScenarioFit(character, info, scenario, twist) {
   const scenarioText = `${scenario} ${twist}`.toLowerCase();
-  const characterText = `${character} ${info ? info.description || '' : ''}`.toLowerCase();
+  const characterText = buildInfoCorpus(info, character).toLowerCase();
   const profession = info ? info.profession || '' : '';
   
   // Token overlap (basic matching)
   const scenarioTokens = tokenize(scenarioText);
   const charTokens = tokenize(characterText);
   const overlap = countOverlap(charTokens, scenarioTokens);
+  const semanticFit = buildKeywordFitDetails(characterText, scenarioText);
+  const sourceIntents = inferIntentGroups(characterText);
+  const targetIntents = inferIntentGroups(scenarioText);
+  const scenarioIntentMatches = targetIntents.filter(intent => sourceIntents.includes(intent));
+  const capability = calculateCapabilityFit(character, info, scenario, twist);
+  const assessment = assessScenarioAndTwist(character, info, scenario, twist);
   
   let multiplier = 1.0;
   
   // Perfect fit: 3+ token overlaps (e.g., "Batman" vs "Crime Fighting", "Gadgets")
-  if (overlap >= 5) {
+  if (semanticFit.totalCount >= 14 || overlap >= 6) {
     multiplier = 1.25; // Increased from 1.2
   } 
   // Great fit: 2-3 overlaps
-  else if (overlap >= 3) {
+  else if (semanticFit.totalCount >= 9 || overlap >= 4) {
     multiplier = 1.18; // Increased from 1.15
   } 
   // Good fit: 1-2 overlaps
-  else if (overlap >= 1) {
+  else if (semanticFit.totalCount >= 4 || overlap >= 1) {
     multiplier = 1.1;
+  }
+
+  if (scenarioIntentMatches.length >= 2) {
+    multiplier += 0.08;
+  } else if (scenarioIntentMatches.length === 1) {
+    multiplier += 0.04;
+  }
+
+  if (capability.totalPoints >= 10) {
+    multiplier += 0.12;
+  } else if (capability.totalPoints >= 7) {
+    multiplier += 0.08;
+  } else if (capability.totalPoints >= 4) {
+    multiplier += 0.05;
+  } else if (capability.totalPoints >= 2) {
+    multiplier += 0.03;
   }
   
   // Profession-based matching (new)
@@ -1095,19 +2150,19 @@ function calculateScenarioFit(character, info, scenario, twist) {
     const professionBonus = 0.05; // 5% bonus per profession match
     
     // Combat/Action scenarios
-    if ((scenario.includes('DEFEAT') || scenario.includes('FIGHT') || scenario.includes('SURVIVE')) 
-        && (professionLower.includes('warrior') || professionLower.includes('fighter') || professionLower.includes('warrior'))) {
+    if ((scenarioText.includes('defeat') || scenarioText.includes('fight') || scenarioText.includes('survive')) 
+        && (professionLower.includes('warrior') || professionLower.includes('fighter') || professionLower.includes('soldier'))) {
       multiplier += professionBonus;
     }
     
     // Building/Creation scenarios
-    if ((scenario.includes('BUILD') || scenario.includes('CREATE') || scenario.includes('DESIGN')) 
+    if ((scenarioText.includes('build') || scenarioText.includes('create') || scenarioText.includes('design')) 
         && (professionLower.includes('engineer') || professionLower.includes('inventor') || professionLower.includes('scientist'))) {
       multiplier += professionBonus;
     }
     
     // Investigation/Strategy scenarios
-    if ((scenario.includes('SOLVE') || scenario.includes('UNCOVER') || scenario.includes('STRATEGIZE')) 
+    if ((scenarioText.includes('solve') || scenarioText.includes('uncover') || scenarioText.includes('strategize')) 
         && (professionLower.includes('detective') || professionLower.includes('strategist') || professionLower.includes('genius'))) {
       multiplier += professionBonus;
     }
@@ -1161,6 +2216,22 @@ function calculateScenarioFit(character, info, scenario, twist) {
   // If info exists but no direct match, provide stability bonus
   if (info && overlap === 0) {
     multiplier = Math.max(multiplier, 1.0);
+  }
+
+  if (info && overlap <= 1 && capability.totalPoints >= 6) {
+    multiplier = Math.max(multiplier, 1.12);
+  }
+
+  if (assessment.scenarioFeasibility.thrive) {
+    multiplier = Math.max(multiplier, 1.24);
+  } else if (!assessment.scenarioFeasibility.canDo) {
+    multiplier = Math.min(multiplier, 0.96);
+  }
+
+  if (assessment.twistImpact.helps) {
+    multiplier += 0.05;
+  } else if (assessment.twistImpact.hurts) {
+    multiplier -= 0.06;
   }
   
   // If no info, apply penalty

@@ -419,37 +419,76 @@ function openOVRBreakdown(evalData) {
   if (scenarioEl && evalData.breakdown) {
     scenarioEl.textContent = evalData.breakdown.scenarioRelevance || 'No scenario analysis available.';
   }
+  const scenarioKeywordsEl = document.getElementById('modalScenarioKeywords');
+  if (scenarioKeywordsEl) {
+    const scenarioKeywords = evalData.breakdown && evalData.breakdown.keywordMatches
+      ? evalData.breakdown.keywordMatches.scenario || []
+      : [];
+    scenarioKeywordsEl.innerHTML = scenarioKeywords.length
+      ? `<span class="ovr-keywords-label">Keywords:</span>${scenarioKeywords.map(kw => `<span class="ovr-keyword-chip">${kw}</span>`).join('')}`
+      : '<span class="ovr-keywords-empty">No keyword matches</span>';
+  }
 
   // Populate twist relevance
   const twistEl = document.getElementById('modalTwistRelevance');
   if (twistEl && evalData.breakdown) {
     twistEl.textContent = evalData.breakdown.twistRelevance || 'No twist analysis available.';
   }
+  const twistKeywordsEl = document.getElementById('modalTwistKeywords');
+  if (twistKeywordsEl) {
+    const twistKeywords = evalData.breakdown && evalData.breakdown.keywordMatches
+      ? evalData.breakdown.keywordMatches.twist || []
+      : [];
+    twistKeywordsEl.innerHTML = twistKeywords.length
+      ? `<span class="ovr-keywords-label">Keywords:</span>${twistKeywords.map(kw => `<span class="ovr-keyword-chip">${kw}</span>`).join('')}`
+      : '<span class="ovr-keywords-empty">No keyword matches</span>';
+  }
 
   // Populate score breakdown
   const scoreBreakdownEl = document.getElementById('modalScoreBreakdown');
   if (scoreBreakdownEl && evalData.breakdown && evalData.breakdown.scoreBreakdown) {
-    let totalScore = 0;
-    const steps = evalData.breakdown.scoreBreakdown.map(step => {
-      totalScore += step.points;
+    const steps = evalData.breakdown.scoreBreakdown;
+    const positiveSteps = steps.filter(step => step.points > 0);
+    const negativeSteps = steps.filter(step => step.points < 0);
+    const positiveTotal = positiveSteps.reduce((sum, step) => sum + step.points, 0);
+    const negativeTotal = Math.abs(negativeSteps.reduce((sum, step) => sum + step.points, 0));
+    const positiveScale = Math.max(30, positiveTotal || 1);
+    const negativeScale = Math.max(6, negativeTotal || 1);
+
+    const buildAcronym = (label) => String(label || '')
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean)
+      .slice(0, 3)
+      .map(part => part[0].toUpperCase())
+      .join('');
+
+    const positiveSegments = positiveSteps.map((step, index) => {
+      const width = Math.max(6, (step.points / positiveScale) * 100);
+      return `<span class="score-mini-segment pos" style="width:${width}%;--segment-hue:${(index * 38) % 360};" title="${step.step}: +${step.points}${step.description ? ` — ${step.description}` : ''}"></span>`;
+    }).join('');
+
+    const negativeSegments = negativeSteps.map((step, index) => {
+      const width = Math.max(8, (Math.abs(step.points) / negativeScale) * 100);
+      return `<span class="score-mini-segment neg" style="width:${width}%;--segment-hue:${(index * 22) % 360};" title="${step.step}: ${step.points}${step.description ? ` — ${step.description}` : ''}"></span>`;
+    }).join('');
+
+    const legendChips = steps.map((step) => {
       const pointsClass = step.points > 0 ? 'positive' : step.points < 0 ? 'negative' : 'neutral';
       const pointsSign = step.points > 0 ? '+' : '';
-      return `
-        <div class="score-breakdown-item">
-          <div class="score-breakdown-label">${step.step}</div>
-          <div class="score-breakdown-value ${pointsClass}">${pointsSign}${step.points}</div>
-          <div class="score-breakdown-desc">${step.description}</div>
-        </div>
-      `;
+      const tag = buildAcronym(step.step) || 'STEP';
+      return `<span class="score-mini-chip ${pointsClass}" title="${step.step}${step.description ? ` — ${step.description}` : ''}"><strong>${tag}</strong> ${pointsSign}${step.points}</span>`;
     }).join('');
-    
+
     scoreBreakdownEl.innerHTML = `
-      ${steps}
-      <div class="score-breakdown-item score-breakdown-total">
-        <div class="score-breakdown-label"><strong>Final Score</strong></div>
-        <div class="score-breakdown-value"><strong>${evalData.score}/30</strong></div>
-        <div class="score-breakdown-desc"></div>
+      <div class="score-mini-header">
+        <span class="score-mini-title">Score Flow</span>
+        <span class="score-mini-total"><strong>${evalData.score}/30</strong></span>
       </div>
+      <div class="score-mini-track" aria-label="Positive score contributions">
+        ${positiveSegments || '<span class="score-mini-empty">No positive modifiers</span>'}
+      </div>
+      ${negativeSegments ? `<div class="score-mini-track penalties" aria-label="Negative score contributions">${negativeSegments}</div>` : ''}
+      <div class="score-mini-legend">${legendChips}</div>
     `;
   }
 
@@ -462,46 +501,25 @@ function openOVRBreakdown(evalData) {
     ovrBreakdownEl.innerHTML = `
       <div class="ovr-breakdown-item">
         <div class="ovr-breakdown-label">Base from Score</div>
-        <div class="ovr-breakdown-bar">
-          <div class="ovr-breakdown-fill" style="width: ${percentages.scoreContribution || 0}%; background: #00bcd4;"></div>
-        </div>
         <div class="ovr-breakdown-value">${ovr.baseFromScore} (${percentages.scoreContribution || 0}%)</div>
-        <div class="ovr-breakdown-desc">${ovr.explanations?.base || ''}</div>
       </div>
       <div class="ovr-breakdown-item">
         <div class="ovr-breakdown-label">Rarity Bonus</div>
-        <div class="ovr-breakdown-bar">
-          <div class="ovr-breakdown-fill" style="width: ${percentages.rarityContribution || 0}%; background: #ffd700;"></div>
-        </div>
         <div class="ovr-breakdown-value">${ovr.rarityBonus} (${percentages.rarityContribution || 0}%)</div>
-        <div class="ovr-breakdown-desc">${ovr.explanations?.rarity || ''}</div>
       </div>
       <div class="ovr-breakdown-item">
         <div class="ovr-breakdown-label">Attribute Bonus</div>
-        <div class="ovr-breakdown-bar">
-          <div class="ovr-breakdown-fill" style="width: ${percentages.attributeContribution || 0}%; background: #4caf50;"></div>
-        </div>
         <div class="ovr-breakdown-value">${ovr.attributeBonus} (${percentages.attributeContribution || 0}%)</div>
-        <div class="ovr-breakdown-desc">${ovr.explanations?.attributes || ''}</div>
       </div>
       <div class="ovr-breakdown-item">
         <div class="ovr-breakdown-label">Scenario Fit</div>
-        <div class="ovr-breakdown-bar">
-          <div class="ovr-breakdown-fill" style="width: ${Math.abs(percentages.scenarioEffect || 0)}%; background: ${(percentages.scenarioEffect || 0) >= 0 ? '#9b59b6' : '#ff5252'};"></div>
-        </div>
         <div class="ovr-breakdown-value">×${ovr.scenarioMultiplier.toFixed(2)} (${percentages.scenarioEffect > 0 ? '+' : ''}${percentages.scenarioEffect || 0}%)</div>
-        <div class="ovr-breakdown-desc">${ovr.explanations?.scenario || ''}</div>
       </div>
       <div class="ovr-breakdown-item ovr-breakdown-total">
         <div class="ovr-breakdown-label"><strong>Final OVR</strong></div>
-        <div class="ovr-breakdown-bar"></div>
         <div class="ovr-breakdown-value"><strong>${ovr.finalOVR}/99</strong></div>
-        <div class="ovr-breakdown-desc"></div>
       </div>
     `;
-    
-    // Draw pie chart
-    drawOVRPieChart(percentages);
   }
 
   // Show modal

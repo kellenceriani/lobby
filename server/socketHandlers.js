@@ -15,6 +15,7 @@ const {
 const { scoreCharacter } = require('./evaluator');
 const { getRandomPhrase } = require('./phraseGenerator');
 const { calculateChemistryBonus, calculateChemistryDetails } = require('./chemistryCalculator');
+const { getRoundWeight, calculateRound4Points } = require('./scoreScaling');
 
 function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
@@ -217,6 +218,15 @@ function registerSocketHandlers(io) {
       player.teamAutoFilled.push(autoFilled);
       game.allCharactersDrafted.push(finalCharacter);
 
+      if (!game.draftEntries[name]) {
+        game.draftEntries[name] = [];
+      }
+      game.draftEntries[name].push({
+        character: finalCharacter,
+        originalScenario: game.currentScenario || '',
+        originalTwist: game.currentTwist || ''
+      });
+
       const allDraftsList = [];
       game.players.forEach(p => {
         p.team.forEach((char, idx) => {
@@ -364,6 +374,7 @@ function registerSocketHandlers(io) {
         const teamEvaluations = {};
         const roundPoints = {};
         const pointBreakdown = {};
+        const round4Weight = getRoundWeight(4);
 
         // Evaluate each team's roster
         for (const [playerName, roster] of Object.entries(finalTeams)) {
@@ -371,7 +382,22 @@ function registerSocketHandlers(io) {
           
           // Score all characters in this roster (up to 6)
           const evaluations = await Promise.all(
-            roster.map(char => scoreCharacter(char, scenario, twist))
+            roster.map(char => {
+              const playerData = game.players.find(p => p.name === playerName);
+              const draftMetaList = playerData && Array.isArray(playerData.finalTeamDraftMeta)
+                ? playerData.finalTeamDraftMeta
+                : [];
+              const draftedMeta = draftMetaList.find(entry =>
+                entry &&
+                entry.character &&
+                entry.character.toLowerCase() === String(char).toLowerCase()
+              );
+
+              return scoreCharacter(char, scenario, twist, {
+                originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
+                originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist
+              });
+            })
           );
 
           console.log(`✅ ${playerName} evaluations complete`);
@@ -396,11 +422,13 @@ function registerSocketHandlers(io) {
 
           console.log(`📈 ${playerName}: Avg OVR=${averageOVR}, Chemistry=${chemistryBonus}, Total=${teamOVR}`);
 
-          roundPoints[playerName] = teamOVR;
+          const weightedRoundPoints = calculateRound4Points(teamOVR);
+          roundPoints[playerName] = weightedRoundPoints;
           pointBreakdown[playerName] = [
             `Team OVR: ${teamOVR}`,
             `Average OVR: ${averageOVR}`,
             `Chemistry Bonus: +${chemistryBonus}`,
+            `Round 4 Weight (x${round4Weight.toFixed(2)}): ${teamOVR} → ${weightedRoundPoints}`,
             `Top Pick: ${topPickEval ? topPickEval.character : 'N/A'}`
           ];
 
@@ -449,13 +477,19 @@ function registerSocketHandlers(io) {
             breakdown: pointBreakdown[p.name] || []
           }));
 
-        // Detect tie in Round 4 results (using OVR scores)
-        const maxOVR = Math.max(...finalLeaderboard.map(t => t.totalOVR));
-        const tiedTeams = finalLeaderboard.filter(t => t.totalOVR === maxOVR).map(t => t.playerName);
+        // Detect winner/tie from actual Round 4 points awarded
+        const roundPointEntries = Object.entries(roundPoints);
+        const maxRoundPoints = roundPointEntries.length
+          ? Math.max(...roundPointEntries.map(([, pts]) => pts))
+          : 0;
+        const tiedTeams = roundPointEntries
+          .filter(([, pts]) => pts === maxRoundPoints)
+          .map(([playerName]) => playerName);
         const isTie = tiedTeams.length > 1;
+        const roundWinner = tiedTeams[0] || null;
 
         game.results[3] = {
-          winner: finalLeaderboard[0] ? finalLeaderboard[0].playerName : null,
+          winner: roundWinner,
           isTie: isTie,
           tiedPlayers: tiedTeams,
           scenario: scenario,
@@ -474,6 +508,9 @@ function registerSocketHandlers(io) {
         game.round4Results = {
           evaluationId,
           payload,
+          winner: roundWinner,
+          isTie,
+          tiedPlayers: tiedTeams,
           roundPoints,
           pointBreakdown,
           leaderboardData
@@ -517,9 +554,9 @@ function registerSocketHandlers(io) {
       game.finalResultsEmitted = true;
 
       io.to(room).emit('finalRoundResults', {
-        winner: game.round4Results.leaderboardData[0]
-          ? game.round4Results.leaderboardData[0].name
-          : null,
+        winner: game.round4Results.winner || null,
+        isTie: game.round4Results.isTie === true,
+        tiedPlayers: Array.isArray(game.round4Results.tiedPlayers) ? game.round4Results.tiedPlayers : [],
         roundPoints: game.round4Results.roundPoints,
         voteCount: {},
         leaderboard: game.round4Results.leaderboardData,

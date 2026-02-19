@@ -5,6 +5,8 @@ const FALLBACK_WORDS = [
 
 let wordCache = [];
 
+const { getRoundWeight, scaleRoundPoints } = require('./scoreScaling');
+
 async function fetchRandomWords() {
   try {
     const response = await fetch('https://random-word-api.herokuapp.com/all');
@@ -440,6 +442,7 @@ function createGameInstance(roomCode, players, settings) {
       team: [],
       teamAutoFilled: [],
       finalTeam: [],
+      finalTeamDraftMeta: [],
       votes: 0,
       roundScores: [0, 0, 0, 0],
       totalScore: 0,
@@ -544,10 +547,19 @@ function calculateRoundBonuses(game, round) {
     }
   });
 
+  const roundNumber = round + 1;
+  const roundWeight = getRoundWeight(roundNumber);
+
   game.players.forEach(p => {
-    const earned = Math.max(0, points[p.name]);
+    const baseEarned = Math.max(0, points[p.name]);
+    const earned = scaleRoundPoints(baseEarned, roundNumber);
+    points[p.name] = earned;
     p.roundScores[round] = earned;
     p.totalScore += earned;
+
+    if (baseEarned !== earned) {
+      pointBreakdown[p.name].push(`Round ${roundNumber} Weight (x${roundWeight.toFixed(2)}): ${baseEarned} → ${earned}`);
+    }
   });
 
   return { points, bonuses, voteCount, pointBreakdown };
@@ -622,10 +634,19 @@ function calculateFinalRoundBonuses(game) {
     }
   });
 
+  const roundNumber = 4;
+  const roundWeight = getRoundWeight(roundNumber);
+
   game.players.forEach(p => {
-    const earned = Math.max(0, points[p.name]);
+    const baseEarned = Math.max(0, points[p.name]);
+    const earned = scaleRoundPoints(baseEarned, roundNumber);
+    points[p.name] = earned;
     p.roundScores[3] = earned;
     p.totalScore += earned;
+
+    if (baseEarned !== earned) {
+      pointBreakdown[p.name].push(`Round ${roundNumber} Weight (x${roundWeight.toFixed(2)}): ${baseEarned} → ${earned}`);
+    }
   });
 
   return { points, bonuses, voteCount, pointBreakdown };
@@ -775,9 +796,13 @@ function startFinalRound(io, roomCode) {
   // Collect each player's final team (from rounds 1-3)
   game.players.forEach(p => {
     p.finalTeam = [];
+    p.finalTeamDraftMeta = [];
     for (let i = 0; i < 3; i++) {
       if (game.results[i] && game.results[i].playerTeams && game.results[i].playerTeams[p.name]) {
         p.finalTeam.push(...game.results[i].playerTeams[p.name]);
+      }
+      if (game.results[i] && game.results[i].playerTeamDraftMeta && game.results[i].playerTeamDraftMeta[p.name]) {
+        p.finalTeamDraftMeta.push(...game.results[i].playerTeamDraftMeta[p.name]);
       }
     }
     console.log(`👤 ${p.name}'s final team (${p.finalTeam.length} chars): ${p.finalTeam.join(', ')}`);
@@ -870,8 +895,11 @@ function tallyResults(io, roomCode) {
     game.results[game.currentRound] = {};
   }
   game.results[game.currentRound].playerTeams = {};
+  game.results[game.currentRound].playerTeamDraftMeta = {};
   game.players.forEach(p => {
     game.results[game.currentRound].playerTeams[p.name] = [...p.team];
+    const meta = Array.isArray(game.draftEntries[p.name]) ? game.draftEntries[p.name] : [];
+    game.results[game.currentRound].playerTeamDraftMeta[p.name] = meta.map(entry => ({ ...entry }));
   });
 
   const { points, bonuses, voteCount, pointBreakdown } = calculateRoundBonuses(game, game.currentRound);

@@ -482,20 +482,28 @@
       <div class="ovr-modal-body">
         <!-- Character Summary -->
         <section class="ovr-breakdown-section">
-          <h3 class="ovr-section-title">📋 Character</h3>
-          <p id="modalCharacterSummary" class="ovr-section-text"></p>
+          <details class="ovr-dropdown" open>
+            <summary class="ovr-section-title">📋 Character</summary>
+            <p id="modalCharacterSummary" class="ovr-section-text"></p>
+          </details>
         </section>
 
         <!-- Scenario Relevance -->
         <section class="ovr-breakdown-section">
-          <h3 class="ovr-section-title">🎯 Scenario Fit</h3>
-          <p id="modalScenarioRelevance" class="ovr-section-text"></p>
+          <details class="ovr-dropdown" open>
+            <summary class="ovr-section-title">🎯 Scenario Fit</summary>
+            <p id="modalScenarioRelevance" class="ovr-section-text"></p>
+            <div id="modalScenarioKeywords" class="ovr-keywords"></div>
+          </details>
         </section>
 
         <!-- Twist Relevance -->
         <section class="ovr-breakdown-section">
-          <h3 class="ovr-section-title">🌀 Twist Fit</h3>
-          <p id="modalTwistRelevance" class="ovr-section-text"></p>
+          <details class="ovr-dropdown" open>
+            <summary class="ovr-section-title">🌀 Twist Fit</summary>
+            <p id="modalTwistRelevance" class="ovr-section-text"></p>
+            <div id="modalTwistKeywords" class="ovr-keywords"></div>
+          </details>
         </section>
 
         <!-- Score Breakdown -->
@@ -508,9 +516,6 @@
         <section class="ovr-breakdown-section">
           <h3 class="ovr-section-title">⭐ OVR (0-99)</h3>
           <div id="modalOVRBreakdown" class="ovr-breakdown-details">
-            <div class="ovr-breakdown-chart">
-              <canvas id="ovrBreakdownChart" width="300" height="300"></canvas>
-            </div>
             <div class="ovr-breakdown-items"></div>
           </div>
         </section>

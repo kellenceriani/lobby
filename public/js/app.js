@@ -1038,6 +1038,81 @@ socket.on('voteLockUpdate', (data) => {
   }
 });
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatNameList(names) {
+  const safeNames = names.map(escapeHtml);
+  if (safeNames.length <= 1) return safeNames[0] || '';
+  if (safeNames.length === 2) return `${safeNames[0]} & ${safeNames[1]}`;
+  return `${safeNames.slice(0, -1).join(', ')}, & ${safeNames[safeNames.length - 1]}`;
+}
+
+function getRoundLeaders(roundPoints = {}) {
+  const entries = Object.entries(roundPoints || {});
+  if (entries.length === 0) {
+    return { leaders: [], maxPoints: 0, isTie: false };
+  }
+
+  const sorted = [...entries].sort((a, b) => b[1] - a[1]);
+  const maxPoints = sorted[0][1];
+  const leaders = sorted.filter(([, score]) => score === maxPoints).map(([name]) => name);
+
+  return {
+    leaders,
+    maxPoints,
+    isTie: leaders.length > 1
+  };
+}
+
+function buildRoundWinnerHTML(data, isFinalRound = false) {
+  const winnerInfo = getRoundLeaders(data.roundPoints);
+  if (!winnerInfo.leaders.length) {
+    return {
+      html: '<h2>🏁 Round complete</h2>',
+      isTie: false
+    };
+  }
+
+  if (winnerInfo.isTie) {
+    const names = formatNameList(winnerInfo.leaders);
+    const tieHeadline = winnerInfo.leaders.length === 2
+      ? `${names} tied for first!`
+      : `${names} all tied for first!`;
+    const tieSubtitle = isFinalRound
+      ? 'Photo finish. The evaluator called this one dead even.'
+      : 'No daylight between them this round.';
+
+    return {
+      html: `
+        <h2>🤝 ${tieHeadline}</h2>
+        <p class="winner-round-score">+${winnerInfo.maxPoints} POINTS EACH</p>
+        <p class="winner-subtitle">${tieSubtitle}</p>
+      `,
+      isTie: true
+    };
+  }
+
+  const winnerName = escapeHtml(winnerInfo.leaders[0]);
+  const headline = isFinalRound
+    ? `🏆 ${winnerName} WINS THE FINAL ROUND! 🏆`
+    : `🏆 ${winnerName} WINS! 🏆`;
+
+  return {
+    html: `
+      <h2>${headline}</h2>
+      <p class="winner-round-score">+${winnerInfo.maxPoints} POINTS</p>
+    `,
+    isTie: false
+  };
+}
+
 // ========================
 // RESULTS SCREEN
 // ========================
@@ -1047,25 +1122,24 @@ socket.on('roundResults', (data) => {
   document.getElementById('resultRound').textContent = data.round;
 
   const winnerBox = document.getElementById('roundWinner');
-
-  let winnerHTML = '';
-  if (data.winner) {
-    winnerHTML = `
-      <h2>🏆 ${data.winner} WINS! 🏆</h2>
-      <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
-    `;
+  const winnerView = buildRoundWinnerHTML(data, false);
+  if (winnerBox) {
+    winnerBox.classList.remove('tie', 'animate-in');
+    winnerBox.innerHTML = winnerView.html;
+    if (winnerView.isTie) winnerBox.classList.add('tie');
+    void winnerBox.offsetWidth;
+    winnerBox.classList.add('animate-in');
   }
-
-  if (winnerBox) winnerBox.innerHTML = winnerHTML;
 
   const breakdownContainer = document.getElementById('resultsBreakdown');
   if (breakdownContainer) {
     let breakdownHTML = '';
     const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
+    const topRoundScore = sorted.length ? sorted[0].roundScore : 0;
     sorted.forEach((playerEntry, idx) => {
       const medal = ['🥇', '🥈', '🥉'][idx] || '•';
       breakdownHTML += `
-        <div class="player-breakdown">
+        <div class="player-breakdown ${playerEntry.roundScore === topRoundScore ? 'top-score' : ''}" style="--result-index:${idx};">
           <div class="breakdown-header">${medal} ${playerEntry.name}</div>
           <div class="breakdown-points">+${playerEntry.roundScore} points</div>
           <div class="breakdown-details">
@@ -1090,7 +1164,7 @@ socket.on('roundResults', (data) => {
   }
 
   showScreen('resultsScreen');
-  showToast('📊 Round results are in!', 'info');
+  showToast(winnerView.isTie ? '🤝 Tie at the top this round!' : '📊 Round results are in!', 'info');
 });
 
 function readyForNextRound() {
@@ -1109,25 +1183,24 @@ socket.on('finalRoundResults', (data) => {
   document.getElementById('resultRound').textContent = '4 (FINAL)';
 
   const winnerBox = document.getElementById('roundWinner');
-
-  let winnerHTML = '';
-  if (data.winner) {
-    winnerHTML = `
-      <h2>🏆 ${data.winner} WINS THE FINAL ROUND!... 🏆</h2>
-      <p class="winner-round-score">+${data.roundPoints[data.winner]} POINTS</p>
-    `;
+  const winnerView = buildRoundWinnerHTML(data, true);
+  if (winnerBox) {
+    winnerBox.classList.remove('tie', 'animate-in');
+    winnerBox.innerHTML = winnerView.html;
+    if (winnerView.isTie) winnerBox.classList.add('tie');
+    void winnerBox.offsetWidth;
+    winnerBox.classList.add('animate-in');
   }
-
-  if (winnerBox) winnerBox.innerHTML = winnerHTML;
 
   const breakdownContainer = document.getElementById('resultsBreakdown');
   if (breakdownContainer) {
     let breakdownHTML = '';
     const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
+    const topRoundScore = sorted.length ? sorted[0].roundScore : 0;
     sorted.forEach((playerEntry, idx) => {
       const medal = ['🥇', '🥈', '🥉'][idx] || '•';
       breakdownHTML += `
-        <div class="player-breakdown">
+        <div class="player-breakdown ${playerEntry.roundScore === topRoundScore ? 'top-score' : ''}" style="--result-index:${idx};">
           <div class="breakdown-header">${medal} ${playerEntry.name}</div>
           <div class="breakdown-points">+${playerEntry.roundScore} points</div>
           <div class="breakdown-details">

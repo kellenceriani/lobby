@@ -10,9 +10,8 @@ const {
   getRandomWord,
   endGame,
   markRoomsDirty
-} = require('./gameEngine');
-
-const { evaluateRound4FromGame } = require('./round4Service');
+} = require('../core/gameEngine');
+const { evaluateRound4FromGame } = require('../services/round4Service');
 const {
   sanitizeName,
   sanitizeRoomCode,

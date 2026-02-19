@@ -1,8 +1,8 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { initWordCache } = require('./server/gameEngine');
-const registerSocketHandlers = require('./server/socketHandlers');
+const { initWordCache } = require('./server/core/gameEngine');
+const registerSocketHandlers = require('./server/socket/socketHandlers');
 
 const app = express();
 const server = http.createServer(app);

@@ -1,7 +1,7 @@
-const { scoreCharacter } = require('./evaluator');
-const { getRandomPhrase } = require('./phraseGenerator');
-const { calculateChemistryDetails } = require('./chemistryCalculator');
-const { getRoundWeight, calculateRound4Points } = require('./scoreScaling');
+const { scoreCharacter } = require('../evaluator');
+const { getRandomPhrase } = require('../evaluator/presentation/phraseGenerator');
+const { calculateChemistryDetails } = require('../evaluator/team/chemistryCalculator');
+const { calculateRound4Points, describeRound4PointFormula } = require('./scoreScaling');
 
 async function mapWithConcurrency(items, concurrency, mapper) {
   const safeConcurrency = Math.max(1, Math.min(concurrency || 1, items.length || 1));
@@ -23,7 +23,6 @@ async function mapWithConcurrency(items, concurrency, mapper) {
 async function evaluateRound4FromGame(game) {
   const scenario = game.currentScenario;
   const twist = game.currentTwist;
-  const round4Weight = getRoundWeight(4);
 
   const teams = game.players.map((player) => ({
     playerName: player.name,
@@ -79,12 +78,16 @@ async function evaluateRound4FromGame(game) {
   evaluatedTeams.forEach(({ playerName, evaluations, teamSummary }) => {
     teamEvaluations[playerName] = { evaluations, teamSummary };
     const weightedRoundPoints = calculateRound4Points(teamSummary.totalOVR);
+    const formula = describeRound4PointFormula(teamSummary.totalOVR);
     roundPoints[playerName] = weightedRoundPoints;
     pointBreakdown[playerName] = [
       `Team OVR: ${teamSummary.totalOVR}`,
       `Average OVR: ${teamSummary.averageOVR}`,
       `Chemistry Bonus: +${teamSummary.chemistryBonus}`,
-      `Round 4 Weight (x${round4Weight.toFixed(2)}): ${teamSummary.totalOVR} → ${weightedRoundPoints}`,
+      `Round 4 Base (${formula.safeOVR} × 2.35): +${formula.basePoints}`,
+      `Competitive Bonus (OVR > 60): +${formula.competitivePoints}`,
+      `Elite Bonus (OVR > 80 curve): +${formula.elitePoints}`,
+      `Round 4 Total: ${formula.totalPoints}`,
       `Top Pick: ${teamSummary.topPick}`
     ];
   });

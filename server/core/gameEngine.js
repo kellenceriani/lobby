@@ -5,8 +5,8 @@ const FALLBACK_WORDS = [
 
 let wordCache = [];
 
-const { getRoundWeight, scaleRoundPoints } = require('./scoreScaling');
-const { loadRoomsSnapshot, queueRoomsSnapshot } = require('./statePersistence');
+const { getRoundWeight, scaleRoundPoints } = require('../services/scoreScaling');
+const { loadRoomsSnapshot, queueRoomsSnapshot } = require('../storage/statePersistence');
 
 async function fetchRandomWords() {
   try {

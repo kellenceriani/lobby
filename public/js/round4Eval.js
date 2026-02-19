@@ -29,6 +29,24 @@ function getCharacterRevealDelay(totalCharacters) {
   return 360;
 }
 
+function getEmotionFromOVR(ovr) {
+  const value = Number(ovr) || 0;
+  if (value <= 12) return 'mad';
+  if (value <= 28) return 'disappointed';
+  if (value <= 44) return 'confused';
+  if (value <= 64) return 'neutral';
+  if (value <= 78) return 'happy';
+  if (value <= 90) return 'amazed';
+  return 'mindBlown';
+}
+
+function getEmotionIconPath(evalData) {
+  const emotionByOVR = getEmotionFromOVR(evalData && evalData.ovr);
+  const fallbackEmotion = evalData && evalData.emotion ? String(evalData.emotion) : 'neutral';
+  const safeEmotion = encodeURIComponent(emotionByOVR || fallbackEmotion || 'neutral');
+  return `/img/emotions/${safeEmotion}.png`;
+}
+
 function updateEvalProgress(current, total) {
   const progress = document.getElementById('evalProgress');
   const bar = document.getElementById('evalProgressBar');
@@ -230,6 +248,9 @@ function renderEvalCard(evalData, container) {
   const ovrClass = `ovr-${ovrTier.tier}`;
   const rarity = evalData.rarity || 'Common';
   const characterType = evalData.characterType || 'balanced';
+  const primaryEmotion = getEmotionFromOVR(evalData.ovr);
+  const fallbackEmotion = evalData.emotion || 'neutral';
+  const emotionIconPath = getEmotionIconPath(evalData);
   
   const card = document.createElement('div');
   card.className = `eval-card eval-card-${evalData.emotion}`;
@@ -237,7 +258,8 @@ function renderEvalCard(evalData, container) {
     <div class="eval-card-header">
       <h3 class="eval-card-name">${escapeHtml(evalData.character)}</h3>
       <div class="eval-card-emotion">
-        <img src="/img/emotions/${encodeURIComponent(evalData.emotion)}.png" alt="${escapeHtml(evalData.emotion)}" 
+        <img src="${emotionIconPath}" alt="${escapeHtml(primaryEmotion)}"
+             onerror="this.onerror=null;this.src='/img/emotions/${encodeURIComponent(fallbackEmotion)}.png';"
              class="eval-emotion-icon" width="64" height="64" decoding="async">
       </div>
     </div>

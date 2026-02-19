@@ -11,7 +11,6 @@ import {
   showHelp,
   closeHelp,
   showToast,
-  showLoading,
   createConfetti,
   updateDraftWarning,
   updateAutoFillWarning,
@@ -1359,6 +1358,3 @@ window.lockVote = lockVote;
 window.readyForNextRound = readyForNextRound;
 window.sendPlayAgain = sendPlayAgain;
 window.goToLobby = goToLobby;
-
-// Keep for future usage
-window.showLoading = showLoading;

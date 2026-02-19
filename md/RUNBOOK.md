@@ -10,14 +10,14 @@ This runbook is for rapid, safe iteration when making major gameplay/evaluator c
   - `npm start`
 
 - Syntax check evaluator:
-  - `node --check server/evaluator.js`
+  - `node --check server/evaluator/index.js`
 
 - Evaluator viability harness:
   - `node server/viabilityTestHarness.js`
   - `npm run eval:viability`
 
 - Smoke module exports:
-  - `node -e "const ev=require('./server/evaluator'); const ge=require('./server/core/gameEngine'); const sh=require('./server/socket/socketHandlers'); const r4=require('./server/services/round4Service'); console.log('ok', typeof ev.scoreCharacter, typeof ge.startGame, typeof sh, typeof r4.evaluateRound4FromGame);"`
+  - `node -e "const ev=require('./server/evaluator/index'); const ge=require('./server/core/gameEngine'); const sh=require('./server/socket/socketHandlers'); const r4=require('./server/services/round4Service'); console.log('ok', typeof ev.scoreCharacter, typeof ge.startGame, typeof sh, typeof r4.evaluateRound4FromGame);"`
 
 ## 2) Standard Change Workflow
 

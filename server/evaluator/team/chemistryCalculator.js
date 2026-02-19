@@ -418,8 +418,4 @@ function calculateChemistryDetails(characterNames) {
   };
 }
 
-function calculateChemistryBonus(characterNames) {
-  return calculateChemistryDetails(characterNames).bonus;
-}
-
-module.exports = { calculateChemistryBonus, calculateChemistryDetails };
+module.exports = { calculateChemistryDetails };

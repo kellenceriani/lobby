@@ -1,4 +1,4 @@
-import { gameState, setLoading } from './state.js';
+import { gameState } from './state.js';
 
 let scenarioCollapsed = false;
 let votingContextCollapsed = false;
@@ -23,14 +23,6 @@ export function showHelp() {
 
 export function closeHelp() {
   showScreen('join');
-}
-
-export function showLoading(show = true) {
-  setLoading(show);
-  const loader = document.getElementById('loadingOverlay');
-  if (loader) {
-    loader.style.display = show ? 'flex' : 'none';
-  }
 }
 
 export function createConfetti() {

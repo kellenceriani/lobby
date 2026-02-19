@@ -668,13 +668,6 @@ function generateFinalScenarioAndTwist(difficulty = 'normal') {
   };
 }
 
-function generateFinalPrompt() {
-  const template = FINAL_PROMPT_TEMPLATES[Math.floor(Math.random() * FINAL_PROMPT_TEMPLATES.length)];
-  const teamType = TEAM_TYPES[Math.floor(Math.random() * TEAM_TYPES.length)];
-  const prompt = template.replace('{TEAM_TYPE}', teamType);
-  return `Now which drafted team has made the best..... ${prompt}!!??!!`;
-}
-
 const rooms = {};
 const voteTimeouts = {};
 

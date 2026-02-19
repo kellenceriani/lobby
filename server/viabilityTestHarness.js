@@ -1,4 +1,4 @@
-const { scoreCharacter, fetchCharacterInfo } = require('./evaluator');
+const { scoreCharacter, fetchCharacterInfo } = require('./evaluator/index');
 
 const ALIAS_PROBES = [
   { input: 'Bats', expected: 'Batman' },

@@ -255,6 +255,161 @@ function mapFitCountToDraftBonus(count) {
   return 0;
 }
 
+const SPECIALIZATION_RULES = [
+  {
+    label: 'ice specialist',
+    context: /\b(ice|frozen|arctic|glacier|snow|blizzard|slippery)\b/,
+    strongSignals: [/\bfrozone\b/, /\biceman\b/, /\bsub[-\s]?zero\b/, /cryokinesis|ice magic|ice power/, /\bice manipulat/],
+    weakSignals: [/\bice\b/, /\bfrost\b/, /\bglacier\b/],
+    minEvidence: 2,
+    points: 4,
+    confidenceFloor: 0.45
+  },
+  {
+    label: 'fire specialist',
+    context: /\b(fire|flame|inferno|burn|lava|volcanic|heatwave)\b/,
+    strongSignals: [/pyrokinesis|fire manipulat|flame control/, /\bhuman torch\b|\bazula\b|\bnatsu\b/, /\bfirebender\b/],
+    weakSignals: [/\bfire\b/, /\bflame\b/, /\blava\b/],
+    minEvidence: 2,
+    points: 4,
+    confidenceFloor: 0.45
+  },
+  {
+    label: 'lightning specialist',
+    context: /\b(lightning|thunder|electric|voltage|storm surge|electrical)\b/,
+    strongSignals: [/electrokinesis|lightning manipulat|thunder control/, /\bthor\b|\benel\b|\bstorm\b/, /\belectric hero\b/],
+    weakSignals: [/\blightning\b/, /\bthunder\b/, /\belectric\b/],
+    minEvidence: 2,
+    points: 4,
+    confidenceFloor: 0.45
+  },
+  {
+    label: 'wind/air specialist',
+    context: /\b(wind|air|gust|hurricane|cyclone|tornado)\b/,
+    strongSignals: [/aerokinesis|wind manipulat|airbender/, /\baang\b|\btempest\b/],
+    weakSignals: [/\bwind\b/, /\bair\b/, /\bgust\b/],
+    minEvidence: 2,
+    points: 3,
+    confidenceFloor: 0.45
+  },
+  {
+    label: 'earth specialist',
+    context: /\b(earth|rock|stone|seismic|quake|mountain|terrain)\b/,
+    strongSignals: [/geokinesis|earth manipulat|stone armor/, /\btoph\b|\bgolem\b|\bterra\b/],
+    weakSignals: [/\bearth\b/, /\brock\b/, /\bstone\b/],
+    minEvidence: 2,
+    points: 3,
+    confidenceFloor: 0.45
+  },
+  {
+    label: 'animal affinity specialist',
+    context: /\b(dog|canine|animal|beast|wildlife|pet|pack|zoo)\b/,
+    strongSignals: [/\bbrian griffin\b|\bscooby\b|\bace the bat-hound\b/, /animal control|beast master|animal speak/, /\bcanine\b|\bwolf\b/],
+    weakSignals: [/\banimal\b/, /\bpet\b/, /\bbeast\b/],
+    minEvidence: 2,
+    points: 3,
+    confidenceFloor: 0.42
+  },
+  {
+    label: 'mystery/investigation specialist',
+    context: /\b(mystery|detective|investigate|clue|case|suspect|evidence)\b/,
+    strongSignals: [/\bsherlock\b|\bshaggy\b|\bpoirot\b/, /detective|investigator|sleuth|forensic/, /deduction|profiling|interrogation/],
+    weakSignals: [/\bmystery\b/, /\bclue\b/, /\bdetective\b/],
+    minEvidence: 2,
+    points: 3,
+    confidenceFloor: 0.4
+  },
+  {
+    label: 'iconic style specialist',
+    context: /\b(iconic clothes|iconic style|signature outfit|fashion|wardrobe|costume)\b/,
+    strongSignals: [/signature outfit|iconic costume|known for .*outfit|fashion icon|distinctive wardrobe/, /\bcruella\b|\bedna mode\b|\blady gaga\b|\bshaggy\b/],
+    weakSignals: [/\bfashion\b/, /\bstyle\b/, /\bcostume\b/],
+    minEvidence: 3,
+    points: 2,
+    confidenceFloor: 0.55,
+    requireExplicitContext: true
+  },
+  {
+    label: 'aquatic specialist',
+    context: /\b(underwater|ocean|sea|flooded|aquatic|deep sea)\b/,
+    strongSignals: [/\baquaman\b|\bnamor\b|\btriton\b/, /aquatic|water breathing|oceanic|hydrokinesis/, /submarine|deep-sea explorer/],
+    weakSignals: [/\bwater\b/, /\bocean\b/, /\bunderwater\b/],
+    minEvidence: 2,
+    points: 3,
+    confidenceFloor: 0.45
+  }
+];
+
+function countRegexHits(source, patterns) {
+  return (Array.isArray(patterns) ? patterns : []).reduce((count, pattern) => {
+    if (!(pattern instanceof RegExp)) return count;
+    return pattern.test(source) ? count + 1 : count;
+  }, 0);
+}
+
+function calculateSpecializationBonus(character, info, scenario, twist, profile) {
+  if (!info) {
+    return {
+      points: 0,
+      reasons: []
+    };
+  }
+
+  const context = `${scenario || ''} ${twist || ''}`.toLowerCase();
+  const corpus = buildInfoCorpus(info, character).toLowerCase();
+  const confidence = Number(info && info.confidence) || 0;
+
+  let points = 0;
+  const reasons = [];
+
+  SPECIALIZATION_RULES.forEach((rule) => {
+    if (!rule.context.test(context)) return;
+    if (rule.requireExplicitContext && !/iconic|signature|distinctive|fashion|costume/.test(context)) return;
+
+    const strongHits = countRegexHits(corpus, rule.strongSignals);
+    const weakHits = countRegexHits(corpus, rule.weakSignals);
+    const evidenceScore = (strongHits * 2) + weakHits;
+    const minEvidence = Number(rule.minEvidence) || 2;
+    const floor = Number(rule.confidenceFloor) || 0;
+
+    if (evidenceScore < minEvidence) return;
+    if (confidence < floor && strongHits < 2) return;
+
+    const bonus = rule.points + (strongHits >= 2 && rule.points >= 3 ? 1 : 0);
+    points += bonus;
+    reasons.push(`${rule.label} (${strongHits} strong/${weakHits} weak)`);
+  });
+
+  const inferredIntents = inferIntentGroups(context);
+  const requiredTraits = new Set();
+  inferredIntents.forEach((intent) => {
+    (INTENT_TO_TRAITS[intent] || []).forEach((trait) => requiredTraits.add(trait));
+  });
+
+  const strongTraitHits = Array.from(requiredTraits).filter((trait) => (profile.traits[trait] || 0) >= 2).length;
+  if (strongTraitHits >= 3) {
+    points += 2;
+    reasons.push('high-trait specialization match');
+  } else if (strongTraitHits >= 1) {
+    points += 1;
+    reasons.push('targeted trait match');
+  } else if (requiredTraits.size >= 3) {
+    points -= 1;
+    reasons.push('specialization mismatch');
+  }
+
+  const confidenceCap = confidence < 0.4
+    ? 1
+    : confidence < 0.55
+      ? 3
+      : 8;
+
+  return {
+    points: Math.max(-3, Math.min(confidenceCap, points)),
+    reasons
+  };
+}
+
 function scoreRelevance(character, info, scenario, twist) {
   if (!info) return { points: 0, note: 'Limited direct overlap with scenario/twist.' };
 
@@ -265,6 +420,7 @@ function scoreRelevance(character, info, scenario, twist) {
 
   const capability = calculateCapabilityFit(character, info, scenario, twist);
   const assessment = assessScenarioAndTwist(character, info, scenario, twist);
+  const specialization = calculateSpecializationBonus(character, info, scenario, twist, assessment.profile);
   const infoConfidence = Number(info.confidence) || 0;
   const traitBreadthPoints = assessment.profile.rankedTraits.length >= 6
     ? 2
@@ -283,7 +439,7 @@ function scoreRelevance(character, info, scenario, twist) {
   const feasibilityPoints = assessment.scenarioFeasibility.score >= 8 ? 5 : assessment.scenarioFeasibility.score >= 6 ? 3 : assessment.scenarioFeasibility.score >= 4 ? 2 : assessment.scenarioFeasibility.score >= 3 ? 1 : 0;
   const twistPoints = assessment.twistImpact.helps ? Math.min(4, assessment.twistImpact.impactScore) : assessment.twistImpact.hurts ? -Math.min(4, Math.abs(assessment.twistImpact.impactScore)) : 0;
 
-  const preTotal = semanticPoints + domainPoints + capabilityPoints + feasibilityPoints + twistPoints + traitBreadthPoints + evidenceLift;
+  const preTotal = semanticPoints + domainPoints + capabilityPoints + feasibilityPoints + twistPoints + traitBreadthPoints + evidenceLift + specialization.points;
   const feasibilityFloor = assessment.scenarioFeasibility.thrive
     ? 4
     : assessment.scenarioFeasibility.canDo
@@ -299,12 +455,13 @@ function scoreRelevance(character, info, scenario, twist) {
     total = Math.min(total, 0);
   }
 
-  total = Math.max(-6, Math.min(24, total));
+  total = Math.max(-8, Math.min(28, total));
 
   const note = [
     `Keyword fit: S${scenarioFit.totalCount}/T${twistFit.totalCount}`,
     `Scenario feasibility: ${assessment.scenarioFeasibility.canDo ? 'can do' : 'struggles'} (${assessment.scenarioFeasibility.score}/10)`,
-    `Twist impact: ${assessment.twistImpact.helps ? 'helps' : assessment.twistImpact.hurts ? 'hurts' : 'neutral'} (${assessment.twistImpact.impactScore})`
+    `Twist impact: ${assessment.twistImpact.helps ? 'helps' : assessment.twistImpact.hurts ? 'hurts' : 'neutral'} (${assessment.twistImpact.impactScore})`,
+    `Specialization: ${specialization.points >= 0 ? '+' : ''}${specialization.points}`
   ].join(' | ');
 
   return {
@@ -339,6 +496,10 @@ function scoreRelevance(character, info, scenario, twist) {
       topTraits: assessment.profile.rankedTraits,
       type: assessment.profile.type,
       powerClass: 'balanced'
+    },
+    specialization: {
+      points: specialization.points,
+      reasons: specialization.reasons
     }
   };
 }
@@ -388,20 +549,31 @@ function calculateScenarioFitValue(character, info, scenario, twist) {
   const source = buildInfoCorpus(info, character).toLowerCase();
   const fit = buildKeywordFitDetails(source, `${scenario || ''} ${twist || ''}`);
   const assessment = assessScenarioAndTwist(character, info, scenario, twist);
+  const specialization = calculateSpecializationBonus(character, info, scenario, twist, assessment.profile);
 
-  let multiplier = 0.96;
-  if (fit.totalCount >= 12) multiplier = 1.22;
-  else if (fit.totalCount >= 8) multiplier = 1.15;
-  else if (fit.totalCount >= 4) multiplier = 1.08;
-  else if (fit.totalCount >= 2) multiplier = 1.03;
+  let multiplier = 0.9;
+  if (fit.totalCount >= 14) multiplier = 1.2;
+  else if (fit.totalCount >= 9) multiplier = 1.13;
+  else if (fit.totalCount >= 5) multiplier = 1.06;
+  else if (fit.totalCount >= 2) multiplier = 1.0;
+  else multiplier = 0.88;
 
-  if (assessment.scenarioFeasibility.thrive) multiplier = Math.max(multiplier, 1.2);
-  else if (!assessment.scenarioFeasibility.canDo) multiplier = Math.min(multiplier, 0.96);
+  if (assessment.scenarioFeasibility.thrive) multiplier += 0.1;
+  else if (assessment.scenarioFeasibility.canDo) multiplier += 0.03;
+  else multiplier -= 0.1;
 
-  if (assessment.twistImpact.helps) multiplier += 0.04;
-  if (assessment.twistImpact.hurts) multiplier -= 0.05;
+  if (assessment.twistImpact.helps) multiplier += 0.05;
+  if (assessment.twistImpact.hurts) multiplier -= 0.08;
 
-  return Math.max(0.85, Math.min(1.3, multiplier));
+  if (specialization.points >= 5) multiplier += 0.1;
+  else if (specialization.points >= 2) multiplier += 0.05;
+  else if (specialization.points <= -2) multiplier -= 0.07;
+
+  if (fit.totalCount <= 1 && !assessment.scenarioFeasibility.canDo && specialization.points <= 0) {
+    multiplier = Math.min(multiplier, 0.82);
+  }
+
+  return Math.max(0.72, Math.min(1.35, multiplier));
 }
 
 function getScenarioFitExplanation(multiplier) {

@@ -299,6 +299,107 @@ const TWIST_TEMPLATES = {
   ]
 };
 
+const TWIST_DOMAIN_SIGNALS = {
+  ice: ['ice', 'arctic', 'frozen', 'snow', 'glacier', 'winter', 'frost'],
+  fire: ['fire', 'flame', 'inferno', 'burn', 'lava', 'volcanic', 'blaze'],
+  lightning: ['lightning', 'thunder', 'storm', 'electric', 'voltage', 'shock'],
+  wind: ['wind', 'air', 'hurricane', 'tornado', 'gust', 'cyclone'],
+  earth: ['earth', 'rock', 'stone', 'mountain', 'cave', 'quake', 'terrain'],
+  elemental: ['elemental', 'elements', 'alchemy', 'nature force'],
+  mystery: ['mystery', 'detective', 'investigate', 'clue', 'case', 'heist', 'secret'],
+  animals: ['animal', 'beast', 'dog', 'wolf', 'cat', 'wildlife', 'pet'],
+  cooking: ['cook', 'bake', 'chef', 'kitchen', 'food', 'recipe', 'restaurant'],
+  sports: ['sport', 'match', 'team', 'tournament', 'league', 'championship', 'race'],
+  water: ['ocean', 'underwater', 'sea', 'flood', 'tsunami', 'coast', 'river'],
+  space: ['space', 'orbit', 'moon', 'mars', 'starship', 'galaxy', 'cosmic'],
+  social: ['debate', 'convince', 'impress', 'heart', 'president', 'celebrity', 'negotiate'],
+  stealth: ['stealth', 'shadow', 'infiltrate', 'covert', 'silent', 'spy', 'assassin'],
+  style: ['fashion', 'style', 'outfit', 'costume', 'clothes', 'iconic look']
+};
+
+const TWIST_PREFIX_LIBRARY = {
+  easy: [
+    'NO DIRECT FORCE', 'LIMITED PREP TIME', 'NO REPEAT ACTIONS', 'ONLY BASIC TOOLS',
+    'PUBLIC PERFORMANCE REQUIRED', 'NO VERBAL COMMUNICATION', 'ONE ATTEMPT ONLY', 'TIME-LIMITED WINDOWS',
+    'NO OUTSIDE HELP', 'STRICT SAFETY RULES', 'COOL-DOWN AFTER EACH MOVE', 'LOW-BUDGET SOLUTION ONLY'
+  ],
+  normal: [
+    'ON ICE', 'UNDERWATER', 'ZERO VISIBILITY', 'SUDDEN RULE CHANGES',
+    'LIVE CROWD VOTING', 'NO MODERN TECH', 'IN A MOVING ENVIRONMENT', 'ONE SHARED RESOURCE',
+    'DELAYED COMMUNICATION', 'MANDATORY TEAM ROTATION', 'NO PHYSICAL CONTACT', 'NOISE SATURATION',
+    'MULTI-LANGUAGE BARRIER', 'RANDOM CHECKPOINT SHIFTS', 'PRESSURE TEST EVERY PHASE', 'ENERGY CAPPED'
+  ],
+  hard: [
+    'REALITY DISTORTION', 'TIME DESYNC', 'HOSTILE ADAPTIVE OPPOSITION', 'NO RECOVERY WINDOW',
+    'COMPETING OBJECTIVES', 'DUPLICATE THREATS', 'MIRROR-CONSTRAINT EXECUTION', 'CONTINUOUS COLLATERAL RISK',
+    'FALSE DATA FEEDS', 'HARD MODE NO RETRIES', 'RAPID TERRAIN SHIFTS', 'CASCADING FAILURE CONDITIONS'
+  ]
+};
+
+const TWIST_DOMAIN_LIBRARY = {
+  ice: ['ON ICE', 'NO TRACTION', 'FREEZING CONDITIONS'],
+  fire: ['EXTREME HEAT ZONE', 'FLAME HAZARDS ACTIVE', 'HEAT SHIELDING REQUIRED'],
+  lightning: ['ELECTRICAL STORMS ACTIVE', 'EMP BURSTS INTERMITTENT', 'HIGH-VOLTAGE RISK WINDOWS'],
+  wind: ['SEVERE WIND SHEAR', 'AIRFLOW SHIFTS CONSTANTLY', 'HIGH-GUST INSTABILITY'],
+  earth: ['UNSTABLE TERRAIN', 'SEISMIC SHOCKS ACTIVE', 'ROCKFALL RISK INCREASING'],
+  elemental: ['ELEMENTAL RESISTANCE CHECKS ACTIVE', 'AURA INTERFERENCE IS RANDOM', 'ELEMENT CYCLE SHIFTS EACH PHASE'],
+  mystery: ['CLUE CHAIN ONLY', 'EVIDENCE-FIRST DECISIONS', 'NO ASSUMPTIONS ALLOWED'],
+  animals: ['ANIMAL BEHAVIOR UNPREDICTABLE', 'NON-HUMAN TARGETS PRIORITIZED', 'WILDLIFE SAFETY FIRST'],
+  cooking: ['INGREDIENTS ARE LIMITED', 'NO HEAT CONTROL', 'TASTE + TIMING BOTH SCORED'],
+  sports: ['LEAGUE RULEBOOK ENFORCED', 'CLOCK NEVER STOPS', 'POSITIONAL RESTRICTIONS APPLY'],
+  water: ['FLOODED TERRAIN', 'BUOYANCY CHANGES EACH PHASE', 'CURRENTS SHIFT CONSTANTLY'],
+  space: ['LOW GRAVITY', 'COMMS LATENCY SPIKES', 'LIFE-SUPPORT CONSTRAINTS'],
+  social: ['PUBLIC TRUST SCORE ACTIVE', 'NO AGGRESSIVE POSTURING', 'CONSENSUS NEEDED TO PROCEED'],
+  stealth: ['NO DETECTION ALLOWED', 'SILENCE MANDATORY', 'LIGHT DISCIPLINE ENFORCED'],
+  style: ['ICONIC CLOTHES REQUIRED', 'VISUAL IDENTITY MATTERS', 'COSTUME CONSISTENCY SCORED']
+};
+
+const TWIST_MODIFIER_LIBRARY = {
+  easy: ['NO BACKTRACKING', 'WITH BASIC EQUIPMENT', 'WITH NEW TEAMMATES'],
+  normal: ['AND EVERY STEP IS SCORED', 'AND YOU MUST ADAPT MID-RUN', 'AND RESOURCES DEGRADE OVER TIME'],
+  hard: ['AND EACH SUCCESS SPAWNS A HARDER OBJECTIVE', 'AND YOU CANNOT REPEAT A STRATEGY', 'AND FAILURE MULTIPLIES PRESSURE']
+};
+
+function inferTwistDomains(text) {
+  const source = String(text || '').toLowerCase();
+  const domains = Object.entries(TWIST_DOMAIN_SIGNALS)
+    .filter(([, keywords]) => keywords.some(keyword => source.includes(keyword)))
+    .map(([domain]) => domain);
+
+  if (!domains.length) return ['social', 'stealth', 'sports'];
+  return domains.slice(0, 3);
+}
+
+function shufflePool(items) {
+  return [...items].sort(() => Math.random() - 0.5);
+}
+
+function composeDynamicTwist({ difficulty = 'normal', scenarioText = '' }) {
+  const safeDifficulty = ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
+  const domains = inferTwistDomains(scenarioText);
+  const primaryPool = [
+    ...(TWIST_PREFIX_LIBRARY.easy || []),
+    ...(safeDifficulty !== 'easy' ? TWIST_PREFIX_LIBRARY.normal || [] : []),
+    ...(safeDifficulty === 'hard' ? TWIST_PREFIX_LIBRARY.hard || [] : [])
+  ];
+
+  const chosenDomain = randomFrom(domains);
+  const domainPool = TWIST_DOMAIN_LIBRARY[chosenDomain] || [];
+  const modifierPool = TWIST_MODIFIER_LIBRARY[safeDifficulty] || [];
+
+  const primary = randomFrom(primaryPool);
+  const domainLine = domainPool.length ? randomFrom(domainPool) : '';
+
+  if (safeDifficulty === 'easy') {
+    return normalizeScenarioText([primary, domainLine].filter(Boolean).join(' | '));
+  }
+
+  const modifier = Math.random() < (safeDifficulty === 'hard' ? 0.75 : 0.45)
+    ? randomFrom(modifierPool)
+    : '';
+  return normalizeScenarioText([primary, domainLine, modifier].filter(Boolean).join(' | '));
+}
+
 function generateScenario(theme = 'all') {
   const categories = theme === 'all'
     ? Object.keys(SCENARIO_TEMPLATES)
@@ -318,30 +419,50 @@ function generateScenario(theme = 'all') {
   return { scenario, category };
 }
 
-function generateTwists(difficulty = 'normal', count = 4) {
+function generateTwists(difficulty = 'normal', count = 4, scenarioText = '') {
+  if (difficulty && typeof difficulty === 'object') {
+    const options = difficulty;
+    return generateTwists(
+      options.difficulty || 'normal',
+      options.count || 4,
+      options.scenarioText || options.scenario || ''
+    );
+  }
+
+  const safeDifficulty = ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
+  const targetCount = Math.max(1, Math.min(12, Number(count) || 4));
   const easyTwists = TWIST_TEMPLATES.easy;
   const normalTwists = TWIST_TEMPLATES.normal;
   const hardTwists = TWIST_TEMPLATES.hard;
 
   let pool = [];
-  if (difficulty === 'easy') {
+  if (safeDifficulty === 'easy') {
     pool = [...easyTwists, ...normalTwists.slice(0, 3)];
-  } else if (difficulty === 'hard') {
+  } else if (safeDifficulty === 'hard') {
     pool = [...normalTwists, ...hardTwists];
   } else {
     pool = [...easyTwists.slice(0, 2), ...normalTwists, ...hardTwists.slice(0, 2)];
   }
 
-  const shuffled = pool.sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+  const dynamicPool = [];
+  for (let i = 0; i < (targetCount * 3); i++) {
+    dynamicPool.push(composeDynamicTwist({
+      difficulty: safeDifficulty,
+      scenarioText
+    }));
+  }
+
+  const merged = Array.from(new Set([...pool, ...dynamicPool]));
+  return shufflePool(merged).slice(0, targetCount);
 }
 
 function generateScenarios(count = 3, theme = 'all', difficulty = 'normal') {
   const scenarios = [];
   for (let i = 0; i < count; i++) {
-    const { scenario } = generateScenario(theme);
-    const twists = generateTwists(difficulty, 4);
-    scenarios.push({ scenario, twists, category: theme });
+    const generated = generateScenario(theme);
+    const scenario = generated.scenario;
+    const twists = generateTwists(difficulty, 6, scenario);
+    scenarios.push({ scenario, twists, category: generated.category });
   }
   return scenarios;
 }
@@ -647,25 +768,26 @@ function generateFinalScenario(difficulty = 'normal') {
   return normalizeScenarioText(fillTemplate(chosenPattern, values));
 }
 
-function generateFinalTwist(difficulty = 'normal') {
-  const prefix = randomFrom(FINAL_TWIST_COMPONENTS.PREFIX);
-  const middle = randomFrom(FINAL_TWIST_COMPONENTS.MIDDLE);
-  const suffixPool = difficulty === 'easy'
-    ? FINAL_TWIST_COMPONENTS.SUFFIX.slice(0, 8)
+function generateFinalTwist(difficulty = 'normal', scenarioText = '') {
+  const domains = inferTwistDomains(scenarioText);
+  const prefixPool = difficulty === 'easy'
+    ? FINAL_TWIST_COMPONENTS.PREFIX.slice(0, 14)
     : difficulty === 'hard'
-      ? FINAL_TWIST_COMPONENTS.SUFFIX.slice(6)
-      : FINAL_TWIST_COMPONENTS.SUFFIX;
+      ? FINAL_TWIST_COMPONENTS.PREFIX.slice(10)
+      : FINAL_TWIST_COMPONENTS.PREFIX;
 
-  const includeSuffix = difficulty !== 'easy' || Math.random() > 0.35;
-  const suffix = includeSuffix ? ` ${randomFrom(suffixPool)}` : '';
+  const prefix = randomFrom(prefixPool);
+  const domainPool = TWIST_DOMAIN_LIBRARY[randomFrom(domains)] || [];
+  const domainConstraint = Math.random() > 0.4 ? randomFrom(domainPool) : '';
 
-  return normalizeScenarioText(`${prefix} ${middle}${suffix}`);
+  return normalizeScenarioText([prefix, domainConstraint].filter(Boolean).join(' | '));
 }
 
 function generateFinalScenarioAndTwist(difficulty = 'normal') {
+  const scenario = generateFinalScenario(difficulty);
   return {
-    scenario: generateFinalScenario(difficulty),
-    twist: generateFinalTwist(difficulty)
+    scenario,
+    twist: generateFinalTwist(difficulty, scenario)
   };
 }
 
@@ -706,9 +828,10 @@ function createGameInstance(roomCode, players, settings) {
 
   if (settings.customScenario && settings.customScenario.trim()) {
     const customIndex = Math.floor(Math.random() * scenarios.length);
+    const customScenario = settings.customScenario.trim().toUpperCase();
     scenarios[customIndex] = {
-      scenario: settings.customScenario.trim().toUpperCase(),
-      twists: generateTwists(difficulty, 4),
+      scenario: customScenario,
+      twists: generateTwists(difficulty, 6, customScenario),
       category: 'custom'
     };
   }
@@ -962,8 +1085,11 @@ function revealPlotTwist(io, roomCode) {
     return;
   }
 
-  const finalTwists = generateTwists('normal', 4);
-  game.currentTwist = finalTwists[Math.floor(Math.random() * finalTwists.length)];
+  const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
+  const generatedTwists = (Array.isArray(scenario && scenario.twists) && scenario.twists.length)
+    ? scenario.twists
+    : generateTwists(difficulty, 6, game.currentScenario || (scenario && scenario.scenario) || '');
+  game.currentTwist = generatedTwists[Math.floor(Math.random() * generatedTwists.length)] || 'NO RULE BREAKERS';
 
   game.activePhase = 'TWIST';
 
@@ -1024,10 +1150,16 @@ function startVoting(io, roomCode) {
     const activeGame = rooms[roomCode].gameState;
     if (!activeGame || activeGame.activePhase !== 'VOTING' || activeGame.voteTallyStarted === true) return;
 
+    const fetchQueue = {};
+    activeGame.players.forEach((player) => {
+      fetchQueue[player.name] = Array.isArray(player.team) ? [...player.team] : [];
+    });
+
     activeGame.voteTallyStarted = true;
     io.to(roomCode).emit('voteTallying', {
       trigger: 'timer',
-      settleDelayMs: 1200
+      settleDelayMs: 1200,
+      fetchQueue
     });
 
     setTimeout(() => tallyResults(io, roomCode), 1200);

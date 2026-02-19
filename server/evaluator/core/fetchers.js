@@ -89,6 +89,64 @@ function upscaleWikipediaThumbnail(url, targetSize = 420) {
   return normalized.replace(/\/(\d+)px-/i, `/${targetSize}px-`);
 }
 
+function classifyImageEntityPriority(candidate) {
+  const title = String(candidate && candidate.title ? candidate.title : '').toLowerCase();
+  const description = String(candidate && candidate.description ? candidate.description : '').toLowerCase();
+  const categories = Array.isArray(candidate && candidate.categories)
+    ? candidate.categories.map((item) => String(item || '').toLowerCase()).join(' ')
+    : '';
+  const corpus = `${title} ${description} ${categories}`;
+
+  if (/fictional|fictional character|character in|protagonist|antagonist|superhero|villain|anime|manga|comic|cartoon|video game character/.test(corpus)) {
+    return 'fictional';
+  }
+
+  if (/\b(?:film|movie|album|song|tv series|television series|video game|novel)\b/.test(corpus)) {
+    return 'media';
+  }
+
+  if (/\b(?:is|was) an?\s+(?:american|british|japanese|korean|french|indian|canadian|australian)?\s*(?:actor|actress|athlete|footballer|musician|singer|rapper|composer|author|writer|scientist|historian|politician|philosopher|streamer|creator|youtuber)\b|biography|born|historical figure|public figure/.test(corpus)) {
+    return 'real';
+  }
+
+  return 'other';
+}
+
+function buildImageTitlePriority(candidate) {
+  const title = normalizeName(
+    candidate && (
+      candidate.title
+      || candidate.enwikiTitle
+      || candidate.wikidataLabel
+      || ''
+    )
+  );
+  if (!title) return [];
+
+  const priority = classifyImageEntityPriority(candidate);
+  const characterFirstTitles = [
+    `${title} (character)`,
+    `${title} (fictional character)`,
+    `${title} (franchise character)`,
+    `${title} (mythology)`
+  ];
+
+  const mediaTitles = [
+    `${title} (film)`,
+    `${title} (TV series)`,
+    `${title} (video game)`
+  ];
+
+  const ordered = priority === 'fictional'
+    ? [...characterFirstTitles, title, ...mediaTitles]
+    : [title, ...characterFirstTitles, ...mediaTitles];
+
+  return dedupeByKey(
+    ordered.map((entry) => normalizeName(entry)).filter(Boolean),
+    (entry) => entry.toLowerCase()
+  ).slice(0, 6);
+}
+
 function createKnownCharacterRecords() {
   const records = new Map();
 
@@ -217,6 +275,36 @@ function deriveContextProfile(options = {}) {
   if (/build|repair|engineer|robot|system|grid|infrastructure/.test(corpus)) {
     pushHints(['engineer', 'technology']);
     entityHints.push('person', 'object');
+  }
+
+  if (/fire|flame|inferno|lava|volcanic/.test(corpus)) {
+    pushHints(['fire powers', 'elemental powers']);
+    entityHints.push('character', 'person');
+  }
+
+  if (/lightning|thunder|electric|voltage|storm/.test(corpus)) {
+    pushHints(['lightning powers', 'electric powers']);
+    entityHints.push('character', 'person');
+  }
+
+  if (/wind|air|hurricane|tornado|gust/.test(corpus)) {
+    pushHints(['wind powers', 'air powers']);
+    entityHints.push('character', 'person');
+  }
+
+  if (/earth|rock|stone|seismic|quake|terrain/.test(corpus)) {
+    pushHints(['earth powers', 'geokinesis']);
+    entityHints.push('character', 'person');
+  }
+
+  if (/elemental|elements|alchemy|nature force/.test(corpus)) {
+    pushHints(['elemental powers', 'magic']);
+    entityHints.push('character', 'legend');
+  }
+
+  if (/iconic clothes|signature outfit|fashion|style|costume/.test(corpus)) {
+    pushHints(['signature outfit', 'iconic costume', 'fashion icon']);
+    entityHints.push('person', 'character');
   }
 
   return {
@@ -800,15 +888,35 @@ async function enrichCandidateImage(candidate) {
     };
   }
 
-  const title = normalizeName(
-    normalizedCandidate.title
-    || normalizedCandidate.enwikiTitle
-    || normalizedCandidate.wikidataLabel
-    || ''
-  );
-  if (!title) return normalizedCandidate;
+  const titlePriority = buildImageTitlePriority(normalizedCandidate);
+  if (!titlePriority.length) return normalizedCandidate;
 
-  const summary = await fetchFromWikipediaSummary(title).catch(() => null);
+  for (const title of titlePriority) {
+    const wikiCandidate = await fetchFromWikipediaEnhanced(title).catch(() => null);
+    if (wikiCandidate && wikiCandidate.imageUrl) {
+      return {
+        ...normalizedCandidate,
+        imageUrl: upscaleWikipediaThumbnail(wikiCandidate.imageUrl)
+      };
+    }
+  }
+
+  const entityPriority = classifyImageEntityPriority(normalizedCandidate);
+  if (entityPriority === 'fictional') {
+    const searchCandidate = await fetchFromWikipediaSearchEnhanced(
+      titlePriority[0],
+      ['fictional character', 'character'],
+      ['fictional character', 'character']
+    ).catch(() => null);
+    if (searchCandidate && searchCandidate.imageUrl) {
+      return {
+        ...normalizedCandidate,
+        imageUrl: upscaleWikipediaThumbnail(searchCandidate.imageUrl)
+      };
+    }
+  }
+
+  const summary = await fetchFromWikipediaSummary(titlePriority[0]).catch(() => null);
   if (summary && summary.imageUrl) {
     return {
       ...normalizedCandidate,
@@ -816,13 +924,7 @@ async function enrichCandidateImage(candidate) {
     };
   }
 
-  const wikiCandidate = await fetchFromWikipediaEnhanced(title).catch(() => null);
-  if (!wikiCandidate || !wikiCandidate.imageUrl) return normalizedCandidate;
-
-  return {
-    ...normalizedCandidate,
-    imageUrl: upscaleWikipediaThumbnail(wikiCandidate.imageUrl)
-  };
+  return normalizedCandidate;
 }
 
 async function searchWikipediaTitles(queryText, limit = 8) {

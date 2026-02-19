@@ -20,6 +20,28 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
+function calculateTeamOVRWithChemistryGate(averageOVR, chemistryBonus) {
+  const safeAverage = Math.max(0, Math.round(Number(averageOVR) || 0));
+  const safeChemistry = Number.isFinite(Number(chemistryBonus)) ? Number(chemistryBonus) : 0;
+  const rawTotal = safeAverage + safeChemistry;
+
+  if (rawTotal <= 99) {
+    return Math.max(0, Math.round(rawTotal));
+  }
+
+  const overflow = rawTotal - 99;
+  const gatedOverflow = Math.round(overflow * 0.35);
+  let capped = 99 + Math.max(0, gatedOverflow);
+
+  if (safeAverage < 88 || safeChemistry < 8) {
+    capped = 99;
+  } else if (safeAverage < 92 || safeChemistry < 10) {
+    capped = Math.min(101, capped);
+  }
+
+  return Math.max(0, Math.min(110, Math.round(capped)));
+}
+
 async function evaluateRound4FromGame(game) {
   const scenario = game.currentScenario;
   const twist = game.currentTwist;
@@ -60,7 +82,7 @@ async function evaluateRound4FromGame(game) {
     const averageOVR = evaluations.length
       ? Math.round(evaluations.reduce((sum, e) => sum + e.ovr, 0) / evaluations.length)
       : 0;
-    const teamOVR = Math.round(averageOVR + chemistryBonus);
+    const teamOVR = calculateTeamOVRWithChemistryGate(averageOVR, chemistryBonus);
     const topPickEval = evaluations.reduce((best, current) => {
       if (!best || current.ovr > best.ovr) return current;
       return best;
@@ -110,12 +132,17 @@ async function evaluateRound4FromGame(game) {
   const finalLeaderboard = Object.entries(teamEvaluations)
     .map(([playerName, teamData]) => ({
       playerName,
+      round4Points: roundPoints[playerName] || 0,
       totalOVR: teamData.teamSummary.totalOVR,
       chemistryBonus: teamData.teamSummary.chemistryBonus,
       topPick: teamData.teamSummary.topPick,
       topPickImageUrl: (teamData.evaluations.find((entry) => entry.character === teamData.teamSummary.topPick) || {}).imageUrl || null
     }))
-    .sort((a, b) => b.totalOVR - a.totalOVR);
+    .sort((a, b) => {
+      if ((b.round4Points || 0) !== (a.round4Points || 0)) return (b.round4Points || 0) - (a.round4Points || 0);
+      if ((b.totalOVR || 0) !== (a.totalOVR || 0)) return (b.totalOVR || 0) - (a.totalOVR || 0);
+      return String(a.playerName || '').localeCompare(String(b.playerName || ''));
+    });
 
   return {
     scenario,

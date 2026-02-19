@@ -445,10 +445,16 @@ function registerSocketHandlers(io) {
       if (allLocked) {
         clearTimeout(voteTimeouts[room]);
         if (!game.voteTallyStarted) {
+          const fetchQueue = {};
+          game.players.forEach((playerEntry) => {
+            fetchQueue[playerEntry.name] = Array.isArray(playerEntry.team) ? [...playerEntry.team] : [];
+          });
+
           game.voteTallyStarted = true;
           io.to(room).emit('voteTallying', {
             trigger: 'all_locked',
-            settleDelayMs: 1200
+            settleDelayMs: 1200,
+            fetchQueue
           });
           setTimeout(() => tallyResults(io, room), 1200);
         }
@@ -527,17 +533,23 @@ function registerSocketHandlers(io) {
           leaderboard: leaderboardData
         };
 
-        const evalLeaderboard = leaderboardData.map((entry) => {
-          const teamRow = scored.finalLeaderboard.find((row) => row.playerName === entry.name) || {};
+        const totalScoreByPlayer = game.players.reduce((acc, player) => {
+          acc[player.name] = Number(player.totalScore) || 0;
+          return acc;
+        }, {});
+
+        const evalLeaderboard = scored.finalLeaderboard.map((teamRow) => {
+          const round4Points = Number(teamRow.round4Points) || 0;
+          const totalScore = Number(totalScoreByPlayer[teamRow.playerName]) || round4Points;
           return {
-            playerName: entry.name,
+            playerName: teamRow.playerName,
             totalOVR: typeof teamRow.totalOVR === 'number' ? teamRow.totalOVR : 0,
             chemistryBonus: typeof teamRow.chemistryBonus === 'number' ? teamRow.chemistryBonus : 0,
             topPick: teamRow.topPick || 'N/A',
             topPickImageUrl: teamRow.topPickImageUrl || null,
-            round4Points: entry.roundScore,
-            totalScore: entry.score,
-            previousTotalScore: entry.score - entry.roundScore
+            round4Points,
+            totalScore,
+            previousTotalScore: totalScore - round4Points
           };
         });
 

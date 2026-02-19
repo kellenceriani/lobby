@@ -36,6 +36,64 @@
   padding: 0 var(--spacing-md);
 }
 
+.pre-round-loading {
+  width: min(560px, 92vw);
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-md);
+}
+
+.pre-round-loading-label {
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+.pre-round-progress {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.26);
+}
+
+.pre-round-progress-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--warning) 86%, white), color-mix(in srgb, var(--primary) 82%, white));
+  transition: width 320ms ease;
+}
+
+.pre-round-status-row {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.pre-round-fetch-label {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.86rem;
+  text-align: left;
+}
+
+.pre-round-progress-pct {
+  color: white;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .central-content {
   display: flex;
   flex-direction: column;

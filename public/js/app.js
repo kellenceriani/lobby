@@ -76,6 +76,153 @@ function appendText(parent, text) {
   parent.appendChild(document.createTextNode(text));
 }
 
+function setPreRoundProgress(percent = 0, fetchLabel = 'Preparing next phase…') {
+  const bounded = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  const progressFill = document.getElementById('preRoundProgressFill');
+  const progressPct = document.getElementById('preRoundProgressPct');
+  const fetchEl = document.getElementById('preRoundFetchLabel');
+  const progressTrack = document.querySelector('#preRoundLoading .pre-round-progress');
+
+  if (progressFill) progressFill.style.width = `${bounded}%`;
+  if (progressPct) progressPct.textContent = `${bounded}%`;
+  if (fetchEl) fetchEl.textContent = fetchLabel;
+  if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(bounded));
+}
+
+function hidePreRoundLoadingState() {
+  const loading = document.getElementById('preRoundLoading');
+  const messageEl = document.getElementById('preRoundMessage');
+  if (loading) loading.style.display = 'none';
+  if (messageEl) messageEl.textContent = '⚡ Get Ready for Chaos ⚡';
+  setPreRoundProgress(0, 'Preparing next phase…');
+}
+
+function buildCharacterFetchLabels(teamMap, { maxPlayers = 4, maxCharsPerPlayer = 2 } = {}) {
+  if (!teamMap || typeof teamMap !== 'object') return [];
+  return Object.entries(teamMap)
+    .slice(0, maxPlayers)
+    .map(([playerName, picks]) => {
+      const items = (Array.isArray(picks) ? picks : [])
+        .map((entry) => {
+          if (entry && typeof entry === 'object') {
+            return entry.character || entry.name || entry.label || '';
+          }
+          return String(entry || '');
+        })
+        .map((name) => String(name).trim())
+        .filter(Boolean)
+        .slice(0, maxCharsPerPlayer);
+
+      if (!items.length) return null;
+      return `${playerName}: ${items.join(', ')}`;
+    })
+    .filter(Boolean);
+}
+
+function holdPreRoundProgressAt92({
+  baseStage = 'Finishing score calculations…',
+  characterLabels = []
+} = {}) {
+  let idx = 0;
+  let pulse = 0;
+  setPreRoundProgress(92, baseStage);
+
+  const timer = setInterval(() => {
+    const fetchContext = characterLabels.length ? characterLabels[idx % characterLabels.length] : '';
+    const label = fetchContext ? `${baseStage} • Fetching: ${fetchContext}` : baseStage;
+    const pulsePct = 92 + Math.round(Math.sin(pulse) * 1);
+    const boundedPct = Math.max(91, Math.min(93, pulsePct));
+    setPreRoundProgress(boundedPct, label);
+    pulse += 0.7;
+    idx += 1;
+  }, 850);
+
+  addTimer(timer);
+}
+
+function showPreRoundLoadingState({
+  title,
+  message,
+  stages = [],
+  progress = 0,
+  showCountdown = false,
+  countdownValue = ''
+}) {
+  const roundLabel = document.getElementById('roundLabel');
+  const messageEl = document.getElementById('preRoundMessage');
+  const countdown = document.getElementById('countdown');
+  const loading = document.getElementById('preRoundLoading');
+
+  if (roundLabel && title) roundLabel.textContent = title;
+  if (messageEl && message) messageEl.textContent = message;
+
+  if (countdown) {
+    countdown.style.display = showCountdown ? 'block' : 'none';
+    if (showCountdown) {
+      countdown.style.fontSize = '10em';
+      countdown.textContent = String(countdownValue);
+    }
+  }
+
+  if (loading) {
+    loading.style.display = 'block';
+  }
+
+  const stageList = Array.isArray(stages) && stages.length ? stages : ['Fetching scenario data…'];
+  const stageIndex = Math.max(0, Math.min(stageList.length - 1, Math.floor((Math.max(0, Math.min(99, progress)) / 100) * stageList.length)));
+  setPreRoundProgress(progress, stageList[stageIndex]);
+}
+
+function startPreRoundLoadingSequence({
+  title,
+  message,
+  stages = [],
+  durationMs = 3000,
+  showCountdown = false,
+  onComplete = null,
+  characterLabels = []
+}) {
+  const safeDuration = Math.max(600, Number(durationMs) || 3000);
+  const safeStages = Array.isArray(stages) && stages.length ? stages : ['Fetching scenario data…'];
+  const startedAt = Date.now();
+
+  showPreRoundLoadingState({
+    title,
+    message,
+    stages: safeStages,
+    progress: 0,
+    showCountdown,
+    countdownValue: Math.ceil(safeDuration / 1000)
+  });
+
+  const tick = setInterval(() => {
+    const elapsed = Date.now() - startedAt;
+    const progress = Math.max(0, Math.min(100, Math.round((elapsed / safeDuration) * 100)));
+    const stageIndex = Math.max(0, Math.min(safeStages.length - 1, Math.floor((Math.min(99, progress) / 100) * safeStages.length)));
+    const stageText = safeStages[stageIndex];
+    const fetchContext = characterLabels.length && progress >= 66
+      ? characterLabels[Math.floor((elapsed / 650) % characterLabels.length)]
+      : '';
+
+    if (showCountdown) {
+      const countdown = document.getElementById('countdown');
+      if (countdown) {
+        const secondsLeft = Math.max(0, Math.ceil((safeDuration - elapsed) / 1000));
+        countdown.textContent = String(secondsLeft);
+      }
+    }
+
+    setPreRoundProgress(progress, fetchContext ? `${stageText} • Fetching: ${fetchContext}` : stageText);
+
+    if (progress >= 100) {
+      clearInterval(tick);
+      if (typeof onComplete === 'function') onComplete();
+    }
+  }, 120);
+
+  addTimer(tick);
+}
+
 // ========================
 // JOIN & LOBBY
 // ========================
@@ -369,7 +516,8 @@ socket.on('roundStart', (data) => {
     console.log('Round 4 starting - skipping preRound countdown');
     return; // Don't show preRound for Round 4, wait for round4Start event
   }
-  
+
+  hidePreRoundLoadingState();
   document.getElementById('roundLabel').textContent = `📍 ROUND ${data.roundNumber} OF 3`;
 
   let countdown = 3;
@@ -387,6 +535,7 @@ socket.on('roundStart', (data) => {
   }, 1000);
 
   addTimer(timer);
+
   showScreen('preRound');
 });
 
@@ -752,44 +901,35 @@ socket.on('votingPhaseStart', (data) => {
 socket.on('round4Start', (data) => {
   console.log('🎮 Round 4 Start event received:', data);
   clearTimers();
+  const finalTeamLabels = buildCharacterFetchLabels(data && data.finalTeams ? data.finalTeams : {}, {
+    maxPlayers: 6,
+    maxCharsPerPlayer: 3
+  });
   
   // Show transition message modal
   showScreen('preRound');
-  const roundLabel = document.getElementById('roundLabel');
-  const countdown = document.querySelector('#preRound .countdown');
-  
-  if (roundLabel) {
-    roundLabel.innerHTML = `
-      <div style="text-align: center; padding: 20px;">
-        <div style="font-size: 3rem; margin-bottom: 20px;">🌪️</div>
-        <h2 style="margin-bottom: 15px;">THE ARENA TRANSFORMS</h2>
-        <p style="margin: 10px 0;">Your rosters are locked.</p>
-        <p style="margin: 10px 0;">Your picks are final.</p>
-        <p style="margin: 10px 0;">The voting stage dissolves away.</p>
-        <div style="height: 2px; background: linear-gradient(90deg, transparent, #ff4081, transparent); margin: 20px 0;"></div>
-        <p style="margin: 15px 0; font-size: 1.2rem; color: #ff4081;">
-          <strong>Now enters: 🤖 THE EVALUATOR</strong>
-        </p>
-        <p style="margin: 10px 0;">One machine. ${Object.keys(data.finalTeams).length * 6} characters. Unlimited takes.</p>
-        <p style="margin: 10px 0;">Your teams face the algorithm.</p>
-        <p style="margin: 15px 0; font-size: 1.1rem; font-weight: bold; color: #f7931e;">
-          Who cooked? Who got cooked? Find out.
-        </p>
-      </div>
-    `;
-  }
-  
-  if (countdown) countdown.style.display = 'none';
-  
-  // Auto-transition to evaluation screen after 5 seconds
-  setTimeout(() => {
-    console.log('⏰ Transition timeout complete, starting evaluation...');
-    if (typeof window.initRound4Evaluation === 'function') {
-      window.initRound4Evaluation(data);
-    } else {
-      console.error('❌ Round 4 evaluation function not found');
+
+  startPreRoundLoadingSequence({
+    title: '🤖 FINAL ROUND: AI EVALUATION',
+    message: `Preparing ${Object.keys(data.finalTeams || {}).length} final teams for evaluator scoring…`,
+    stages: [
+      'Locking final rosters…',
+      'Loading cached intel from rounds 1-3…',
+      'Preparing evaluator pipeline…',
+      'Starting AI evaluation…'
+    ],
+    durationMs: 5000,
+    showCountdown: false,
+    characterLabels: finalTeamLabels,
+    onComplete: () => {
+      console.log('⏰ Transition timeout complete, starting evaluation...');
+      if (typeof window.initRound4Evaluation === 'function') {
+        window.initRound4Evaluation(data);
+      } else {
+        console.error('❌ Round 4 evaluation function not found');
+      }
     }
-  }, 5000);
+  });
 });
 
 function castVote(playerName) {
@@ -912,27 +1052,50 @@ function getRoundLeaders(roundPoints = {}) {
   };
 }
 
-function showVoteTallyLoading(trigger = 'timer') {
-  const roundLabel = document.getElementById('roundLabel');
-  const countdown = document.getElementById('countdown');
+function showVoteTallyLoading(payload = {}) {
+  const trigger = payload && payload.trigger ? payload.trigger : 'timer';
   const triggerText = trigger === 'all_locked'
-    ? 'All votes locked. Finalizing scores...'
-    : 'Voting window closed. Finalizing scores...';
+    ? 'All votes locked. Finalizing scores now…'
+    : 'Voting window closed. Finalizing scores…';
+  const fetchQueue = buildCharacterFetchLabels(payload.fetchQueue || {}, {
+    maxPlayers: 5,
+    maxCharsPerPlayer: 2
+  });
 
-  if (roundLabel) {
-    roundLabel.innerHTML = `
-      <div style="text-align: center; padding: 20px;">
-        <div style="font-size: 2.5rem; margin-bottom: 12px;">⏳</div>
-        <h2 style="margin-bottom: 10px;">TALLYING ROUND RESULTS</h2>
-        <p style="margin: 8px 0;">${triggerText}</p>
-        <p style="margin: 8px 0;">Applying vote impact + contextual intel fit.</p>
-      </div>
-    `;
-  }
+  showPreRoundLoadingState({
+    title: '⏳ TALLYING ROUND RESULTS',
+    message: triggerText,
+    stages: [
+      'Verifying locked votes…',
+      'Fetching matchup intel for submitted teams…',
+      'Applying scoring rules and tie checks…'
+    ],
+    progress: 58,
+    showCountdown: false
+  });
 
-  if (countdown) {
-    countdown.style.display = 'none';
-  }
+  let progress = 58;
+  const ramp = setInterval(() => {
+    progress = Math.min(92, progress + 1);
+    const stageText = progress < 70
+      ? 'Verifying locked votes…'
+      : progress < 84
+        ? 'Fetching matchup intel for submitted teams…'
+        : 'Applying scoring rules and tie checks…';
+
+    const fetchContext = fetchQueue.length ? fetchQueue[Math.floor(progress / 3) % fetchQueue.length] : '';
+    const label = fetchContext ? `${stageText} • Fetching: ${fetchContext}` : stageText;
+    setPreRoundProgress(progress, label);
+
+    if (progress >= 92) {
+      clearInterval(ramp);
+      holdPreRoundProgressAt92({
+        baseStage: 'Awaiting final score commit…',
+        characterLabels: fetchQueue
+      });
+    }
+  }, 160);
+  addTimer(ramp);
 
   showScreen('preRound');
 }
@@ -958,6 +1121,79 @@ function categorizeBreakdownLines(lines = []) {
   });
 
   return groups;
+}
+
+function dedupeBreakdownLines(lines = []) {
+  const seen = new Set();
+  return (Array.isArray(lines) ? lines : []).filter((line) => {
+    const normalized = String(line || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!normalized || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function extractLinePoints(line) {
+  const text = String(line || '');
+  const matches = text.match(/[+-]\d+/g);
+  if (!matches || !matches.length) return 0;
+  return Number(matches[matches.length - 1]) || 0;
+}
+
+function formatSignedNumber(value) {
+  const numeric = Number(value) || 0;
+  return numeric >= 0 ? `+${numeric}` : `${numeric}`;
+}
+
+function summarizeBreakdown(lines = []) {
+  const grouped = categorizeBreakdownLines(lines);
+  const sum = (arr) => (Array.isArray(arr) ? arr.reduce((acc, line) => acc + extractLinePoints(line), 0) : 0);
+  const votePoints = sum(grouped.vote);
+  const intelPoints = sum(grouped.intel);
+  const corePoints = sum(grouped.core);
+  const totalAbs = Math.max(1, Math.abs(votePoints) + Math.abs(intelPoints) + Math.abs(corePoints));
+
+  return {
+    grouped,
+    votePoints,
+    intelPoints,
+    corePoints,
+    votePct: Math.max(8, Math.round((Math.abs(votePoints) / totalAbs) * 100)),
+    intelPct: Math.max(8, Math.round((Math.abs(intelPoints) / totalAbs) * 100)),
+    corePct: Math.max(8, Math.round((Math.abs(corePoints) / totalAbs) * 100)),
+    totalAbs
+  };
+}
+
+function buildBreakdownGroupMarkup({
+  title,
+  helper,
+  lines,
+  emptyLabel = 'No entries for this section.'
+}) {
+  const safeLines = dedupeBreakdownLines(lines);
+  const rows = safeLines.length
+    ? safeLines.map((line) => {
+      const points = extractLinePoints(line);
+      const lowered = String(line || '').toLowerCase();
+      const rowClass = points < 0 || lowered.includes("didn't vote") ? 'negative'
+        : points > 0 ? 'positive'
+          : 'neutral';
+      return `<div class="breakdown-note ${rowClass}">${line}</div>`;
+    }).join('')
+    : `<div class="breakdown-note muted">${emptyLabel}</div>`;
+
+  return `
+    <section class="breakdown-section-group">
+      <div class="breakdown-section-head">
+        <h5>${title}</h5>
+        <p>${helper}</p>
+      </div>
+      <div class="breakdown-notes-inline">
+        ${rows}
+      </div>
+    </section>
+  `;
 }
 
 function buildRoundWinnerHTML(data, isFinalRound = false) {
@@ -1026,35 +1262,47 @@ socket.on('roundResults', (data) => {
     const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
     const topRoundScore = sorted.length ? sorted[0].roundScore : 0;
     sorted.forEach((playerEntry, idx) => {
-      const medal = ['🥇', '🥈', '🥉'][idx] || '•';
-      const grouped = categorizeBreakdownLines(playerEntry.breakdown);
-      const previewLine = grouped.vote[0] || grouped.intel[0] || grouped.core[0] || 'No breakdown details available.';
-      const renderGroup = (title, lines) => {
-        if (!lines.length) {
-          return `<div class="breakdown-group"><h5>${title}</h5><div class="breakdown-line muted">No items</div></div>`;
-        }
-        return `
-          <div class="breakdown-group">
-            <h5>${title}</h5>
-            ${lines.map((line) => {
-              const isNegative = String(line).includes('-') || String(line).toLowerCase().includes("didn't vote");
-              return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
-            }).join('')}
-          </div>
-        `;
-      };
+      const summary = summarizeBreakdown(playerEntry.breakdown);
+      const grouped = summary.grouped;
+      const voteLines = dedupeBreakdownLines(grouped.vote || []);
+      const intelLines = dedupeBreakdownLines(grouped.intel || []);
+      const modifierLines = dedupeBreakdownLines(grouped.core || []);
+
+      const voteMarkup = buildBreakdownGroupMarkup({
+        title: 'Community Votes',
+        helper: 'Points earned from how players voted.',
+        lines: voteLines,
+        emptyLabel: 'No vote-based changes.'
+      });
+      const intelMarkup = buildBreakdownGroupMarkup({
+        title: 'Intel Fit',
+        helper: 'How well the team matched scenario/twist context.',
+        lines: intelLines,
+        emptyLabel: 'No intel-fit changes.'
+      });
+      const modifierMarkup = buildBreakdownGroupMarkup({
+        title: 'Other Modifiers',
+        helper: 'Rule-based adjustments outside votes and intel (formerly “Core”).',
+        lines: modifierLines,
+        emptyLabel: 'No extra modifiers applied.'
+      });
 
       breakdownHTML += `
         <div class="player-breakdown ${playerEntry.roundScore === topRoundScore ? 'top-score' : ''}" style="--result-index:${idx};">
-          <div class="breakdown-header">${medal} ${playerEntry.name}</div>
-          <div class="breakdown-points">+${playerEntry.roundScore} points</div>
-          <div class="breakdown-preview">${previewLine}</div>
-          <details class="breakdown-details-disclosure">
-            <summary>View full breakdown</summary>
-            <div class="breakdown-details">
-              ${renderGroup('Vote Impact', grouped.vote)}
-              ${renderGroup('Intel Impact', grouped.intel)}
-              ${renderGroup('Core Round Scoring', grouped.core)}
+          <details class="player-breakdown-dropdown">
+            <summary class="breakdown-summary-row" aria-label="Open detailed score breakdown for ${playerEntry.name}">
+              <span class="breakdown-points">${formatSignedNumber(playerEntry.roundScore)} pts</span>
+              <span class="breakdown-header">${playerEntry.name}</span>
+            </summary>
+            <div class="breakdown-details" aria-label="Detailed score notes">
+              <div class="breakdown-impact-row" aria-label="Score contribution split">
+                <div class="impact-chip vote">Votes ${formatSignedNumber(summary.votePoints)}</div>
+                <div class="impact-chip intel">Intel ${formatSignedNumber(summary.intelPoints)}</div>
+                <div class="impact-chip core">Other ${formatSignedNumber(summary.corePoints)}</div>
+              </div>
+              ${voteMarkup}
+              ${intelMarkup}
+              ${modifierMarkup}
             </div>
           </details>
         </div>
@@ -1065,39 +1313,19 @@ socket.on('roundResults', (data) => {
 
   const scoringMeta = document.getElementById('roundScoringMeta');
   if (scoringMeta) {
-    scoringMeta.innerHTML = '<strong>Scoring:</strong> Community votes + contextual intel fit';
+    scoringMeta.innerHTML = '<strong>Scoring:</strong> Community votes + contextual intel fit + other rule-based modifiers';
   }
 
   const intelSummaryContainer = document.getElementById('resultsIntelSummary');
-  const intelSummary = data && data.roundIntelSummary ? data.roundIntelSummary : null;
   if (intelSummaryContainer) {
-    const intelRows = intelSummary
-      ? Object.entries(intelSummary)
-        .filter(([, summary]) => summary)
-        .sort((a, b) => (Number((b[1] && b[1].averageRelevance) || 0) - Number((a[1] && a[1].averageRelevance) || 0)))
-      : [];
-
-    if (intelRows.length) {
-      intelSummaryContainer.style.display = 'grid';
-      intelSummaryContainer.innerHTML = intelRows.map(([name, summary]) => {
-        const relevance = Number(summary.averageRelevance || 0).toFixed(2);
-        const adaptability = Number(summary.averageAdaptability || 0).toFixed(2);
-        const confidencePct = Math.round(Number(summary.averageConfidence || 0) * 100);
-        const trustedCount = Number(summary.trustedCount || 0);
-        return `
-          <div class="intel-summary-card">
-            <div class="intel-summary-head">🧠 ${escapeHtml(name)} intel profile</div>
-            <div class="intel-summary-line">Relevance: ${relevance} • Adaptability: ${adaptability} • Confidence: ${confidencePct}% • Trusted picks: ${trustedCount}/2</div>
-          </div>
-        `;
-      }).join('');
-    } else {
-      intelSummaryContainer.style.display = 'none';
-      intelSummaryContainer.innerHTML = '';
-    }
+    intelSummaryContainer.style.display = 'none';
+    intelSummaryContainer.innerHTML = '';
   }
 
-  resetResultsDetails();
+  const resultsDetails = document.getElementById('resultsDetails');
+  if (resultsDetails) {
+    resultsDetails.style.display = 'block';
+  }
 
   const readyButton = document.getElementById('nextRoundReadyBtn');
   if (readyButton) {
@@ -1112,8 +1340,7 @@ socket.on('roundResults', (data) => {
 
 socket.on('voteTallying', (data) => {
   clearTimers();
-  const trigger = data && data.trigger ? data.trigger : 'timer';
-  showVoteTallyLoading(trigger);
+  showVoteTallyLoading(data || {});
 });
 
 function readyForNextRound() {

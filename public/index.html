@@ -246,7 +246,17 @@
     <div class="central-content">
       <h2 id="roundLabel">ROUND 1 OF 3</h2>
       <div id="countdown" class="countdown" role="status">3</div>
-      <p>⚡ Get Ready for Chaos ⚡</p>
+      <p id="preRoundMessage">⚡ Get Ready for Chaos ⚡</p>
+      <div id="preRoundLoading" class="pre-round-loading" aria-live="polite" style="display: none;">
+        <div class="pre-round-loading-label">Preparing next phase…</div>
+        <div class="pre-round-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <span id="preRoundProgressFill" class="pre-round-progress-fill" style="width: 0%;"></span>
+        </div>
+        <div class="pre-round-status-row">
+          <span id="preRoundFetchLabel" class="pre-round-fetch-label">Fetching game state…</span>
+          <span id="preRoundProgressPct" class="pre-round-progress-pct">0%</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -390,16 +400,7 @@
       </div>
 
       <div id="resultsIntelSummary" class="results-intel-summary" style="display: none;"></div>
-      
-      <!-- Leaderboard Toggle -->
-      <div class="results-section-toggle">
-        <button class="btn-toggle-section" onclick="toggleResultsDetails()" aria-label="Toggle details">
-          <span id="resultsDetailsIcon">▼</span> View Detailed Breakdown
-        </button>
-      </div>
-      
-      <!-- Expandable Details -->
-      <div id="resultsDetails" class="results-details-collapsible" style="display: none;">
+      <div id="resultsDetails" class="results-details-collapsible" style="display: block;">
         <div id="resultsBreakdown" class="breakdown-container-modern"></div>
       </div>
       

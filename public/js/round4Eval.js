@@ -422,6 +422,16 @@ function displayFinalLeaderboard() {
   const leaderboardDiv = document.createElement('div');
   leaderboardDiv.className = 'eval-final-leaderboard';
   leaderboardDiv.innerHTML = `<h2>🏆 Round 4 Leaderboard</h2>`;
+
+  const rankedTeams = [...round4State.finalLeaderboard].sort((a, b) => {
+    const pointsDiff = (Number(b && b.round4Points) || 0) - (Number(a && a.round4Points) || 0);
+    if (pointsDiff !== 0) return pointsDiff;
+
+    const ovrDiff = (Number(b && b.totalOVR) || 0) - (Number(a && a.totalOVR) || 0);
+    if (ovrDiff !== 0) return ovrDiff;
+
+    return String(a && a.playerName ? a.playerName : '').localeCompare(String(b && b.playerName ? b.playerName : ''));
+  });
   
   const table = document.createElement('table');
   table.className = 'leaderboard-table';
@@ -437,7 +447,7 @@ function displayFinalLeaderboard() {
       </tr>
     </thead>
     <tbody>
-      ${round4State.finalLeaderboard.map((team, idx) => {
+      ${rankedTeams.map((team, idx) => {
         const teamEvaluations = round4State.allTeamEvaluations && round4State.allTeamEvaluations[team.playerName]
           ? round4State.allTeamEvaluations[team.playerName].evaluations
           : [];

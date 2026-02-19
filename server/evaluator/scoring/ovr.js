@@ -18,48 +18,48 @@ function getOVRTier(ovr) {
 
 function mapScoreToOVR(score) {
   const normalized = Math.max(0, Math.min(1, (score || 0) / SCORE_MAX));
-  const curved = Math.pow(normalized, 0.86);
-  return Math.round(curved * 99);
+  const curved = Math.pow(normalized, 1.08);
+  return Math.round(curved * 96);
 }
 
 function detectRarity(character, info) {
   const lower = String(character || '').toLowerCase();
   const confidence = info && typeof info.confidence === 'number' ? info.confidence : 0;
 
-  if (RARITY_KEYWORDS.icon.some(name => lower.includes(name))) return 15;
-  if (RARITY_KEYWORDS.legendary.some(name => lower.includes(name))) return 12;
-  if (RARITY_KEYWORDS.epic.some(name => lower.includes(name))) return 9;
-  if (RARITY_KEYWORDS.rare.some(name => lower.includes(name))) return 6;
+  if (RARITY_KEYWORDS.icon.some(name => lower.includes(name))) return -5;
+  if (RARITY_KEYWORDS.legendary.some(name => lower.includes(name))) return -4;
+  if (RARITY_KEYWORDS.epic.some(name => lower.includes(name))) return -3;
+  if (RARITY_KEYWORDS.rare.some(name => lower.includes(name))) return -2;
 
   for (const [, franchiseData] of Object.entries(FRANCHISE_DATABASE)) {
     const members = Array.isArray(franchiseData) ? franchiseData : franchiseData.members;
     const prestige = franchiseData.prestige || 'major';
 
     if (members.some(member => lower.includes(member))) {
-      if (prestige === 'iconic') return 5;
-      if (prestige === 'legendary') return 4;
-      return 3;
+      if (prestige === 'iconic') return -3;
+      if (prestige === 'legendary') return -2;
+      return -1;
     }
   }
 
   const obscuritySignal = calculateObscuritySignal(character, info);
 
-  if (!info) return 0;
-  if (confidence < 0.35) return 1;
+  if (!info) return -1;
+  if (confidence < 0.35) return 0;
 
-  let bonus = 2;
-  if (info.source === 'wikipedia' || info.source === 'wikidata+wiki') bonus += 2;
-  else if (info.source === 'wikipedia-search' || info.source === 'wikidata') bonus += 1;
+  let bonus = 1;
+  if (info.source === 'wikipedia' || info.source === 'wikidata+wiki') bonus += 1;
 
-  if (obscuritySignal >= 7) bonus += 7;
-  else if (obscuritySignal >= 5) bonus += 5;
-  else if (obscuritySignal >= 3) bonus += 3;
+  if (obscuritySignal >= 7) bonus += 8;
+  else if (obscuritySignal >= 5) bonus += 6;
+  else if (obscuritySignal >= 3) bonus += 4;
   else if (obscuritySignal >= 2) bonus += 2;
 
-  if (confidence >= 0.75) bonus += 2;
-  else if (confidence >= 0.6) bonus += 1;
+  if (confidence >= 0.8) bonus += 2;
+  else if (confidence >= 0.65) bonus += 1;
+  else if (confidence < 0.45) bonus -= 1;
 
-  return Math.max(0, Math.min(12, bonus));
+  return Math.max(-6, Math.min(12, bonus));
 }
 
 function calculateObscuritySignal(character, info) {
@@ -104,12 +104,56 @@ function calculateObscuritySignal(character, info) {
 }
 
 function getRarityTier(bonus) {
-  if (bonus >= 15) return 'Icon';
-  if (bonus >= 12) return 'Legendary';
-  if (bonus >= 9) return 'Epic';
-  if (bonus >= 6) return 'Rare';
-  if (bonus >= 2) return 'Common';
+  if (bonus >= 10) return 'Icon';
+  if (bonus >= 7) return 'Legendary';
+  if (bonus >= 4) return 'Epic';
+  if (bonus >= 2) return 'Rare';
+  if (bonus >= 0) return 'Gold';
+  if (bonus >= -2) return 'Silver';
   return 'Bronze';
+}
+
+function calculateArchetypePowerBonus(character, info) {
+  const lower = `${character || ''} ${info && info.title ? info.title : ''} ${info && info.description ? info.description : ''} ${info && info.profession ? info.profession : ''}`.toLowerCase();
+  const compact = canonicalizeName(character || '');
+
+  if (POWER_LEVELS.cosmic.some(name => lower.includes(name) || compact.includes(canonicalizeName(name)))) return 12;
+  if (POWER_LEVELS.godlike.some(name => lower.includes(name) || compact.includes(canonicalizeName(name)))) return 9;
+  if (POWER_LEVELS.superhuman.some(name => lower.includes(name) || compact.includes(canonicalizeName(name)))) return 6;
+  if (POWER_LEVELS.enhanced.some(name => lower.includes(name) || compact.includes(canonicalizeName(name)))) return 3;
+
+  if (/\b(superhero|metahuman|demigod|cosmic|alien warrior|superhuman)\b/.test(lower)) return 5;
+  if (/\b(athlete|soldier|detective|martial|engineer|scientist|wizard|sorcerer)\b/.test(lower)) return 2;
+  if (/\b(ordinary|civilian|student|citizen|shopkeeper|office worker)\b/.test(lower)) return -1;
+
+  return 0;
+}
+
+function determineEliteCap({ normalizedScore, scenarioFit, rarityBonus, archetypeBonus, confidence }) {
+  if (
+    normalizedScore >= 0.965
+    && scenarioFit >= 1.24
+    && rarityBonus >= 4
+    && archetypeBonus >= 7
+    && confidence >= 0.72
+  ) {
+    return 99;
+  }
+
+  if (
+    normalizedScore >= 0.92
+    && scenarioFit >= 1.14
+    && (rarityBonus >= 2 || archetypeBonus >= 6)
+    && confidence >= 0.6
+  ) {
+    return 98;
+  }
+
+  if (normalizedScore >= 0.86 && scenarioFit >= 1.05) {
+    return 96;
+  }
+
+  return 94;
 }
 
 function detectCharacterType(character, info) {
@@ -191,19 +235,32 @@ function calculateAttributes(character, info, scenario, twist, typeData) {
 
 function calculateAdvancedOVR(score, character, info, scenario, twist) {
   const normalized = Math.max(0, Math.min(1, (score || 0) / SCORE_MAX));
-  const baseOVR = Math.round(38 + (Math.pow(normalized, 0.88) * 42));
+  const baseOVR = Math.round(30 + (Math.pow(normalized, 1.28) * 47));
   const rarityBonus = detectRarity(character, info);
+  const archetypeBonus = calculateArchetypePowerBonus(character, info);
   const typeData = detectCharacterType(character, info);
   const attributes = calculateAttributes(character, info, scenario, twist, typeData);
 
-  const topStats = Object.values(attributes).sort((a, b) => b - a).slice(0, 3);
-  const attributeBonus = Math.round((topStats.reduce((sum, val) => sum + val, 0) / 3) * 0.13);
+  const topStats = Object.values(attributes).sort((a, b) => b - a).slice(0, 4);
+  const topStatsAverage = topStats.reduce((sum, val) => sum + val, 0) / Math.max(1, topStats.length);
+  const attributeBonus = Math.round((topStatsAverage - 50) * 0.16);
   const scenarioFit = calculateScenarioFit(character, info, scenario, twist);
+  const confidenceValue = info && typeof info.confidence === 'number' ? info.confidence : 0;
   const confidenceBonus = info && typeof info.confidence === 'number'
-    ? Math.round(Math.max(0, (info.confidence - 0.4) * 12))
+    ? Math.round((info.confidence - 0.45) * 10)
     : 0;
 
-  let finalOVR = Math.round((baseOVR + rarityBonus + attributeBonus + confidenceBonus) * scenarioFit);
+  const fitAdjustment = Math.round((scenarioFit - 1) * 24);
+  const eliteCap = determineEliteCap({
+    normalizedScore: normalized,
+    scenarioFit,
+    rarityBonus,
+    archetypeBonus,
+    confidence: confidenceValue
+  });
+
+  let finalOVR = Math.round(baseOVR + rarityBonus + archetypeBonus + attributeBonus + confidenceBonus + fitAdjustment);
+  finalOVR = Math.min(eliteCap, finalOVR);
   finalOVR = Math.max(0, Math.min(99, finalOVR));
 
   return {

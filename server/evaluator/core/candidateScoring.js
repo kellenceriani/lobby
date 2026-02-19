@@ -30,6 +30,58 @@ function extractProfessionFromWikipedia(extract) {
   return null;
 }
 
+function classifyEntityPriority(candidate) {
+  const title = String(candidate && candidate.title ? candidate.title : '').toLowerCase();
+  const description = String(candidate && candidate.description ? candidate.description : '').toLowerCase();
+  const categories = Array.isArray(candidate && candidate.categories) ? candidate.categories.map((c) => String(c || '').toLowerCase()).join(' ') : '';
+  const snippet = String(candidate && candidate.searchSnippet ? candidate.searchSnippet : '').toLowerCase();
+  const corpus = `${title} ${description} ${categories} ${snippet}`;
+
+  const fictionalSignals = [
+    /\bfictional\b/,
+    /\bfictional character\b/,
+    /\bcharacter in\b/,
+    /\bprotagonist\b/,
+    /\bantagonist\b/,
+    /\bsuperhero\b/,
+    /\bvillain\b/,
+    /\banime\b/,
+    /\bmanga\b/,
+    /\bcomic(?:\s+book)?\b/,
+    /\bcartoon\b/,
+    /\btelevision character\b/,
+    /\bvideo game character\b/
+  ];
+
+  const realPersonSignals = [
+    /\b(?:is|was) an?\s+(?:american|british|japanese|korean|french|indian|canadian|australian)?\s*(?:actor|actress|athlete|footballer|musician|singer|rapper|composer|author|writer|scientist|historian|politician|philosopher|streamer|creator|youtuber)\b/,
+    /\bbiography\b/,
+    /\bborn\b/,
+    /\bdied\b/,
+    /\bhistorical figure\b/,
+    /\bpublic figure\b/,
+    /\bperson\b/
+  ];
+
+  const mediaObjectSignals = [
+    /\b(?:film|movie|album|song|tv series|television series|video game|novel)\b/,
+    /\b\d{4}\s+(?:film|album|song)\b/,
+    /\bseason\s+\d+\b/,
+    /\bepisode\b/
+  ];
+
+  const hasFictional = fictionalSignals.some((rx) => rx.test(corpus));
+  if (hasFictional) return 'fictional';
+
+  const hasRealPerson = realPersonSignals.some((rx) => rx.test(corpus));
+  if (hasRealPerson) return 'real';
+
+  const hasMediaObject = mediaObjectSignals.some((rx) => rx.test(corpus));
+  if (hasMediaObject) return 'other';
+
+  return 'other';
+}
+
 function scoreInfoCandidate(characterInput, candidate) {
   const normalized = normalizeInfoCandidate(candidate);
   if (!normalized) return { score: 0, confidence: 0, candidate: null };
@@ -49,6 +101,7 @@ function scoreInfoCandidate(characterInput, candidate) {
   const snippet = String(normalized.searchSnippet || '').toLowerCase();
   const contextHints = queryProfile.contextHints.map(h => h.toLowerCase());
   const isSingleTokenQuery = queryVariants.some(queryVariant => queryVariant.split(/\s+/).filter(Boolean).length === 1);
+  const entityPriority = classifyEntityPriority(normalized);
 
   let score = 0;
   const confidenceSignals = {
@@ -173,6 +226,15 @@ function scoreInfoCandidate(characterInput, candidate) {
     confidenceSignals.quality += 0.05;
   }
 
+  if (entityPriority === 'fictional') {
+    confidenceSignals.quality += 0.24;
+    confidenceSignals.nameMatch += 0.05;
+  } else if (entityPriority === 'real') {
+    confidenceSignals.quality += 0.12;
+  } else {
+    confidenceSignals.penalties -= 0.04;
+  }
+
   if ((normalized.description || '').length >= 400) {
     confidenceSignals.quality += 0.06;
   }
@@ -198,6 +260,10 @@ function scoreInfoCandidate(characterInput, candidate) {
   const queryLooksEntitySpecific = entityHints.some(hint => ['object', 'legend', 'name', 'person', 'nickname', 'species'].includes(hint));
   if (isSingleTokenQuery && !queryLooksMedia && !queryLooksEntitySpecific && (mediaLikeTitle || mediaLikeDescription)) {
     confidenceSignals.penalties -= 0.2;
+  }
+
+  if ((mediaLikeTitle || mediaLikeDescription) && entityPriority !== 'fictional') {
+    confidenceSignals.penalties -= 0.12;
   }
 
   const isCharacterListLike = /list of/i.test(String(normalized.title || '')) && /character|fictional/i.test(categoryText);

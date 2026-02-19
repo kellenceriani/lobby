@@ -50,6 +50,53 @@ function getJoinedRoom(socket) {
   return { room, name, roomData };
 }
 
+function getEligibleFinalPlayers(roomData, game) {
+  if (!roomData || !game || !Array.isArray(game.players)) return [];
+  const connectedNames = new Set((roomData.players || []).map((p) => p.name));
+  return game.players
+    .filter((player) => !player.isBot && connectedNames.has(player.name))
+    .map((player) => player.name);
+}
+
+function emitFinalRoundResults(io, room, game) {
+  if (!game || !game.round4Results) return false;
+  if (game.finalResultsEmitted) return true;
+
+  game.finalResultsEmitted = true;
+  io.to(room).emit('finalRoundResults', {
+    winner: game.round4Results.winner || null,
+    isTie: game.round4Results.isTie === true,
+    tiedPlayers: Array.isArray(game.round4Results.tiedPlayers) ? game.round4Results.tiedPlayers : [],
+    roundPoints: game.round4Results.roundPoints,
+    voteCount: {},
+    leaderboard: game.round4Results.leaderboardData,
+    pointBreakdown: game.round4Results.pointBreakdown
+  });
+
+  setTimeout(() => endGame(io, room), 3000);
+  return true;
+}
+
+function updateFinalResultsWaiting(io, room, roomData, game) {
+  if (!game || !game.round4Results || game.finalResultsEmitted) return;
+
+  game.finalResultsReady = game.finalResultsReady || {};
+  const eligiblePlayers = getEligibleFinalPlayers(roomData, game);
+  const readyCount = eligiblePlayers.filter((playerName) => game.finalResultsReady[playerName] === true).length;
+
+  io.to(room).emit('finalResultsWaiting', {
+    readyCount,
+    totalPlayers: eligiblePlayers.length
+  });
+
+  const allReady = eligiblePlayers.length > 0
+    && eligiblePlayers.every((playerName) => game.finalResultsReady[playerName] === true);
+
+  if (allReady) {
+    emitFinalRoundResults(io, room, game);
+  }
+}
+
 function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
@@ -74,6 +121,11 @@ function registerSocketHandlers(io) {
       }
 
       const roomData = rooms[room];
+
+      if (roomData.isGameActive && (!Array.isArray(roomData.players) || roomData.players.length === 0)) {
+        roomData.isGameActive = false;
+        roomData.gameState = null;
+      }
 
       if (roomData.isGameActive) {
         socket.emit('joinError', 'Game already in progress. Try again next round!');
@@ -519,34 +571,14 @@ function registerSocketHandlers(io) {
       const game = roomData.gameState;
       if (!game || !game.round4Results) return;
 
+      const eligiblePlayers = getEligibleFinalPlayers(roomData, game);
+      if (!eligiblePlayers.includes(name)) return;
+
       game.finalResultsReady = game.finalResultsReady || {};
       game.finalResultsReady[name] = true;
 
-      const allReady = game.players.every(p => game.finalResultsReady[p.name] === true);
-      if (!allReady) {
-        io.to(room).emit('finalResultsWaiting', {
-          readyCount: Object.keys(game.finalResultsReady).length,
-          totalPlayers: game.players.length
-        });
-        markRoomsDirty();
-        return;
-      }
-
-      if (game.finalResultsEmitted) return;
-      game.finalResultsEmitted = true;
-
-      io.to(room).emit('finalRoundResults', {
-        winner: game.round4Results.winner || null,
-        isTie: game.round4Results.isTie === true,
-        tiedPlayers: Array.isArray(game.round4Results.tiedPlayers) ? game.round4Results.tiedPlayers : [],
-        roundPoints: game.round4Results.roundPoints,
-        voteCount: {},
-        leaderboard: game.round4Results.leaderboardData,
-        pointBreakdown: game.round4Results.pointBreakdown
-      });
-
+      updateFinalResultsWaiting(io, room, roomData, game);
       markRoomsDirty();
-      setTimeout(() => endGame(io, room), 3000);
     });
 
     socket.on('playAgain', () => {
@@ -577,6 +609,10 @@ function registerSocketHandlers(io) {
 
       if (roomData.gameState && Array.isArray(roomData.gameState.players)) {
         roomData.gameState.players = roomData.gameState.players.filter(p => p.name !== name);
+      }
+
+      if (roomData.gameState) {
+        updateFinalResultsWaiting(io, room, roomData, roomData.gameState);
       }
 
       if (roomData.host === name && roomData.players.length > 0) {

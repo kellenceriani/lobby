@@ -1032,6 +1032,11 @@ function startFinalRound(io, roomCode) {
   const game = rooms[roomCode].gameState;
   game.activePhase = 'AI_EVALUATION';
   game.phaseStartTime = Date.now();
+  game.round4InProgress = false;
+  game.round4Applied = false;
+  game.round4Results = null;
+  game.finalResultsReady = {};
+  game.finalResultsEmitted = false;
 
   // Collect each player's final team (from rounds 1-3)
   game.players.forEach(p => {
@@ -1265,7 +1270,7 @@ function endGame(io, roomCode) {
       rarity: entry.rarity || 'Bronze',
       ovrTierLabel: entry && entry.ovrTier && entry.ovrTier.label ? entry.ovrTier.label : null,
       characterType: entry.characterType || null,
-      draftRound,
+      draftRound: draftedRound,
       pickNumberInRound,
       globalDraftOrder: draftMeta && Number.isFinite(Number(draftMeta.globalDraftOrder)) ? Number(draftMeta.globalDraftOrder) : null,
       draftedAtMs: draftMeta && Number.isFinite(Number(draftMeta.draftedAtMs)) ? Number(draftMeta.draftedAtMs) : null,

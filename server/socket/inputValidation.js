@@ -1,6 +1,5 @@
 const NAME_RE = /^[A-Za-z0-9 _'\-.]{2,20}$/;
 const ROOM_RE = /^[A-Z0-9]{2,10}$/;
-const DRAFT_CHAR_RE = /^[\p{L}\p{N} _'\-.]{1,40}$/u;
 
 function sanitizeName(raw) {
   const name = String(raw || '').trim().replace(/\s+/g, ' ');
@@ -29,7 +28,7 @@ function sanitizeReaction(raw) {
 function sanitizeDraftCharacter(raw) {
   const character = String(raw || '').trim().replace(/\s+/g, ' ');
   if (!character || character.length > 40) return null;
-  if (!DRAFT_CHAR_RE.test(character)) return null;
+  if (/[\p{C}]/u.test(character)) return null;
   return character;
 }
 

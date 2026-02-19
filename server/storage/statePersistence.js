@@ -6,6 +6,41 @@ const SNAPSHOT_FILE = path.join(SNAPSHOT_DIR, 'rooms.snapshot.json');
 
 let pendingWrite = null;
 
+function sanitizeForSnapshot(value) {
+  if (!value) return value;
+
+  const seen = new WeakSet();
+  const transientKeys = new Set([
+    'draftTimeout',
+    'voteTimeout',
+    'roundTimeout',
+    'phaseTimeout',
+    'timer',
+    'timeout'
+  ]);
+
+  try {
+    return JSON.parse(JSON.stringify(value, (key, current) => {
+      if (transientKeys.has(key)) return undefined;
+      if (typeof current === 'function') return undefined;
+
+      if (current && typeof current === 'object') {
+        if (seen.has(current)) return undefined;
+        seen.add(current);
+
+        const ctorName = current.constructor && current.constructor.name;
+        if (ctorName === 'Timeout' || ctorName === 'Immediate') {
+          return undefined;
+        }
+      }
+
+      return current;
+    }));
+  } catch (err) {
+    return null;
+  }
+}
+
 function ensureDir() {
   if (!fs.existsSync(SNAPSHOT_DIR)) {
     fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
@@ -22,7 +57,7 @@ function serializeRooms(rooms) {
       host: room.host || null,
       settings: room.settings || {},
       messages: Array.isArray(room.messages) ? room.messages.slice(-50) : [],
-      gameState: room.gameState || null
+      gameState: sanitizeForSnapshot(room.gameState)
     };
   });
   return out;
@@ -34,8 +69,8 @@ function hydrateRooms(serialized) {
     hydrated[code] = {
       roomCode: room.roomCode || code,
       players: [],
-      gameState: room.gameState || null,
-      isGameActive: !!room.isGameActive,
+      gameState: null,
+      isGameActive: false,
       host: room.host || null,
       settings: room.settings || {
         difficulty: 'normal',

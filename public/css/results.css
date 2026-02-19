@@ -199,6 +199,42 @@
   text-align: center;
 }
 
+.winner-char-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+}
+
+.winner-char-card {
+  margin: 0;
+  background: var(--gradient-card);
+  border: 1px solid #e9d6ff;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xs);
+  text-align: center;
+}
+
+.winner-char-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+.winner-char-card figcaption {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #444;
+}
+
+.winner-char-card.missing figcaption {
+  color: #a03a3a;
+}
+
 .leaderboard-modern {
   list-style: none;
   margin: var(--spacing-xl) 0;

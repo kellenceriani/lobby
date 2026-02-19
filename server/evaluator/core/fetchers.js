@@ -75,6 +75,199 @@ function dedupeByKey(items, keySelector) {
   return out;
 }
 
+function createKnownCharacterRecords() {
+  const records = new Map();
+
+  const addRecord = (name, source, context = []) => {
+    const normalized = normalizeName(name);
+    const compact = canonicalizeName(normalized);
+    if (!normalized || !compact) return;
+
+    const existing = records.get(compact);
+    const base = existing || {
+      canonical: normalized,
+      aliases: new Set(),
+      sources: new Set(),
+      context: new Set()
+    };
+
+    base.aliases.add(normalized);
+    if (source) base.sources.add(source);
+    (Array.isArray(context) ? context : []).forEach((hint) => {
+      const cleanHint = normalizeName(hint);
+      if (cleanHint) base.context.add(cleanHint);
+    });
+
+    records.set(compact, base);
+  };
+
+  Object.entries(CHARACTER_NAME_ALIASES).forEach(([canonical, aliases]) => {
+    const canonicalName = normalizeName(canonical);
+    addRecord(canonicalName, 'alias-index');
+    (Array.isArray(aliases) ? aliases : []).forEach((alias) => {
+      addRecord(alias, 'alias-index', [canonicalName]);
+      const aliasCompact = canonicalizeName(alias);
+      const canonicalCompact = canonicalizeName(canonicalName);
+      const aliasRecord = records.get(aliasCompact);
+      if (aliasRecord && canonicalCompact) aliasRecord.context.add(canonicalName);
+    });
+  });
+
+  Object.entries(FRANCHISE_DATABASE).forEach(([franchise, data]) => {
+    const members = Array.isArray(data) ? data : data.members;
+    (Array.isArray(members) ? members : []).forEach((member) => addRecord(member, 'franchise-db', [franchise, `${franchise} character`]));
+  });
+
+  Object.entries(RARITY_KEYWORDS).forEach(([tier, names]) => {
+    (Array.isArray(names) ? names : []).forEach((name) => addRecord(name, 'rarity-index', [tier]));
+  });
+
+  Object.entries(POWER_LEVELS).forEach(([tier, names]) => {
+    (Array.isArray(names) ? names : []).forEach((name) => addRecord(name, 'power-index', [tier]));
+  });
+
+  return records;
+}
+
+const KNOWN_CHARACTER_RECORDS = createKnownCharacterRecords();
+
+const REFERENCE_PATTERNS = [
+  { regex: /^bats$/i, canonical: 'Batman', hints: ['dc', 'gotham'] },
+  { regex: /^supes$/i, canonical: 'Superman', hints: ['dc', 'krypton'] },
+  { regex: /^spidey$/i, canonical: 'Spider-Man', hints: ['marvel', 'web'] },
+  { regex: /^tchalla$/i, canonical: 'TChalla', hints: ['marvel', 'wakanda'] },
+  { regex: /dark knight/i, canonical: 'Batman', hints: ['dc', 'gotham'] },
+  { regex: /wizard kid.*scar|boy who lived/i, canonical: 'Harry Potter', hints: ['hogwarts', 'harry potter'] },
+  { regex: /pirate king.*straw hat|straw hat guy/i, canonical: 'Monkey D. Luffy', hints: ['one piece', 'pirate'] },
+  { regex: /guy from spy x family/i, canonical: 'Loid Forger', hints: ['spy x family', 'twilight'] },
+  { regex: /witcher.*monster hunter/i, canonical: 'Geralt of Rivia', hints: ['the witcher'] },
+  { regex: /green ogre.*swamp/i, canonical: 'Shrek', hints: ['dreamworks'] },
+  { regex: /blue alien cat.*pandora/i, canonical: 'Neytiri', hints: ['avatar film', 'pandora'] }
+];
+
+function tokensFromText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(token => token && token.length > 2);
+}
+
+function resolveCanonicalAlias(name) {
+  const normalized = normalizeName(name);
+  const compact = canonicalizeName(normalized);
+  if (!normalized || !compact) return null;
+
+  for (const [canonical, aliases] of Object.entries(CHARACTER_NAME_ALIASES)) {
+    const canonicalName = normalizeName(canonical);
+    const aliasList = [canonicalName, ...(Array.isArray(aliases) ? aliases : [])].map(normalizeName).filter(Boolean);
+    const compactAliases = aliasList.map(alias => canonicalizeName(alias));
+    if (!compactAliases.includes(compact)) continue;
+
+    const exactAlias = aliasList.find(alias => canonicalizeName(alias) === compact) || normalized;
+    return {
+      canonical: canonicalName,
+      matchedAlias: exactAlias,
+      source: 'alias-index',
+      confidence: exactAlias.toLowerCase() === canonicalName.toLowerCase() ? 0.84 : 0.76
+    };
+  }
+
+  const record = KNOWN_CHARACTER_RECORDS.get(compact);
+  if (!record) return null;
+
+  return {
+    canonical: normalizeName(record.canonical),
+    matchedAlias: normalized,
+    source: Array.from(record.sources)[0] || 'known-index',
+    confidence: 0.68,
+    contextHints: Array.from(record.context)
+  };
+}
+
+function resolveProxyReference(name) {
+  const normalized = normalizeName(name);
+  if (!normalized) return null;
+
+  const patterned = REFERENCE_PATTERNS.find(entry => entry.regex.test(normalized));
+  if (patterned) {
+    return {
+      canonical: patterned.canonical,
+      matchedAlias: normalized,
+      source: 'proxy-pattern',
+      confidence: 0.72,
+      contextHints: patterned.hints || []
+    };
+  }
+
+  const queryTokens = tokensFromText(normalized);
+  if (!queryTokens.length) return null;
+
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const record of KNOWN_CHARACTER_RECORDS.values()) {
+    const aliases = Array.from(record.aliases);
+    const aliasTokens = aliases.flatMap(alias => tokensFromText(alias));
+    if (!aliasTokens.length) continue;
+
+    const overlap = queryTokens.filter(token => aliasTokens.includes(token)).length;
+    const score = overlap / Math.max(queryTokens.length, 1);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = record;
+    }
+  }
+
+  if (!bestMatch || bestScore < 0.67) return null;
+
+  return {
+    canonical: normalizeName(bestMatch.canonical),
+    matchedAlias: normalized,
+    source: 'proxy-token-overlap',
+    confidence: Math.min(0.74, 0.52 + (bestScore * 0.25)),
+    contextHints: Array.from(bestMatch.context)
+  };
+}
+
+function resolveCharacterSeed(character, profile) {
+  const parsed = profile || parseCharacterQuery(character);
+  const aliasMatch = resolveCanonicalAlias(parsed.baseName || character);
+  const proxyMatch = aliasMatch ? null : resolveProxyReference(parsed.original || character);
+  const resolved = aliasMatch || proxyMatch;
+
+  const baseName = resolved ? normalizeName(resolved.canonical) : normalizeName(parsed.baseName || character);
+  const variants = dedupeByKey(
+    [
+      baseName,
+      ...(resolved && resolved.matchedAlias ? [resolved.matchedAlias] : []),
+      ...getCharacterNameVariants(character),
+      ...getCharacterNameVariants(baseName)
+    ].map(name => normalizeName(name)).filter(Boolean),
+    name => canonicalizeName(name)
+  ).slice(0, 10);
+
+  const contextHints = dedupeByKey(
+    [
+      ...(parsed.contextHints || []),
+      ...(parsed.entityHints || []),
+      ...((resolved && resolved.contextHints) || [])
+    ].map(hint => normalizeName(hint)).filter(Boolean),
+    hint => hint.toLowerCase()
+  ).slice(0, 10);
+
+  return {
+    baseName,
+    variants,
+    contextHints,
+    resolution: resolved ? {
+      source: resolved.source,
+      matchedAlias: normalizeName(resolved.matchedAlias),
+      canonical: baseName,
+      confidence: resolved.confidence
+    } : null
+  };
+}
+
 function buildSearchQueries(baseName, contextHints = [], entityHints = []) {
   const name = normalizeName(baseName);
   if (!name) return [];
@@ -152,18 +345,19 @@ function fallbackFromAliasIndex(character) {
     if (!allCanonical.some(alias => variants.includes(alias))) continue;
 
     const title = all.find(name => name.includes(' ')) || all[0] || character;
+    const directMatch = all.find(name => canonicalizeName(name) === canonicalizeName(character));
     return {
       source: 'local-index',
       title,
       description: `Resolved via local alias index for ${character}.`,
       aliases: all,
       categories: ['character/person name match'],
-      confidence: 0.58,
-      confidenceBand: 'medium',
+      confidence: directMatch ? 0.7 : 0.58,
+      confidenceBand: directMatch ? 'high' : 'medium',
       confidenceSignals: {
-        sourceReliability: 0.16,
-        nameMatch: 0.22,
-        aliasMatch: 0.2,
+        sourceReliability: directMatch ? 0.2 : 0.16,
+        nameMatch: directMatch ? 0.28 : 0.22,
+        aliasMatch: directMatch ? 0.22 : 0.2,
         contextMatch: 0,
         quality: 0,
         penalties: 0
@@ -402,6 +596,7 @@ function mapWikipediaPageToCandidate(page, wikidataMeta = null) {
     source: 'wikipedia',
     title: page.title,
     description: String(page.extract).substring(0, 3200),
+    imageUrl: page.thumbnail && page.thumbnail.source ? page.thumbnail.source : null,
     profession: extractProfessionFromWikipedia(page.extract),
     pageprops: page.pageprops || {},
     categories,
@@ -434,7 +629,7 @@ async function fetchFromWikipediaEnhanced(title) {
   const normalized = normalizeName(title);
   if (!normalized) return null;
 
-  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(normalized)}&prop=extracts|pageprops|categories&cllimit=24&exintro=false&exchars=4200&explaintext=true&format=json&origin=*`;
+  const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(normalized)}&prop=extracts|pageprops|categories|pageimages&cllimit=24&exintro=false&exchars=4200&explaintext=true&pithumbsize=420&format=json&origin=*`;
   const json = await getJson(url);
   const pages = json && json.query && json.query.pages ? Object.values(json.query.pages) : [];
   const page = pages[0];
@@ -499,6 +694,7 @@ async function fetchFromWikipediaSummary(character) {
     source: 'wikipedia',
     title: json.title || normalized,
     description: String(json.extract).substring(0, 1400),
+    imageUrl: (json.thumbnail && json.thumbnail.source) || (json.originalimage && json.originalimage.source) || null,
     categories: [],
     aliases: []
   };
@@ -803,11 +999,32 @@ async function fetchCharacterInfo(character) {
 
   const task = (async () => {
     const profile = parseCharacterQuery(character);
-    const variants = getCharacterNameVariants(character).slice(0, 6);
-    const contextHints = dedupeByKey([...(profile.contextHints || []), ...(profile.entityHints || [])], hint => String(hint || '').toLowerCase()).slice(0, 8);
+    const seed = resolveCharacterSeed(character, profile);
+    const variants = seed.variants;
+    const contextHints = seed.contextHints;
 
-    const baseName = profile.baseName || character;
+    const baseName = seed.baseName || profile.baseName || character;
     const stagedCandidates = [];
+
+    if (seed.resolution && seed.resolution.canonical) {
+      stagedCandidates.push(normalizeInfoCandidate({
+        source: 'local-index',
+        title: seed.resolution.canonical,
+        description: `Resolved from alias/proxy mapping for ${character}.`,
+        aliases: dedupeByKey([seed.resolution.matchedAlias, seed.resolution.canonical], alias => canonicalizeName(alias)),
+        categories: ['character/person name match', 'alias/proxy resolution'],
+        confidence: Math.max(0.7, Number(seed.resolution.confidence) || 0.7),
+        confidenceBand: (Number(seed.resolution.confidence) || 0.7) >= 0.78 ? 'high' : 'medium',
+        confidenceSignals: {
+          sourceReliability: 0.2,
+          nameMatch: 0.24,
+          aliasMatch: 0.22,
+          contextMatch: 0.08,
+          quality: 0,
+          penalties: 0
+        }
+      }));
+    }
 
     const collectCandidates = (items) => {
       (Array.isArray(items) ? items : [items]).forEach((item) => {
@@ -825,6 +1042,21 @@ async function fetchCharacterInfo(character) {
         return `${source}|${title}|${desc}`;
       }
     );
+
+    const maybePreferSeedCandidate = (candidateSet, picked) => {
+      if (!seed.resolution || !picked) return picked;
+      if (isStrongTitleLink(seed.resolution.canonical, picked.title || '')) return picked;
+
+      const seedCandidate = (Array.isArray(candidateSet) ? candidateSet : []).find((candidate) => {
+        if (!candidate || candidate.source !== 'local-index') return false;
+        return canonicalizeName(candidate.title || '') === canonicalizeName(seed.resolution.canonical || '');
+      });
+
+      if (!seedCandidate) return picked;
+      const pickedConfidence = Number(picked.confidence) || 0;
+      if (pickedConfidence >= 0.94) return picked;
+      return seedCandidate;
+    };
 
     const runWithRetries = async (fn, attempts = 2) => {
       for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -845,19 +1077,30 @@ async function fetchCharacterInfo(character) {
       () => fetchFromWikidata(baseName, contextHints)
     ];
 
+    const seedVariantFetches = variants
+      .filter(variant => canonicalizeName(variant) !== canonicalizeName(baseName))
+      .slice(0, 3)
+      .flatMap(variant => [
+        () => fetchFromWikipediaEnhanced(variant),
+        () => fetchFromWikipediaSearchEnhanced(variant, contextHints)
+      ]);
+
+    stageOneFetches.push(...seedVariantFetches);
+
     for (const runFetch of stageOneFetches) {
       const candidate = await runWithRetries(runFetch, 2);
       collectCandidates(candidate);
 
       const stageCandidates = toUniqueCandidates();
-      const stageBest = pickBestCandidate(character, stageCandidates);
+      const stageBest = maybePreferSeedCandidate(stageCandidates, pickBestCandidate(character, stageCandidates));
       if (stageBest && stageBest.confidence >= 0.75) {
         const resolved = {
           ...stageBest,
           lookupMeta: {
             queriedVariants: variants,
             candidateCount: stageCandidates.length,
-            contextHints
+            contextHints,
+            resolution: seed.resolution
           }
         };
         setCachedCharacter(character, resolved);
@@ -866,14 +1109,15 @@ async function fetchCharacterInfo(character) {
     }
 
     let candidates = toUniqueCandidates();
-    let best = pickBestCandidate(character, candidates);
+    let best = maybePreferSeedCandidate(candidates, pickBestCandidate(character, candidates));
     if (best && best.confidence >= 0.72) {
       const resolved = {
         ...best,
         lookupMeta: {
           queriedVariants: variants,
           candidateCount: candidates.length,
-          contextHints
+          contextHints,
+          resolution: seed.resolution
         }
       };
       setCachedCharacter(character, resolved);
@@ -897,14 +1141,15 @@ async function fetchCharacterInfo(character) {
     collectCandidates(stageTwoResults);
 
     candidates = toUniqueCandidates();
-    best = pickBestCandidate(character, candidates);
+    best = maybePreferSeedCandidate(candidates, pickBestCandidate(character, candidates));
     if (best) {
       const resolved = {
         ...best,
         lookupMeta: {
           queriedVariants: variants,
           candidateCount: candidates.length,
-          contextHints
+          contextHints,
+          resolution: seed.resolution
         }
       };
       setCachedCharacter(character, resolved);
@@ -923,14 +1168,15 @@ async function fetchCharacterInfo(character) {
       collectCandidates(candidate);
     }
     candidates = toUniqueCandidates();
-    best = pickBestCandidate(character, candidates);
+    best = maybePreferSeedCandidate(candidates, pickBestCandidate(character, candidates));
     if (best) {
       const resolved = {
         ...best,
         lookupMeta: {
           queriedVariants: variants,
           candidateCount: candidates.length,
-          contextHints
+          contextHints,
+          resolution: seed.resolution
         }
       };
       setCachedCharacter(character, resolved);

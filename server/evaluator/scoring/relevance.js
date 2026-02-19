@@ -239,11 +239,12 @@ function assessScenarioAndTwist(character, info, scenario, twist) {
 }
 
 function mapFitCountToPoints(count) {
-  if (count >= 10) return 8;
-  if (count >= 7) return 6;
-  if (count >= 4) return 4;
-  if (count >= 2) return 2;
-  if (count >= 1) return 1;
+  if (count >= 9) return 8;
+  if (count >= 6) return 6;
+  if (count >= 4) return 5;
+  if (count >= 3) return 4;
+  if (count >= 2) return 3;
+  if (count >= 1) return 2;
   return 0;
 }
 
@@ -264,14 +265,41 @@ function scoreRelevance(character, info, scenario, twist) {
 
   const capability = calculateCapabilityFit(character, info, scenario, twist);
   const assessment = assessScenarioAndTwist(character, info, scenario, twist);
+  const infoConfidence = Number(info.confidence) || 0;
+  const traitBreadthPoints = assessment.profile.rankedTraits.length >= 6
+    ? 2
+    : assessment.profile.rankedTraits.length >= 3
+      ? 1
+      : 0;
+  const evidenceLift = infoConfidence >= 0.75
+    ? 2
+    : infoConfidence >= 0.5
+      ? 1
+      : 0;
 
   const semanticPoints = mapFitCountToPoints(scenarioFit.totalCount) + mapFitCountToPoints(twistFit.totalCount);
   const domainPoints = Math.min(4, domains.length * 2);
-  const capabilityPoints = Math.min(8, capability.totalPoints);
-  const feasibilityPoints = assessment.scenarioFeasibility.score >= 8 ? 4 : assessment.scenarioFeasibility.score >= 5 ? 2 : assessment.scenarioFeasibility.score >= 3 ? 1 : 0;
+  const capabilityPoints = Math.min(10, Math.round(capability.totalPoints * 0.8));
+  const feasibilityPoints = assessment.scenarioFeasibility.score >= 8 ? 5 : assessment.scenarioFeasibility.score >= 6 ? 3 : assessment.scenarioFeasibility.score >= 4 ? 2 : assessment.scenarioFeasibility.score >= 3 ? 1 : 0;
   const twistPoints = assessment.twistImpact.helps ? Math.min(4, assessment.twistImpact.impactScore) : assessment.twistImpact.hurts ? -Math.min(4, Math.abs(assessment.twistImpact.impactScore)) : 0;
 
-  const total = Math.max(-6, Math.min(24, semanticPoints + domainPoints + capabilityPoints + feasibilityPoints + twistPoints));
+  const preTotal = semanticPoints + domainPoints + capabilityPoints + feasibilityPoints + twistPoints + traitBreadthPoints + evidenceLift;
+  const feasibilityFloor = assessment.scenarioFeasibility.thrive
+    ? 4
+    : assessment.scenarioFeasibility.canDo
+      ? 3
+      : 0;
+
+  let total = preTotal;
+  if (feasibilityFloor > 0 && total < feasibilityFloor) {
+    total = feasibilityFloor;
+  }
+
+  if (scenarioFit.totalCount === 0 && twistFit.totalCount === 0 && !assessment.scenarioFeasibility.canDo) {
+    total = Math.min(total, 0);
+  }
+
+  total = Math.max(-6, Math.min(24, total));
 
   const note = [
     `Keyword fit: S${scenarioFit.totalCount}/T${twistFit.totalCount}`,

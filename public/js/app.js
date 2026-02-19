@@ -867,6 +867,25 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function buildMissingWinnerImage() {
+  const text = 'Womp Womp, Shoulda picked a real thing bro';
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#2b2b2b"/>
+          <stop offset="100%" stop-color="#1d1d1d"/>
+        </linearGradient>
+      </defs>
+      <rect width="360" height="360" fill="url(#bg)" rx="22"/>
+      <text x="180" y="150" fill="#f5f5f5" font-size="20" font-family="Arial, sans-serif" text-anchor="middle">Womp Womp,</text>
+      <text x="180" y="185" fill="#f5f5f5" font-size="20" font-family="Arial, sans-serif" text-anchor="middle">Shoulda picked a</text>
+      <text x="180" y="220" fill="#f5f5f5" font-size="20" font-family="Arial, sans-serif" text-anchor="middle">real thing bro</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
 function formatNameList(names) {
   const safeNames = names.map(escapeHtml);
   if (safeNames.length <= 1) return safeNames[0] || '';
@@ -1000,49 +1019,8 @@ function readyForNextRound() {
 socket.on('finalRoundResults', (data) => {
   clearTimers();
   playWinSound();
-  document.getElementById('resultRound').textContent = '4 (FINAL)';
-
-  const winnerBox = document.getElementById('roundWinner');
-  const winnerView = buildRoundWinnerHTML(data, true);
-  if (winnerBox) {
-    winnerBox.classList.remove('tie', 'animate-in');
-    winnerBox.innerHTML = winnerView.html;
-    if (winnerView.isTie) winnerBox.classList.add('tie');
-    void winnerBox.offsetWidth;
-    winnerBox.classList.add('animate-in');
-  }
-
-  const breakdownContainer = document.getElementById('resultsBreakdown');
-  if (breakdownContainer) {
-    let breakdownHTML = '';
-    const sorted = [...data.leaderboard].sort((a, b) => b.roundScore - a.roundScore);
-    const topRoundScore = sorted.length ? sorted[0].roundScore : 0;
-    sorted.forEach((playerEntry, idx) => {
-      const medal = ['🥇', '🥈', '🥉'][idx] || '•';
-      breakdownHTML += `
-        <div class="player-breakdown ${playerEntry.roundScore === topRoundScore ? 'top-score' : ''}" style="--result-index:${idx};">
-          <div class="breakdown-header">${medal} ${playerEntry.name}</div>
-          <div class="breakdown-points">+${playerEntry.roundScore} points</div>
-          <div class="breakdown-details">
-            ${playerEntry.breakdown.map(line => {
-              const isNegative = line.includes('-') || line.toLowerCase().includes("didn't vote");
-              return `<div class="breakdown-line ${isNegative ? 'negative' : ''}">${line}</div>`;
-            }).join('')}
-          </div>
-        </div>
-      `;
-    });
-    breakdownContainer.innerHTML = breakdownHTML;
-  }
-
-  resetResultsDetails();
-
-  const readyButton = document.getElementById('nextRoundReadyBtn');
-  if (readyButton) {
-    readyButton.style.display = 'none';
-  }
-
-  showScreen('resultsScreen');
+  const tie = data && data.isTie === true;
+  showToast(tie ? '🤝 Final round locked with a tie.' : '🏁 Final round tally locked.', 'info', 2200);
 });
 
 // ========================
@@ -1052,6 +1030,32 @@ socket.on('gameEnded', (data) => {
   clearTimers();
   playWinSound();
   setTimeout(() => createConfetti(), 300);
+
+  const placeholderImage = buildMissingWinnerImage();
+  const winnerGallery = document.getElementById('finalWinnerCharacters');
+  if (winnerGallery) {
+    const winnerCharacters = Array.isArray(data.winnerCharacters) ? data.winnerCharacters : [];
+    if (winnerCharacters.length) {
+      winnerGallery.innerHTML = winnerCharacters.map((entry) => {
+        const safeName = escapeHtml(entry && entry.character ? entry.character : 'Unknown');
+        const imageUrl = entry && entry.imageUrl ? String(entry.imageUrl) : placeholderImage;
+        return `
+          <figure class="winner-char-card ${entry && entry.imageUrl ? '' : 'missing'}">
+            <img
+              src="${escapeHtml(imageUrl)}"
+              alt="${safeName}"
+              loading="lazy"
+              decoding="async"
+              onerror="this.onerror=null;this.src='${placeholderImage}';this.closest('figure')?.classList.add('missing');"
+            >
+            <figcaption>${safeName}</figcaption>
+          </figure>
+        `;
+      }).join('');
+    } else {
+      winnerGallery.innerHTML = '';
+    }
+  }
 
   const final = document.getElementById('finalLeaderboard');
   final.innerHTML = '';

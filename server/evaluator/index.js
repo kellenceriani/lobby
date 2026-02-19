@@ -144,6 +144,8 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
     emotion: mapScoreToEmotion(roundedScore),
     score: roundedScore,
     ovr: ovrData.ovr,
+    imageUrl: scoringInfo && scoringInfo.imageUrl ? scoringInfo.imageUrl : null,
+    infoSource: scoringInfo && scoringInfo.source ? scoringInfo.source : null,
     ovrTier: ovrData.tier,
     attributes: ovrData.attributes,
     rarity: ovrData.rarity,

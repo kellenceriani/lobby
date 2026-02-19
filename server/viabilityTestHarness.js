@@ -1,5 +1,16 @@
 const { scoreCharacter, fetchCharacterInfo } = require('./evaluator');
 
+const ALIAS_PROBES = [
+  { input: 'Bats', expected: 'Batman' },
+  { input: 'Supes', expected: 'Superman' },
+  { input: 'Spidey', expected: 'Spider-Man' },
+  { input: 'The Dark Knight', expected: 'Batman' },
+  { input: 'The Boy Who Lived', expected: 'Harry Potter' },
+  { input: 'wizard kid with scar', expected: 'Harry Potter' },
+  { input: 'pirate king straw hat guy', expected: 'Monkey D. Luffy' },
+  { input: 'guy from spy x family', expected: 'Loid Forger' }
+];
+
 const SCENARIOS = [
   { name: 'city-defense', scenario: 'DEFEND A CITY POWER GRID', twist: 'WITH BURST POWER ONLY' },
   { name: 'mystery-heist', scenario: 'STOP A RELIC HEIST', twist: 'WHILE EVIDENCE SELF-DELETES' },
@@ -122,6 +133,64 @@ function parseFeasibility(notes) {
   return match ? Number(match[1]) : null;
 }
 
+function normalizeCompact(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function stdDev(values) {
+  const nums = (Array.isArray(values) ? values : []).filter(v => Number.isFinite(v));
+  if (nums.length <= 1) return 0;
+  const mean = nums.reduce((sum, v) => sum + v, 0) / nums.length;
+  const variance = nums.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / nums.length;
+  return Number(Math.sqrt(variance).toFixed(3));
+}
+
+function extractStepPoints(result, stepName) {
+  const steps = result && result.breakdown && Array.isArray(result.breakdown.scoreBreakdown)
+    ? result.breakdown.scoreBreakdown
+    : [];
+  const step = steps.find(entry => String(entry.step || '').toLowerCase() === String(stepName || '').toLowerCase());
+  return step && Number.isFinite(step.points) ? step.points : 0;
+}
+
+function isAliasResolutionMatch(info, expected) {
+  if (!info) return false;
+
+  const expectedCompact = normalizeCompact(expected);
+  const titleCompact = normalizeCompact(info.title || '');
+  if (titleCompact && (titleCompact.includes(expectedCompact) || expectedCompact.includes(titleCompact))) return true;
+
+  const aliases = Array.isArray(info.aliases) ? info.aliases : [];
+  return aliases.some(alias => {
+    const aliasCompact = normalizeCompact(alias);
+    return aliasCompact && (aliasCompact.includes(expectedCompact) || expectedCompact.includes(aliasCompact));
+  });
+}
+
+async function runAliasResolutionAudit() {
+  const rows = [];
+  for (const probe of ALIAS_PROBES) {
+    const info = await fetchCharacterInfo(probe.input);
+    const passed = isAliasResolutionMatch(info, probe.expected);
+    rows.push({
+      input: probe.input,
+      expected: probe.expected,
+      passed,
+      source: info && info.source ? info.source : 'none',
+      title: info && info.title ? info.title : 'N/A',
+      confidence: info && Number.isFinite(info.confidence) ? Number(info.confidence.toFixed(3)) : 0
+    });
+  }
+
+  return {
+    total: rows.length,
+    passed: rows.filter(row => row.passed).length,
+    rows
+  };
+}
+
 async function evaluateEntry(entry) {
   const info = await fetchCharacterInfo(entry.name);
 
@@ -138,6 +207,12 @@ async function evaluateEntry(entry) {
     : 0;
 
   const avgOVR = Number((scenarioResults.reduce((sum, result) => sum + (result.ovr || 0), 0) / scenarioResults.length).toFixed(2));
+  const ovrStdDev = stdDev(scenarioResults.map(result => Number(result.ovr) || 0));
+  const feasibilityStdDev = stdDev(feasibilityScores);
+  const avgRelevancePoints = Number((scenarioResults.reduce((sum, result) => sum + extractStepPoints(result, 'Scenario/Twist Relevance'), 0) / scenarioResults.length).toFixed(2));
+  const avgDraftedScenarioBonus = Number((scenarioResults.reduce((sum, result) => sum + extractStepPoints(result, 'Original Scenario Fit (Drafted)'), 0) / scenarioResults.length).toFixed(2));
+  const avgDraftedTwistBonus = Number((scenarioResults.reduce((sum, result) => sum + extractStepPoints(result, 'Original Twist Fit (Drafted)'), 0) / scenarioResults.length).toFixed(2));
+
   const source = info && info.source ? info.source : 'none';
   const confidence = info && typeof info.confidence === 'number' ? Number(info.confidence.toFixed(3)) : 0;
   const rarity = scenarioResults[0] && scenarioResults[0].rarity ? scenarioResults[0].rarity : 'Bronze';
@@ -149,8 +224,52 @@ async function evaluateEntry(entry) {
     confidence,
     rarity,
     avgOVR,
+    ovrStdDev,
     avgFeasibility,
+    feasibilityStdDev,
+    avgRelevancePoints,
+    avgDraftedScenarioBonus,
+    avgDraftedTwistBonus,
     resolved: confidence >= 0.35
+  };
+}
+
+function analyzeBalance(results) {
+  const all = Array.isArray(results) ? results : [];
+  if (!all.length) return { warnings: [], critical: [] };
+
+  const avgRelevance = Number((all.reduce((sum, row) => sum + (row.avgRelevancePoints || 0), 0) / all.length).toFixed(2));
+  const avgDraftedScenario = Number((all.reduce((sum, row) => sum + (row.avgDraftedScenarioBonus || 0), 0) / all.length).toFixed(2));
+  const avgDraftedTwist = Number((all.reduce((sum, row) => sum + (row.avgDraftedTwistBonus || 0), 0) / all.length).toFixed(2));
+  const ovrSpread = stdDev(all.map(row => row.avgOVR));
+  const feasibilitySpread = stdDev(all.map(row => row.avgFeasibility));
+
+  const warnings = [];
+  const critical = [];
+
+  if (ovrSpread < 2.2) {
+    warnings.push(`OVR spread is very flat (stddev ${ovrSpread}). Evaluations may be over-compressed.`);
+  }
+  if (feasibilitySpread < 1.1) {
+    warnings.push(`Scenario feasibility spread is low (stddev ${feasibilitySpread}). Can-do vs struggles separation may be weak.`);
+  }
+  if (avgDraftedScenario > 2.1 || avgDraftedTwist > 2.1) {
+    warnings.push(`Drafted fit bonuses are high on average (scenario ${avgDraftedScenario}, twist ${avgDraftedTwist}). Consider tightening bonus caps.`);
+  }
+  if (avgRelevance < 2.0) {
+    critical.push(`Average scenario/twist relevance points are too low (${avgRelevance}). Relevance extraction may be underpowered.`);
+  }
+
+  return {
+    metrics: {
+      avgRelevance,
+      avgDraftedScenario,
+      avgDraftedTwist,
+      ovrSpread,
+      feasibilitySpread
+    },
+    warnings,
+    critical
   };
 }
 
@@ -169,6 +288,7 @@ function summarize(results) {
     total: results.length,
     resolved: results.filter(result => result.resolved).length,
     avgConfidence: Number((results.reduce((sum, row) => sum + row.confidence, 0) / results.length).toFixed(3)),
+    avgRelevancePoints: Number((results.reduce((sum, row) => sum + row.avgRelevancePoints, 0) / results.length).toFixed(2)),
     rareOrHigher: results.filter(row => ['Rare', 'Epic', 'Legendary', 'Icon'].includes(row.rarity)).length,
     byBucket
   };
@@ -181,12 +301,19 @@ const { scenarios: ACTIVE_SCENARIOS, buckets: ACTIVE_BUCKETS } = applyRunLimits(
   const entries = flattenBuckets(ACTIVE_BUCKETS);
   console.log(`Running viability harness (${RUN_CONFIG.mode}) for ${entries.length} entries across ${ACTIVE_SCENARIOS.length} scenarios...`);
 
+  const aliasAudit = await runAliasResolutionAudit();
+  console.log(`Alias resolution audit: ${aliasAudit.passed}/${aliasAudit.total} passed`);
+  aliasAudit.rows.forEach(row => {
+    const state = row.passed ? 'PASS' : 'FAIL';
+    console.log(`[Alias:${state}] ${row.input} -> expected ${row.expected} | title=${row.title} | src=${row.source} | conf=${row.confidence.toFixed(3)}`);
+  });
+
   const results = [];
   for (const entry of entries) {
     try {
       const row = await evaluateEntry(entry);
       results.push(row);
-      console.log(`${row.bucket.padEnd(12)} | ${row.name.padEnd(22)} | src=${row.source.padEnd(15)} conf=${row.confidence.toFixed(3)} ovr=${row.avgOVR.toFixed(2)} feas=${row.avgFeasibility.toFixed(2)} rarity=${row.rarity}`);
+      console.log(`${row.bucket.padEnd(12)} | ${row.name.padEnd(22)} | src=${row.source.padEnd(15)} conf=${row.confidence.toFixed(3)} ovr=${row.avgOVR.toFixed(2)} feas=${row.avgFeasibility.toFixed(2)} rel=${row.avgRelevancePoints.toFixed(2)} ovrσ=${row.ovrStdDev.toFixed(2)} rarity=${row.rarity}`);
     } catch (error) {
       console.log(`${entry.bucket.padEnd(12)} | ${entry.name.padEnd(22)} | ERROR: ${error.message}`);
       results.push({
@@ -196,27 +323,46 @@ const { scenarios: ACTIVE_SCENARIOS, buckets: ACTIVE_BUCKETS } = applyRunLimits(
         confidence: 0,
         rarity: 'Bronze',
         avgOVR: 0,
+        ovrStdDev: 0,
         avgFeasibility: 0,
+        feasibilityStdDev: 0,
+        avgRelevancePoints: 0,
+        avgDraftedScenarioBonus: 0,
+        avgDraftedTwistBonus: 0,
         resolved: false
       });
     }
   }
 
   const summary = summarize(results);
+  const balance = analyzeBalance(results);
   console.log('\n=== SUMMARY ===');
   console.log(`Resolved >=0.35 confidence: ${summary.resolved}/${summary.total}`);
   console.log(`Average confidence: ${summary.avgConfidence}`);
+  console.log(`Average relevance points: ${summary.avgRelevancePoints}`);
   console.log(`Rare+ rarity count: ${summary.rareOrHigher}/${summary.total}`);
   summary.byBucket.forEach(bucket => {
     console.log(`- ${bucket.bucket}: resolved ${bucket.resolved}/${bucket.total}, avgConf ${bucket.avgConf}, avgOVR ${bucket.avgOVR}, rare+ ${bucket.rareOrHigher}/${bucket.total}`);
   });
 
+  console.log('\n=== BALANCE DIAGNOSTICS ===');
+  console.log(`avgRelevance=${balance.metrics.avgRelevance} | avgDraftScenario=${balance.metrics.avgDraftedScenario} | avgDraftTwist=${balance.metrics.avgDraftedTwist}`);
+  console.log(`ovrSpread(stddev)=${balance.metrics.ovrSpread} | feasibilitySpread(stddev)=${balance.metrics.feasibilitySpread}`);
+  if (!balance.warnings.length && !balance.critical.length) {
+    console.log('No major balance warnings detected.');
+  } else {
+    balance.warnings.forEach(msg => console.log(`WARN: ${msg}`));
+    balance.critical.forEach(msg => console.log(`CRITICAL: ${msg}`));
+  }
+
   const qualityGatePassed =
     summary.resolved >= Math.ceil(summary.total * 0.8) &&
-    summary.byBucket.every(bucket => bucket.resolved >= Math.ceil(bucket.total * 0.6));
+    summary.byBucket.every(bucket => bucket.resolved >= Math.ceil(bucket.total * 0.6)) &&
+    aliasAudit.passed >= Math.ceil(aliasAudit.total * 0.75) &&
+    balance.critical.length === 0;
 
   if (!qualityGatePassed) {
-    console.error('\nQuality gate failed: insufficient coverage for broad-name retrieval.');
+    console.error('\nQuality gate failed: coverage, alias fidelity, or balance diagnostics did not meet thresholds.');
     process.exitCode = 1;
   }
 })();

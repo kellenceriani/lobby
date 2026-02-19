@@ -459,10 +459,24 @@ function registerSocketHandlers(io) {
           leaderboard: leaderboardData
         };
 
+        const evalLeaderboard = leaderboardData.map((entry) => {
+          const teamRow = scored.finalLeaderboard.find((row) => row.playerName === entry.name) || {};
+          return {
+            playerName: entry.name,
+            totalOVR: typeof teamRow.totalOVR === 'number' ? teamRow.totalOVR : 0,
+            chemistryBonus: typeof teamRow.chemistryBonus === 'number' ? teamRow.chemistryBonus : 0,
+            topPick: teamRow.topPick || 'N/A',
+            topPickImageUrl: teamRow.topPickImageUrl || null,
+            round4Points: entry.roundScore,
+            totalScore: entry.score,
+            previousTotalScore: entry.score - entry.roundScore
+          };
+        });
+
         const payload = {
           evaluationId,
           allTeamEvaluations: scored.teamEvaluations,
-          finalLeaderboard: scored.finalLeaderboard,
+          finalLeaderboard: evalLeaderboard,
           isTie,
           tiedPlayers: tiedTeams
         };

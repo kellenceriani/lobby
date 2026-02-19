@@ -3,6 +3,8 @@
 const CHEMISTRY_MIN = 0;
 const CHEMISTRY_MAX = 25; // Increased from 15 for deeper synergies
 const CHEMISTRY_BASE = 5;
+const CHEMISTRY_EFFECT_MIN = -10;
+const CHEMISTRY_EFFECT_MAX = 14;
 
 // Relationship Database - Known Allies, Rivals, and Enemies
 const RELATIONSHIPS = {
@@ -194,6 +196,22 @@ function addDetail(details, label, bonus, matches, overlapTracker = null) {
   return adjustedBonus;
 }
 
+function scaleChemistryToSignedEffect(rawChemistryScore, rosterSize) {
+  const safeRosterSize = Math.max(2, Number(rosterSize) || 2);
+  const centered = Number(rawChemistryScore) - CHEMISTRY_BASE;
+
+  if (!Number.isFinite(centered)) return 0;
+
+  const positiveScale = safeRosterSize >= 6 ? 0.6 : safeRosterSize >= 4 ? 0.72 : 0.82;
+  const negativeScale = safeRosterSize >= 6 ? 0.68 : safeRosterSize >= 4 ? 0.8 : 0.9;
+
+  const scaled = centered >= 0
+    ? centered * positiveScale
+    : centered * negativeScale;
+
+  return Math.max(CHEMISTRY_EFFECT_MIN, Math.min(CHEMISTRY_EFFECT_MAX, Math.round(scaled * 10) / 10));
+}
+
 function matchByKeywords(names, keywords) {
   return names.filter(name => keywords.some(kw => name.includes(kw)));
 }
@@ -383,8 +401,21 @@ function calculateChemistryDetails(characterNames) {
   }
 
   // ===== FINAL CALCULATION =====
-  const finalBonus = Math.max(CHEMISTRY_MIN, Math.min(CHEMISTRY_MAX, Math.round(bonus * 10) / 10));
-  return { bonus: finalBonus, details };
+  const boundedRaw = Math.max(CHEMISTRY_MIN, Math.min(CHEMISTRY_MAX, Math.round(bonus * 10) / 10));
+  const effect = scaleChemistryToSignedEffect(boundedRaw, characterNames.length);
+
+  return {
+    bonus: effect,
+    details,
+    rawScore: boundedRaw,
+    base: CHEMISTRY_BASE,
+    bounds: {
+      rawMin: CHEMISTRY_MIN,
+      rawMax: CHEMISTRY_MAX,
+      effectMin: CHEMISTRY_EFFECT_MIN,
+      effectMax: CHEMISTRY_EFFECT_MAX
+    }
+  };
 }
 
 function calculateChemistryBonus(characterNames) {

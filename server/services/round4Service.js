@@ -63,6 +63,8 @@ async function evaluateRound4FromGame(game) {
         totalOVR: teamOVR,
         chemistryBonus,
         chemistryDetails: chemistryInfo.details,
+        chemistryRawScore: typeof chemistryInfo.rawScore === 'number' ? chemistryInfo.rawScore : null,
+        chemistryBase: typeof chemistryInfo.base === 'number' ? chemistryInfo.base : null,
         averageOVR,
         topPick: topPickEval ? topPickEval.character : 'N/A',
         highestOVR: topPickEval ? topPickEval.ovr : 0,
@@ -83,7 +85,10 @@ async function evaluateRound4FromGame(game) {
     pointBreakdown[playerName] = [
       `Team OVR: ${teamSummary.totalOVR}`,
       `Average OVR: ${teamSummary.averageOVR}`,
-      `Chemistry Bonus: +${teamSummary.chemistryBonus}`,
+      `Chemistry Adjustment: ${teamSummary.chemistryBonus >= 0 ? '+' : ''}${teamSummary.chemistryBonus}`,
+      ...(typeof teamSummary.chemistryRawScore === 'number' && typeof teamSummary.chemistryBase === 'number'
+        ? [`Chemistry Raw Score: ${teamSummary.chemistryRawScore} (base ${teamSummary.chemistryBase})`]
+        : []),
       `Round 4 Base (${formula.safeOVR} × 2.35): +${formula.basePoints}`,
       `Competitive Bonus (OVR > 60): +${formula.competitivePoints}`,
       `Elite Bonus (OVR > 80 curve): +${formula.elitePoints}`,
@@ -97,7 +102,8 @@ async function evaluateRound4FromGame(game) {
       playerName,
       totalOVR: teamData.teamSummary.totalOVR,
       chemistryBonus: teamData.teamSummary.chemistryBonus,
-      topPick: teamData.teamSummary.topPick
+      topPick: teamData.teamSummary.topPick,
+      topPickImageUrl: (teamData.evaluations.find((entry) => entry.character === teamData.teamSummary.topPick) || {}).imageUrl || null
     }))
     .sort((a, b) => b.totalOVR - a.totalOVR);
 

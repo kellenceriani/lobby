@@ -385,6 +385,8 @@ function displayFinalLeaderboard() {
       <tr>
         <th>Rank</th>
         <th>Team</th>
+        <th>R4 Pts</th>
+        <th>Total Pts</th>
         <th>Team OVR</th>
         <th>Chemistry</th>
         <th>Top Pick</th>
@@ -395,6 +397,8 @@ function displayFinalLeaderboard() {
         <tr class="rank-${idx + 1}">
           <td>${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '#' + (idx + 1)}</td>
           <td><strong>${escapeHtml(team.playerName)}</strong></td>
+          <td><strong>${typeof team.round4Points === 'number' ? team.round4Points : '-'}</strong></td>
+          <td><strong>${typeof team.totalScore === 'number' ? team.totalScore : '-'}</strong></td>
           <td><strong>${team.totalOVR}</strong></td>
           <td>${team.chemistryBonus >= 0 ? '+' : ''}${team.chemistryBonus}</td>
           <td>${escapeHtml(team.topPick)}</td>

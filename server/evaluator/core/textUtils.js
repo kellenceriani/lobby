@@ -13,7 +13,11 @@ function normalizeName(name) {
 }
 
 function canonicalizeName(name) {
-  return normalizeName(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalizeName(name)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 function stripDiacritics(value) {
@@ -252,6 +256,20 @@ function getCharacterNameVariants(name) {
 
   if (normalized.includes('-')) variants.add(normalized.replace(/-/g, ' '));
   if (normalized.includes(' ')) variants.add(normalized.replace(/\s+/g, '-'));
+
+  const transliterated = baseName
+    .split(/\s+/)
+    .map((token) => {
+      if (/ou$/i.test(token) && token.length >= 4) return token.replace(/ou$/i, 'o');
+      if (/oo$/i.test(token) && token.length >= 4) return token.replace(/oo$/i, 'o');
+      return token;
+    })
+    .join(' ')
+    .trim();
+
+  if (transliterated && canonicalizeName(transliterated) !== canonicalizeName(baseName)) {
+    variants.add(transliterated);
+  }
 
   return Array.from(variants).map(normalizeName).filter(Boolean);
 }

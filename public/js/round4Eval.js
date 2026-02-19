@@ -552,10 +552,16 @@ function openOVRBreakdown(evalData) {
         <div class="ovr-breakdown-label">Scenario Fit</div>
         <div class="ovr-breakdown-value">×${ovr.scenarioMultiplier.toFixed(2)} (${percentages.scenarioEffect > 0 ? '+' : ''}${percentages.scenarioEffect || 0}%)</div>
       </div>
+      ${typeof ovr.scenarioDelta === 'number' ? `
+      <div class="ovr-breakdown-item">
+        <div class="ovr-breakdown-label">Scenario Delta</div>
+        <div class="ovr-breakdown-value">${ovr.scenarioDelta > 0 ? '+' : ''}${ovr.scenarioDelta}</div>
+      </div>` : ''}
       <div class="ovr-breakdown-item ovr-breakdown-total">
         <div class="ovr-breakdown-label"><strong>Final OVR</strong></div>
         <div class="ovr-breakdown-value"><strong>${ovr.finalOVR}/99</strong></div>
       </div>
+      ${ovr.scenarioDeltaNarrative ? `<div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Why Scenario Changed OVR</div><div class="ovr-breakdown-value">${ovr.scenarioDeltaNarrative}</div></div>` : ''}
     `;
   }
 

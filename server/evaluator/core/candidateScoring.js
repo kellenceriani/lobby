@@ -44,7 +44,9 @@ function scoreInfoCandidate(characterInput, candidate) {
   const aliasCompacts = normalized.aliases.map(alias => canonicalizeName(alias));
   const description = String(normalized.description || '').toLowerCase();
   const categories = normalized.categories.map(c => String(c || '').toLowerCase());
+  const snippet = String(normalized.searchSnippet || '').toLowerCase();
   const contextHints = queryProfile.contextHints.map(h => h.toLowerCase());
+  const isSingleTokenQuery = queryVariants.some(queryVariant => queryVariant.split(/\s+/).filter(Boolean).length === 1);
 
   let score = 0;
   const confidenceSignals = {
@@ -74,18 +76,28 @@ function scoreInfoCandidate(characterInput, candidate) {
   queryVariants.forEach(queryVariant => {
     const queryCompact = canonicalizeName(queryVariant);
     const queryTokens = queryVariant.toLowerCase().split(/\s+/).filter(Boolean);
+    const titleTokens = title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const isSingleToken = queryTokens.length === 1;
 
     let variantNameMatch = 0;
     if (queryCompact && titleCompact && queryCompact === titleCompact) {
       variantNameMatch += 0.38;
     }
 
-    if (queryCompact && titleCompact && (titleCompact.includes(queryCompact) || queryCompact.includes(titleCompact))) {
+    const hasTokenMatch = isSingleToken
+      ? titleTokens.includes(queryTokens[0])
+      : (queryCompact && titleCompact && (titleCompact.includes(queryCompact) || queryCompact.includes(titleCompact)));
+
+    if (hasTokenMatch) {
       variantNameMatch += 0.08;
     }
 
-    if (queryTokens.length === 1 && title.toLowerCase().startsWith(`${queryTokens[0]} `)) {
+    if (queryTokens.length === 1 && title.toLowerCase().startsWith(`${queryTokens[0]} (`)) {
       variantNameMatch += 0.06;
+    }
+
+    if (isSingleToken && !titleTokens.includes(queryTokens[0])) {
+      confidenceSignals.penalties -= 0.12;
     }
 
     const similarity = calculateNameSimilarity(queryVariant, title);
@@ -93,7 +105,7 @@ function scoreInfoCandidate(characterInput, candidate) {
 
     let variantAliasMatch = 0;
     if (aliasCompacts.includes(queryCompact)) variantAliasMatch += 0.24;
-    else if (aliasCompacts.some(alias => alias && queryCompact && (alias.includes(queryCompact) || queryCompact.includes(alias)))) {
+    else if (!isSingleToken && aliasCompacts.some(alias => alias && queryCompact && (alias.includes(queryCompact) || queryCompact.includes(alias)))) {
       variantAliasMatch += 0.12;
     }
 
@@ -131,17 +143,37 @@ function scoreInfoCandidate(characterInput, candidate) {
   }
 
   const categoryText = categories.join(' ');
-  if (/fictional|character|superhero|villain|comic|manga|anime|mythology|historical|biography|actor|athlete|politician|scientist/.test(categoryText)) {
+  if (/fictional|character|superhero|villain|comic|manga|anime|mythology|historical|biography|actor|athlete|politician|scientist|animal|species|genus|family\s*name|surname|given\s*name/.test(categoryText)) {
     confidenceSignals.quality += 0.1;
+  }
+
+  if (/fictional|character|mythology|historical|animal|species|surname|given name/.test(snippet)) {
+    confidenceSignals.quality += 0.05;
   }
 
   if ((normalized.description || '').length >= 400) {
     confidenceSignals.quality += 0.06;
   }
 
+  if (isSingleTokenQuery && /surname|given names?|family name/.test(categoryText)) {
+    confidenceSignals.quality += 0.08;
+  }
+
+  const titleLower = String(normalized.title || '').toLowerCase();
+  const mediaLikeTitle = /\((?:\d{4} film|film|album|song|tv series|television series|video game)\)/.test(titleLower);
+  const mediaLikeDescription = /\bis a (?:\d{4}\s+)?(?:american|british|japanese|french|indian)?\s*(film|album|song|television series|video game)\b/.test(description);
+  const queryLooksMedia = queryVariants.some(queryVariant => /film|movie|album|song|series|show/.test(queryVariant.toLowerCase()));
+  if (isSingleTokenQuery && !queryLooksMedia && (mediaLikeTitle || mediaLikeDescription)) {
+    confidenceSignals.penalties -= 0.2;
+  }
+
   const isCharacterListLike = /list of/i.test(String(normalized.title || '')) && /character|fictional/i.test(categoryText);
-  if (/disambiguation|surname|given names|album|song|filmography|episode/.test(categoryText)) {
+  if (/disambiguation|album|song|filmography|episode/.test(categoryText)) {
     confidenceSignals.penalties -= 0.18;
+  }
+
+  if (/surname|given names?/.test(categoryText) && !/(surname|family name|last name|given name)/.test((queryProfile.baseName || '').toLowerCase())) {
+    confidenceSignals.penalties -= 0.1;
   } else if (/list of/.test(categoryText) && !isCharacterListLike) {
     confidenceSignals.penalties -= 0.12;
   }
@@ -163,9 +195,9 @@ function scoreInfoCandidate(characterInput, candidate) {
   let confidence = Math.max(0, Math.min(1, score));
   const linkageScore = confidenceSignals.nameMatch + confidenceSignals.aliasMatch + confidenceSignals.contextMatch;
   if (linkageScore < 0.09) {
-    confidence = Math.min(confidence, 0.4);
+    confidence = Math.min(confidence, 0.36);
   } else if (linkageScore < 0.16) {
-    confidence = Math.min(confidence, 0.52);
+    confidence = Math.min(confidence, 0.48);
   }
 
   return {

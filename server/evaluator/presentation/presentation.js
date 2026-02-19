@@ -89,6 +89,8 @@ function buildBreakdown({ character, validation, info, scenario, twist, score, n
       attributeBonus: 0,
       scenarioMultiplier: 1.0,
       finalOVR: ovrData.ovr,
+      scenarioDelta: 0,
+      scenarioDeltaNarrative: '',
       percentages: {}
     }
   };
@@ -153,7 +155,20 @@ function buildBreakdown({ character, validation, info, scenario, twist, score, n
       : 0;
     const scenarioFit = calculateScenarioFitValue(character, info, scenario, twist);
     const preMultiplier = baseOVR + rarityBonus + attributeBonus + confidenceBonus;
+    const scenarioAdjusted = Math.round(preMultiplier * scenarioFit);
+    const scenarioDelta = scenarioAdjusted - preMultiplier;
     const safeOVR = ovrData.ovr || 1;
+
+    let scenarioDeltaNarrative = 'Scenario conditions keep this character near baseline potential.';
+    if (scenarioDelta >= 4) {
+      scenarioDeltaNarrative = `${character} gains strong scenario lift (+${scenarioDelta} OVR from fit conditions).`;
+    } else if (scenarioDelta >= 1) {
+      scenarioDeltaNarrative = `${character} gains a mild scenario boost (+${scenarioDelta} OVR).`;
+    } else if (scenarioDelta <= -4) {
+      scenarioDeltaNarrative = `${character} is scenario-capped (${preMultiplier} → ${scenarioAdjusted}, ${scenarioDelta} OVR) due to constraint mismatch.`;
+    } else if (scenarioDelta <= -1) {
+      scenarioDeltaNarrative = `${character} loses some scenario value (${preMultiplier} → ${scenarioAdjusted}, ${scenarioDelta} OVR).`;
+    }
 
     breakdown.ovrBreakdown = {
       baseFromScore: baseOVR,
@@ -162,6 +177,8 @@ function buildBreakdown({ character, validation, info, scenario, twist, score, n
       confidenceBonus,
       scenarioMultiplier: scenarioFit,
       finalOVR: ovrData.ovr,
+      scenarioDelta,
+      scenarioDeltaNarrative,
       percentages: {
         scoreContribution: Math.round((baseOVR / safeOVR) * 100),
         rarityContribution: Math.round((rarityBonus / safeOVR) * 100),

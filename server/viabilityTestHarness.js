@@ -13,7 +13,12 @@ const CHARACTER_BUCKETS = {
   obscureAnime: ['Lain Iwakura', 'Boogiepop', 'Kaiji Itou', 'Ergo Proxy', 'Kino (Kino no Tabi)'],
   celebrities: ['Adele', 'Saoirse Ronan', 'Hideo Kojima', 'Frida Kahlo', 'Usain Bolt'],
   firstNames: ['Loid', 'Asta', 'Ayanokoji', 'Daenerys', 'Ichika'],
-  randomNiche: ['The Noid', 'Cú Chulainn', 'Moomintroll', 'Vash the Stampede', 'Nico Robin']
+  randomNiche: ['The Noid', 'Cú Chulainn', 'Moomintroll', 'Vash the Stampede', 'Nico Robin'],
+  obscureCartoons: ['Mao Mao', 'Kiff Chatterley', 'Top Cat', 'Snufkin', 'Yakko Warner'],
+  historicalPeople: ['Boudica', 'Ibn Sina', 'Murasaki Shikibu', 'Suleiman the Magnificent', 'Thutmose III'],
+  lastNames: ['Forger', 'Holmes', 'Skywalker', 'Targaryen', 'Pevensie'],
+  animals: ['Axolotl', 'Tardigrade', 'Peregrine Falcon', 'Blue Whale', 'Honey Badger'],
+  fictionalAnimals: ['Toothless', 'Appa', 'Scooby-Doo', 'Momo (Avatar)', 'Salem Saberhagen']
 };
 
 function flattenBuckets() {
@@ -115,7 +120,7 @@ function summarize(results) {
   });
 
   const qualityGatePassed =
-    summary.resolved >= Math.ceil(summary.total * 0.75) &&
+    summary.resolved >= Math.ceil(summary.total * 0.8) &&
     summary.byBucket.every(bucket => bucket.resolved >= Math.ceil(bucket.total * 0.6));
 
   if (!qualityGatePassed) {

@@ -1,7 +1,7 @@
 const https = require('https');
 const { WIKI_SEARCH_HINTS, CHARACTER_NAME_ALIASES, FRANCHISE_DATABASE, RARITY_KEYWORDS, POWER_LEVELS, MIN_INFO_CONFIDENCE } = require('./constants');
 const { normalizeName, canonicalizeName, getCharacterNameVariants, parseCharacterQuery, resolveLikelyTypo } = require('./textUtils');
-const { normalizeInfoCandidate, extractProfessionFromWikipedia, pickBestInfoCandidate } = require('./candidateScoring');
+const { normalizeInfoCandidate, extractProfessionFromWikipedia, pickBestInfoCandidate, scoreInfoCandidate } = require('./candidateScoring');
 
 const FETCH_CACHE = new Map();
 const INFLIGHT_FETCHES = new Map();
@@ -73,6 +73,57 @@ function dedupeByKey(items, keySelector) {
     out.push(item);
   }
   return out;
+}
+
+function buildSearchQueries(baseName, contextHints = []) {
+  const name = normalizeName(baseName);
+  if (!name) return [];
+
+  const hintQueries = (Array.isArray(contextHints) ? contextHints : [])
+    .map(hint => normalizeName(hint))
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const broadEntityHints = [
+    'character',
+    'fictional character',
+    'historical figure',
+    'person',
+    'animal',
+    'species',
+    'mythological creature',
+    'surname',
+    'family name'
+  ];
+
+  const queries = [
+    name,
+    `"${name}"`,
+    ...broadEntityHints.map(hint => `${name} ${hint}`),
+    ...WIKI_SEARCH_HINTS.map(hint => `${name} ${hint}`),
+    ...hintQueries.flatMap(hint => [`${name} ${hint}`, `${hint} ${name}`, `"${name}" ${hint}`]),
+    ...(name.includes(' ') ? [`${name} wiki`, `${name} wikipedia`] : []),
+    ...(name.split(/\s+/).length === 1 ? [`${name} (character)`, `${name} (surname)`] : [])
+  ];
+
+  return dedupeByKey(queries.map(q => normalizeName(q)).filter(Boolean), q => q.toLowerCase()).slice(0, 24);
+}
+
+function isStrongTitleLink(character, title) {
+  const query = normalizeName(character).toLowerCase();
+  const pageTitle = normalizeName(title).toLowerCase();
+  if (!query || !pageTitle) return false;
+
+  const queryTokens = query.split(/\s+/).filter(Boolean);
+  const titleTokens = pageTitle.split(/[^a-z0-9]+/).filter(Boolean);
+
+  if (queryTokens.length === 1) {
+    return titleTokens.includes(queryTokens[0]);
+  }
+
+  const queryCompact = canonicalizeName(query);
+  const titleCompact = canonicalizeName(pageTitle);
+  return !!queryCompact && !!titleCompact && (titleCompact.includes(queryCompact) || queryCompact.includes(titleCompact));
 }
 
 function fallbackFromAliasIndex(character) {
@@ -249,7 +300,55 @@ function pickBestCandidate(character, candidates) {
     .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
 
   if (!preScored.length) return null;
-  return preScored[0].confidence >= MIN_INFO_CONFIDENCE ? preScored[0] : null;
+
+  if (preScored[0].confidence >= MIN_INFO_CONFIDENCE) return preScored[0];
+
+  const rescue = preScored.find((candidate) => {
+    const source = String(candidate.source || '');
+    if (!/wikipedia|wikidata/.test(source)) return false;
+    const description = String(candidate.description || '').toLowerCase();
+    const titleLinked = isStrongTitleLink(character, candidate.title || '');
+    const contentLooksEntity = description.length >= 100 && !/(may refer to|disambiguation|list of)/i.test(description);
+    return titleLinked && contentLooksEntity;
+  });
+
+  if (!rescue) return null;
+
+  return {
+    ...rescue,
+    confidence: Math.max(rescue.confidence || 0, 0.38),
+    confidenceBand: rescue.confidenceBand === 'low' ? 'medium' : rescue.confidenceBand
+  };
+}
+
+function pickLooseSearchCandidate(character, candidates) {
+  const scored = (Array.isArray(candidates) ? candidates : [])
+    .map(candidate => scoreInfoCandidate(character, candidate))
+    .filter(entry => entry && entry.candidate)
+    .sort((a, b) => b.score - a.score);
+
+  const loose = scored.find((entry) => {
+    const candidate = entry.candidate;
+    const source = String(candidate.source || '');
+    if (!/wikipedia|wikidata/.test(source)) return false;
+
+    const description = String(candidate.description || '').toLowerCase();
+    const categories = Array.isArray(candidate.categories) ? candidate.categories.join(' ').toLowerCase() : '';
+    const titleLinked = isStrongTitleLink(character, candidate.title || '');
+    const entityLike = /(fictional|character|person|historical|animal|species|surname|family name|given name|mythology)/.test(`${description} ${categories}`);
+
+    return titleLinked && entityLike && !/(may refer to|disambiguation)/.test(description);
+  });
+
+  if (!loose) return null;
+
+  return {
+    ...loose.candidate,
+    confidence: Math.max(loose.candidate.confidence || 0, 0.37),
+    confidenceBand: (loose.candidate.confidence || 0) >= 0.7
+      ? loose.candidate.confidenceBand
+      : 'medium'
+  };
 }
 
 async function fetchWikidataMetadata(entityId) {
@@ -276,6 +375,7 @@ async function fetchWikidataMetadata(entityId) {
 function mapWikipediaPageToCandidate(page, wikidataMeta = null) {
   if (!page || !page.extract) return null;
   if (/disambiguation|may refer to/i.test(page.extract)) return null;
+  if (/^list of\b/i.test(String(page.title || '')) && !/(surname|given name|family name)/i.test(String(page.title || ''))) return null;
 
   const categories = Array.isArray(page.categories)
     ? page.categories.map(c => (c && c.title ? c.title.replace(/^Category:/, '') : '')).filter(Boolean).slice(0, 20)
@@ -365,6 +465,22 @@ async function searchWikipediaTitles(queryText, limit = 8) {
     .filter(Boolean);
 }
 
+async function searchWikipediaTitlesWithIntitle(queryText, limit = 8) {
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(`intitle:${queryText}`)}&srlimit=${limit}&format=json&origin=*`;
+  const json = await getJson(url);
+  const rows = json && json.query && Array.isArray(json.query.search) ? json.query.search : [];
+  return rows
+    .map((row) => {
+      if (!row || !row.title) return null;
+      return {
+        title: row.title,
+        pageId: row.pageid || null,
+        snippet: row.snippet ? String(row.snippet).replace(/<[^>]+>/g, ' ') : ''
+      };
+    })
+    .filter(Boolean);
+}
+
 async function fetchFromWikipediaOpenSearch(character, contextHints = []) {
   const normalized = normalizeName(character);
   if (!normalized) return null;
@@ -407,35 +523,66 @@ async function fetchFromWikipediaPrefixSearch(character) {
   return null;
 }
 
+async function fetchFromWikipediaFuzzyToken(character) {
+  const normalized = normalizeName(character);
+  if (!normalized) return null;
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length !== 1) return null;
+
+  const token = tokens[0];
+  if (token.length < 6) return null;
+
+  const stems = dedupeByKey([
+    token.slice(0, 6),
+    token.slice(0, 5),
+    token.slice(0, 4)
+  ].filter(Boolean), value => value.toLowerCase());
+
+  const candidates = [];
+
+  for (const stem of stems) {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=prefixsearch&pssearch=${encodeURIComponent(stem)}&pslimit=8&format=json&origin=*`;
+    const json = await getJson(url);
+    const rows = json && json.query && Array.isArray(json.query.prefixsearch) ? json.query.prefixsearch : [];
+    const titles = rows.map(row => normalizeName(row && row.title)).filter(Boolean);
+    if (!titles.length) continue;
+
+    const resolved = await Promise.all(titles.map(title => fetchFromWikipediaEnhanced(title).catch(() => null)));
+    candidates.push(...resolved.filter(Boolean));
+  }
+
+  if (!candidates.length) return null;
+  const best = pickBestCandidate(character, candidates);
+  if (best) return best;
+
+  const fallback = candidates.find((candidate) => {
+    const title = String(candidate.title || '').toLowerCase();
+    const description = String(candidate.description || '').toLowerCase();
+    return stems.some(stem => title.includes(stem.toLowerCase())) && /(fictional|character|animal|mythology|species)/.test(description);
+  });
+
+  if (!fallback) return null;
+  return {
+    ...fallback,
+    source: 'wikipedia-search',
+    confidence: Math.max(fallback.confidence || 0, 0.37),
+    confidenceBand: 'medium'
+  };
+}
+
 async function fetchFromWikipediaSearchEnhanced(character, contextHints = []) {
   const normalized = normalizeName(character);
   if (!normalized) return null;
 
-  const queryVariants = [
-    normalized,
-    `"${normalized}"`,
-    `${normalized} character`,
-    `${normalized} person`,
-    `${normalized} singer`,
-    `${normalized} actor`,
-    `${normalized} athlete`,
-    `${normalized} writer`,
-    `${normalized} fictional character`,
-    `${normalized} mythology`,
-    ...contextHints.slice(0, 3).flatMap(hint => [`${normalized} ${hint}`, `${hint} ${normalized}`]),
-    ...WIKI_SEARCH_HINTS.slice(0, 6).map(hint => `${normalized} ${hint}`)
-  ];
+  const uniqueQueries = buildSearchQueries(normalized, contextHints).slice(0, 8);
 
-  const uniqueQueries = dedupeByKey(
-    queryVariants.map(text => normalizeName(text)).filter(Boolean),
-    text => text.toLowerCase()
-  ).slice(0, 12);
-
-  const resultLists = await Promise.all(uniqueQueries.map(query => searchWikipediaTitles(query).catch(() => [])));
+  const resultLists = await Promise.all(uniqueQueries.map(query => searchWikipediaTitles(query, 10).catch(() => [])));
+  const intitleResults = await Promise.all(uniqueQueries.slice(0, 4).map(query => searchWikipediaTitlesWithIntitle(query, 6).catch(() => [])));
   const searchRows = dedupeByKey(
-    resultLists.flat().filter(Boolean),
+    [...resultLists.flat(), ...intitleResults.flat()].filter(Boolean),
     row => normalizeName(row.title).toLowerCase()
-  ).slice(0, 18);
+  ).slice(0, 14);
 
   const candidates = await Promise.all(searchRows.map(async (row) => {
     const candidate = await fetchFromWikipediaEnhanced(row.title).catch(() => null);
@@ -449,6 +596,9 @@ async function fetchFromWikipediaSearchEnhanced(character, contextHints = []) {
   const best = pickBestInfoCandidate(character, candidates);
   if (best) return best;
 
+  const looseBest = pickLooseSearchCandidate(character, candidates);
+  if (looseBest) return looseBest;
+
   const topTitle = searchRows[0] && searchRows[0].title ? searchRows[0].title : normalized;
   const disambiguationTitles = await fetchWikipediaDisambiguationLinks(topTitle, 10);
   if (!disambiguationTitles.length) return null;
@@ -461,8 +611,10 @@ async function fetchFromWikipediaSearchEnhanced(character, contextHints = []) {
       source: 'wikipedia-search'
     };
   }));
+  const strictDisambiguationBest = pickBestInfoCandidate(character, disambiguationCandidates);
+  if (strictDisambiguationBest) return strictDisambiguationBest;
 
-  return pickBestInfoCandidate(character, disambiguationCandidates);
+  return pickLooseSearchCandidate(character, disambiguationCandidates);
 }
 
 async function fetchWikipediaCandidateFromWikidataRow(row) {
@@ -488,10 +640,10 @@ async function fetchFromWikidata(character, contextHints = []) {
   const normalized = normalizeName(character);
   if (!normalized) return null;
 
-  const queries = [normalized, ...contextHints.slice(0, 3).map(hint => `${normalized} ${hint}`)].slice(0, 6);
+  const queries = buildSearchQueries(normalized, contextHints).slice(0, 10);
   const searchResults = await Promise.all(
     queries.map(async (query) => {
-      const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=6&origin=*`;
+      const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=8&type=item&origin=*`;
       const json = await getJson(url);
       return json && Array.isArray(json.search) ? json.search : [];
     })
@@ -500,7 +652,7 @@ async function fetchFromWikidata(character, contextHints = []) {
   const rankedRows = dedupeByKey(
     searchResults.flat().filter(Boolean),
     candidate => candidate.id
-  ).slice(0, 8);
+  ).slice(0, 12);
 
   if (!rankedRows.length) return null;
 
@@ -631,6 +783,7 @@ async function fetchCharacterInfo(character) {
       () => fetchFromWikipediaSearchEnhanced(baseName, contextHints),
       () => fetchFromWikipediaOpenSearch(baseName, contextHints),
       () => fetchFromWikipediaPrefixSearch(baseName),
+      () => fetchFromWikipediaFuzzyToken(baseName),
       () => fetchFromWikipediaSummary(baseName),
       () => fetchFromWikidata(baseName, contextHints)
     ];
@@ -638,6 +791,21 @@ async function fetchCharacterInfo(character) {
     for (const runFetch of stageOneFetches) {
       const candidate = await runWithRetries(runFetch, 2);
       collectCandidates(candidate);
+
+      const stageCandidates = toUniqueCandidates();
+      const stageBest = pickBestCandidate(character, stageCandidates);
+      if (stageBest && stageBest.confidence >= 0.75) {
+        const resolved = {
+          ...stageBest,
+          lookupMeta: {
+            queriedVariants: variants,
+            candidateCount: stageCandidates.length,
+            contextHints
+          }
+        };
+        setCachedCharacter(character, resolved);
+        return resolved;
+      }
     }
 
     let candidates = toUniqueCandidates();
@@ -657,12 +825,13 @@ async function fetchCharacterInfo(character) {
 
     const secondaryVariants = variants
       .filter(variant => canonicalizeName(variant) !== canonicalizeName(baseName))
-      .slice(0, 3);
+      .slice(0, 5);
 
     const stageTwoTasks = [
       ...secondaryVariants.map(variant => fetchFromWikipediaEnhanced(variant).catch(() => null)),
       ...secondaryVariants.map(variant => fetchFromWikipediaSearchEnhanced(variant, contextHints).catch(() => null)),
-      ...secondaryVariants.slice(0, 2).map(variant => fetchFromWikipediaOpenSearch(variant, contextHints).catch(() => null)),
+      ...secondaryVariants.slice(0, 3).map(variant => fetchFromWikipediaOpenSearch(variant, contextHints).catch(() => null)),
+      ...secondaryVariants.slice(0, 2).map(variant => fetchFromWikidata(variant, contextHints).catch(() => null)),
       fetchFromFandom(baseName, contextHints).catch(() => null),
       fetchFromOMDb(baseName).catch(() => null)
     ];
@@ -753,6 +922,7 @@ module.exports = {
   fetchFromWikipediaSearchEnhanced,
   fetchFromWikipediaOpenSearch,
   fetchFromWikipediaPrefixSearch,
+  fetchFromWikipediaFuzzyToken,
   fetchFromWikipediaSummary,
   fetchFromWikidata,
   fetchFromFandom,

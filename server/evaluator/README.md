@@ -10,6 +10,13 @@ Round 4 character and team evaluation system.
 - Rebalanced OVR scaling (`scoring/ovr.js`) with non-linear score curve, rarity/type attributes, confidence bonus, and scenario multiplier
 - Stable outward contract: `scoreCharacter` still returns `score`, `ovr`, `notes`, and `breakdown` in the same payload shape
 
+Recent upgrades:
+- Broader retrieval query generation for ambiguous names (`character/person/historical/animal/species/surname/family-name` paths)
+- Wikipedia search hardening with `intitle` enrichment, disambiguation-link expansion, fuzzy token rescue, and list-page rejection
+- Candidate scoring improvements for single-token ambiguity, media false-positive suppression, and richer entity-quality signals
+- Scenario OVR delta narrative in `breakdown.ovrBreakdown.scenarioDeltaNarrative` for user-facing "why OVR changed" explanations
+- Expanded viability harness coverage for obscure cartoons, historical figures, last names, animals, and fictional animals
+
 Design goals:
 - Better character resolution coverage (including API failure fallbacks)
 - Less code-path sprawl and clearer scoring composition

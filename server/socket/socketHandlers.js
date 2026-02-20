@@ -454,11 +454,16 @@ function registerSocketHandlers(io) {
       }
 
       player.draftLocked = true;
-      const lockElapsedMs = Math.max(0, Date.now() - (Number(game.roundStartTime) || Date.now()));
-      player.draftLockTime = lockElapsedMs;
-      const previousBestLock = Number(player.fastestDraftLockMs);
-      if (!Number.isFinite(previousBestLock) || previousBestLock < 0 || lockElapsedMs < previousBestLock) {
-        player.fastestDraftLockMs = lockElapsedMs;
+      const roundStartMs = Number(game.roundStartTime);
+      const lockElapsedMs = Number.isFinite(roundStartMs) && roundStartMs > 0
+        ? Math.max(0, Date.now() - roundStartMs)
+        : null;
+      player.draftLockTime = Number.isFinite(lockElapsedMs) ? lockElapsedMs : null;
+      if (Number.isFinite(lockElapsedMs) && lockElapsedMs > 0) {
+        const previousBestLock = Number(player.fastestDraftLockMs);
+        if (!Number.isFinite(previousBestLock) || previousBestLock <= 0 || lockElapsedMs < previousBestLock) {
+          player.fastestDraftLockMs = lockElapsedMs;
+        }
       }
 
       io.to(room).emit('playerLocked', { playerName: name, phase: 'DRAFT' });
@@ -611,7 +616,9 @@ function registerSocketHandlers(io) {
 
         const evalLeaderboard = scored.finalLeaderboard.map((teamRow) => {
           const sourcePlayer = game.players.find((player) => player.name === teamRow.playerName);
-          const fastestLockMs = sourcePlayer && Number.isFinite(Number(sourcePlayer.fastestDraftLockMs))
+          const fastestLockMs = sourcePlayer
+            && Number.isFinite(Number(sourcePlayer.fastestDraftLockMs))
+            && Number(sourcePlayer.fastestDraftLockMs) > 0
             ? Math.max(0, Math.round(Number(sourcePlayer.fastestDraftLockMs)))
             : null;
           const round4Points = Number(teamRow.round4Points) || 0;

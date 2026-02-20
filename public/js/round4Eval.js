@@ -1,4 +1,1858 @@
-// Round 4 Evaluation Screen Controller
+// Round 4 Cinematic Evaluation Controller
+
+const round4State = {
+  isEvaluating: false,
+  rendered: false,
+  allTeamEvaluations: null,
+  finalLeaderboard: null,
+  totalCharacters: 0,
+  totalTeams: 0,
+  evaluationId: null,
+  finalResultsRequested: false,
+  teams: [],
+  queue: [],
+  placements: [],
+  queueIndex: 0,
+  currentAssignment: null,
+  transitionRunning: false,
+  sequenceComplete: false,
+  evalLookup: Object.create(null),
+  revealTimer: null,
+  revealConfig: null,
+  pendingFinalResultsTimer: null,
+  preloadPromise: null,
+  preloadDone: false,
+  teamBoardCollapsed: Object.create(null)
+};
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildMissingCharacterImage(label = 'No Image') {
+  const safeLabel = escapeHtml(label);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="${safeLabel}">
+      <defs>
+        <linearGradient id="fallbackBg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#1f2430"/>
+          <stop offset="100%" stop-color="#2e3647"/>
+        </linearGradient>
+      </defs>
+      <rect width="256" height="256" rx="22" fill="url(#fallbackBg)"/>
+      <circle cx="128" cy="94" r="40" fill="#55607a"/>
+      <rect x="54" y="148" width="148" height="58" rx="29" fill="#55607a"/>
+      <text x="128" y="234" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#d0d8ea">${safeLabel}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function normalizeImageUrl(url) {
+  if (!url) return null;
+  const raw = String(url).trim();
+  if (!raw) return null;
+  if (raw.startsWith('//')) return `https:${raw}`;
+  return raw;
+}
+
+function resolveCharacterImage(url, fallbackLabel = 'No Image') {
+  return normalizeImageUrl(url) || buildMissingCharacterImage(fallbackLabel);
+}
+
+function getScenarioDelta(evalData) {
+  const ovrBreakdown = evalData && evalData.breakdown ? evalData.breakdown.ovrBreakdown : null;
+  if (ovrBreakdown && Number.isFinite(Number(ovrBreakdown.scenarioDelta))) {
+    return Number(ovrBreakdown.scenarioDelta);
+  }
+  if (ovrBreakdown && Number.isFinite(Number(ovrBreakdown.scenarioMultiplier))) {
+    return Math.round((Number(ovrBreakdown.scenarioMultiplier) - 1) * 20);
+  }
+  return 0;
+}
+
+function getOVRTierFromValue(ovr) {
+  if (ovr >= 99) return { tier: 'icon', label: 'Icon' };
+  if (ovr >= 95) return { tier: 'legendary', label: 'Legendary' };
+  if (ovr >= 90) return { tier: 'epic', label: 'Epic' };
+  if (ovr >= 85) return { tier: 'rare', label: 'Rare' };
+  if (ovr >= 75) return { tier: 'gold', label: 'Gold' };
+  if (ovr >= 65) return { tier: 'silver', label: 'Silver' };
+  return { tier: 'bronze', label: 'Bronze' };
+}
+
+function normalizeTierLabel(label) {
+  const raw = String(label || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('icon')) return 'icon';
+  if (raw.includes('legend')) return 'legendary';
+  if (raw.includes('epic')) return 'epic';
+  if (raw.includes('rare')) return 'rare';
+  if (raw.includes('gold')) return 'gold';
+  if (raw.includes('silver')) return 'silver';
+  return 'bronze';
+}
+
+function getTierClassFromEval(evalData) {
+  const normalized = normalizeTierLabel(evalData && evalData.ovrTierLabel);
+  if (normalized) return `tier-${normalized}`;
+  const fallback = getOVRTierFromValue(Number(evalData && evalData.ovr) || 0);
+  return `tier-${fallback.tier}`;
+}
+
+function getTierClassFromOVR(ovr) {
+  const tier = getOVRTierFromValue(Number(ovr) || 0);
+  return `tier-${tier.tier}`;
+}
+
+function updateLoadingDockProgress(current, total, label) {
+  const safeTotal = Math.max(1, Number(total) || 1);
+  const safeCurrent = Math.max(0, Math.min(safeTotal, Number(current) || 0));
+  const percent = Math.round((safeCurrent / safeTotal) * 100);
+
+  const totalEl = document.getElementById('evalLoadTotal');
+  const currentEl = document.getElementById('evalLoadFetched');
+  const pctEl = document.getElementById('evalPreloadPct');
+  const fillEl = document.getElementById('evalPreloadFill');
+  const subtitle = document.getElementById('evalLoadingSubtitle');
+  const botSpeech = document.getElementById('evalLoadBotSpeech');
+
+  if (totalEl) totalEl.textContent = String(safeTotal);
+  if (currentEl) currentEl.textContent = String(safeCurrent);
+  if (pctEl) pctEl.textContent = `${percent}%`;
+  if (fillEl) fillEl.style.width = `${percent}%`;
+  if (subtitle && label) subtitle.textContent = label;
+  if (botSpeech && label) botSpeech.textContent = label;
+}
+
+function setLoadingBotContext(scenario, twist, speech) {
+  const scenarioEl = document.getElementById('evalLoadScenario');
+  const twistEl = document.getElementById('evalLoadTwist');
+  const speechEl = document.getElementById('evalLoadBotSpeech');
+
+  if (scenarioEl && scenario) scenarioEl.textContent = scenario;
+  if (twistEl && twist) twistEl.textContent = twist;
+  if (speechEl && speech) speechEl.textContent = speech;
+}
+
+function signed(value) {
+  const numeric = Number(value) || 0;
+  return numeric > 0 ? `+${numeric}` : `${numeric}`;
+}
+
+function boardStateClass(filledCount) {
+  if (filledCount >= 6) return 'is-complete';
+  if (filledCount >= 4) return 'is-filling-low';
+  if (filledCount >= 2) return 'is-filling-mid';
+  return 'is-fuzzy';
+}
+
+function updateEvalProgress(current, total) {
+  const progress = document.getElementById('evalProgress');
+  const bar = document.getElementById('evalProgressBar');
+  const fill = bar ? bar.querySelector('.eval-progress-fill') : null;
+  const pct = document.getElementById('evalProgressPct');
+  const safeTotal = Math.max(1, Number(total) || 0);
+  const safeCurrent = Math.max(0, Number(current) || 0);
+  const percent = Math.max(0, Math.min(100, Math.round((safeCurrent / safeTotal) * 100)));
+
+  if (progress) progress.textContent = String(safeCurrent);
+  if (fill) fill.style.width = `${percent}%`;
+  if (bar) bar.setAttribute('aria-valuenow', String(percent));
+  if (pct) pct.textContent = `${percent}%`;
+}
+
+function clearEvalSurface() {
+  const boards = document.getElementById('evalTeamBoards');
+  const hero = document.getElementById('evalHeroHost');
+  const leaderboard = document.getElementById('evalLeaderboardContainer');
+  if (boards) boards.innerHTML = '';
+  if (hero) hero.innerHTML = '';
+  if (leaderboard) leaderboard.innerHTML = '';
+}
+
+function resetCinematicState() {
+  if (round4State.revealTimer) {
+    window.clearTimeout(round4State.revealTimer);
+    round4State.revealTimer = null;
+  }
+  if (round4State.pendingFinalResultsTimer) {
+    window.clearTimeout(round4State.pendingFinalResultsTimer);
+    round4State.pendingFinalResultsTimer = null;
+  }
+
+  round4State.teams = [];
+  round4State.queue = [];
+  round4State.placements = [];
+  round4State.queueIndex = 0;
+  round4State.currentAssignment = null;
+  round4State.transitionRunning = false;
+  round4State.sequenceComplete = false;
+  round4State.evalLookup = Object.create(null);
+  round4State.revealConfig = null;
+  round4State.preloadPromise = null;
+  round4State.preloadDone = false;
+  round4State.teamBoardCollapsed = Object.create(null);
+
+  const completion = document.getElementById('evalCompletionBadge');
+  const status = document.getElementById('evalFinalStatus');
+  const continueBtn = document.getElementById('evalContinueBtn');
+  if (completion) completion.hidden = true;
+  if (status) status.textContent = 'Synchronized reveal is starting...';
+  if (continueBtn) {
+    continueBtn.disabled = true;
+    continueBtn.textContent = '✅ CONFIRM & CONTINUE';
+  }
+}
+
+function initRound4Evaluation(data) {
+  const scenario = data && data.scenario ? data.scenario : 'Unknown scenario';
+  const twist = data && data.twist ? data.twist : 'Unknown twist';
+  const finalTeams = data && data.finalTeams ? data.finalTeams : {};
+
+  const evalScreen = document.getElementById('round4EvalScreen');
+  if (evalScreen) {
+    document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
+    evalScreen.classList.add('active');
+  }
+
+  const scenarioText = document.getElementById('evalScenarioText');
+  const twistText = document.getElementById('evalTwistText');
+  const causalityText = document.getElementById('evalContextCausality');
+  if (scenarioText) scenarioText.textContent = scenario;
+  if (twistText) twistText.textContent = twist;
+  if (causalityText) {
+    causalityText.textContent = 'Focus shifts to the currently filling team. Completed teams auto-collapse until all are complete.';
+  }
+  setLoadingBotContext(scenario, twist, 'Calibrating tier-weighted model against scenario and twist constraints...');
+
+  round4State.totalCharacters = Object.values(finalTeams).reduce((sum, team) => sum + (Array.isArray(team) ? team.length : 0), 0);
+  round4State.totalTeams = Object.keys(finalTeams || {}).length;
+
+  const evalTotal = document.getElementById('evalTotal');
+  const evalTeamCount = document.getElementById('evalTeamCount');
+  if (evalTotal) evalTotal.textContent = String(round4State.totalCharacters);
+  if (evalTeamCount) evalTeamCount.textContent = String(round4State.totalTeams);
+
+  updateEvalProgress(0, round4State.totalCharacters);
+  clearEvalSurface();
+  resetCinematicState();
+
+  const loading = document.getElementById('evalLoading');
+  const loadingTitle = document.getElementById('evalLoadingTitle');
+  const loadingSubtitle = document.getElementById('evalLoadingSubtitle');
+  if (loading) loading.style.display = 'flex';
+  if (loadingTitle) loadingTitle.textContent = 'Evaluating teams...';
+  if (loadingSubtitle) loadingSubtitle.textContent = 'Merging cached intel from earlier rounds with final scoring.';
+  updateLoadingDockProgress(0, Math.max(1, round4State.totalCharacters || 18), 'Queued for cinematic preload...');
+
+  round4State.isEvaluating = true;
+  round4State.rendered = false;
+  round4State.evaluationId = null;
+  round4State.finalResultsRequested = false;
+  round4State.allTeamEvaluations = null;
+  round4State.finalLeaderboard = null;
+
+  if (window.socket) {
+    window.socket.emit('evaluateRound4');
+  }
+}
+
+function getTeamOrderNames() {
+  const fromLeaderboard = Array.isArray(round4State.finalLeaderboard)
+    ? round4State.finalLeaderboard.map((row) => row && row.playerName).filter(Boolean)
+    : [];
+  const fromEvaluations = Object.keys(round4State.allTeamEvaluations || {});
+  const seen = new Set();
+  const ordered = [];
+  [...fromLeaderboard, ...fromEvaluations].forEach((name) => {
+    if (!seen.has(name)) {
+      seen.add(name);
+      ordered.push(name);
+    }
+  });
+  return ordered;
+}
+
+function buildCinematicData() {
+  const all = round4State.allTeamEvaluations || {};
+  const teamNames = getTeamOrderNames();
+  const teams = [];
+  const queue = [];
+
+  teamNames.forEach((playerName, teamIndex) => {
+    const teamData = all[playerName] || {};
+    const evaluations = Array.isArray(teamData.evaluations) ? teamData.evaluations.slice(0, 6) : [];
+    const teamSummary = teamData.teamSummary || {};
+
+    const normalizedEvaluations = evaluations.map((entry, slotIndex) => {
+      const normalized = {
+        ...entry,
+        fitDelta: getScenarioDelta(entry),
+        roleType: entry.roleType || entry.characterType || 'Balanced',
+        shortReason: entry.reason || 'No short reason available.',
+        rarity: entry.rarity || 'Common',
+        notes: Array.isArray(entry.notes) ? entry.notes.slice(0, 4) : [],
+        ovrTierLabel: (entry.ovrTier && entry.ovrTier.label) || (typeof entry.ovrTier === 'string' ? entry.ovrTier : getOVRTierFromValue(entry.ovr).label)
+      };
+
+      queue.push({
+        teamIndex,
+        slotIndex,
+        teamName: playerName,
+        evalData: normalized,
+        key: `${teamIndex}-${slotIndex}`
+      });
+
+      return normalized;
+    });
+
+    teams.push({ teamIndex, playerName, teamSummary, evaluations: normalizedEvaluations });
+  });
+
+  round4State.teams = teams;
+  round4State.queue = queue;
+  round4State.totalCharacters = queue.length;
+  round4State.totalTeams = teams.length;
+
+  const evalTotal = document.getElementById('evalTotal');
+  const evalTeamCount = document.getElementById('evalTeamCount');
+  if (evalTotal) evalTotal.textContent = String(round4State.totalCharacters);
+  if (evalTeamCount) evalTeamCount.textContent = String(round4State.totalTeams);
+}
+
+function findPlacement(teamIndex, slotIndex) {
+  return round4State.placements.find((item) => item.teamIndex === teamIndex && item.slotIndex === slotIndex) || null;
+}
+
+function renderTeamBoards() {
+  const container = document.getElementById('evalTeamBoards');
+  if (!container) return;
+
+  const allTeamsComplete = round4State.queue.length > 0 && round4State.placements.length >= round4State.queue.length;
+  const activeTeamIndex = round4State.currentAssignment ? round4State.currentAssignment.teamIndex : null;
+
+  container.classList.toggle('is-all-complete', allTeamsComplete);
+  container.classList.toggle('has-active-focus', !allTeamsComplete && activeTeamIndex !== null);
+
+  container.innerHTML = round4State.teams.map((team) => {
+    const filled = round4State.placements.filter((item) => item.teamIndex === team.teamIndex).length;
+    if (filled >= 6 && !allTeamsComplete) {
+      round4State.teamBoardCollapsed[team.teamIndex] = true;
+    }
+    if (filled < 6 && !allTeamsComplete) {
+      round4State.teamBoardCollapsed[team.teamIndex] = false;
+    }
+
+    const isCollapsed = Boolean(round4State.teamBoardCollapsed[team.teamIndex]);
+    const isFocus = activeTeamIndex === team.teamIndex;
+    const isMuted = activeTeamIndex !== null && !isFocus && !allTeamsComplete;
+
+    const teamTierClass = getTierClassFromOVR(Math.round((Number(team.teamSummary && team.teamSummary.totalOVR) || 0) / 6));
+    const slotsHtml = Array.from({ length: 6 }).map((_, slotIndex) => {
+      const placed = findPlacement(team.teamIndex, slotIndex);
+      if (!placed) {
+        return `<div class="eval-slot" data-team-index="${team.teamIndex}" data-slot-index="${slotIndex}" aria-hidden="true"></div>`;
+      }
+
+      const evalData = placed.evalData;
+      const image = resolveCharacterImage(evalData.imageUrl, evalData.character || 'No Portrait');
+      const tierClass = getTierClassFromEval(evalData);
+      return `
+        <div class="eval-slot is-filled" data-team-index="${team.teamIndex}" data-slot-index="${slotIndex}">
+          <button class="eval-docked-plaque ${tierClass}" type="button" data-eval-key="${escapeHtml(placed.key)}" aria-label="View OVR breakdown for ${escapeHtml(evalData.character || 'character')}">
+            <img src="${escapeHtml(image)}" alt="${escapeHtml(evalData.character || 'Character')} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
+            <span>
+              <span class="eval-docked-name ${tierClass}">${escapeHtml(evalData.character || 'Unknown')}</span>
+              <span class="eval-docked-ovr ${tierClass}">OVR ${Number(evalData.ovr) || 0}</span>
+            </span>
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <section class="eval-team-board ${boardStateClass(filled)} ${isFocus ? 'is-focus' : ''} ${isMuted ? 'is-muted' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-team-board="${team.teamIndex}" data-filled="${filled}">
+        <header class="eval-team-board-head">
+          <h3 class="${teamTierClass}">${escapeHtml(team.playerName)}</h3>
+          <p>${filled}/6 placed • Team OVR ${Number(team.teamSummary && team.teamSummary.totalOVR) || 0}</p>
+          <button class="eval-team-toggle" type="button" data-team-toggle="${team.teamIndex}" ${allTeamsComplete ? '' : 'disabled'} aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-label="Toggle ${escapeHtml(team.playerName)} board">${isCollapsed ? 'Expand' : 'Collapse'}</button>
+        </header>
+        <div class="eval-team-slots">${slotsHtml}</div>
+      </section>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.eval-docked-plaque').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.getAttribute('data-eval-key');
+      if (!key || !round4State.evalLookup[key]) return;
+      openOVRBreakdown(round4State.evalLookup[key]);
+    });
+  });
+
+  if (allTeamsComplete) {
+    container.querySelectorAll('[data-team-toggle]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const teamIndex = Number(button.getAttribute('data-team-toggle'));
+        if (!Number.isFinite(teamIndex)) return;
+        round4State.teamBoardCollapsed[teamIndex] = !Boolean(round4State.teamBoardCollapsed[teamIndex]);
+        renderTeamBoards();
+      });
+    });
+  }
+}
+
+function renderActivePlaque() {
+  const host = document.getElementById('evalHeroHost');
+  if (!host) return;
+
+  const assignment = round4State.currentAssignment;
+  if (!assignment) {
+    host.innerHTML = '';
+    return;
+  }
+
+  const evalData = assignment.evalData;
+  const tierClass = getTierClassFromEval(evalData);
+  const fitDelta = Number(evalData.fitDelta) || 0;
+  const fitClass = fitDelta >= 0 ? 'fit-positive' : 'fit-negative';
+  const image = resolveCharacterImage(evalData.imageUrl, evalData.character || 'No Portrait');
+  const notes = Array.isArray(evalData.notes) ? evalData.notes : [];
+
+  host.innerHTML = `
+    <article id="evalActivePlaque" class="eval-active-plaque ${tierClass}" aria-live="polite">
+      <div class="eval-active-head">
+        <img src="${escapeHtml(image)}" alt="${escapeHtml(evalData.character || 'Character')} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
+        <div>
+          <h3 class="${tierClass}">${escapeHtml(evalData.character || 'Unknown')}</h3>
+          <p>${escapeHtml(evalData.roleType || 'Balanced')} • ${escapeHtml(evalData.rarity || 'Common')}</p>
+          <p>${escapeHtml(evalData.shortReason || 'No reason provided.')}</p>
+        </div>
+      </div>
+      <div class="eval-active-metrics">
+        <button class="eval-active-ovr-btn ${tierClass}" type="button" aria-label="View OVR breakdown for ${escapeHtml(evalData.character || 'character')}">
+          <span>OVR</span>
+          <strong>${Number(evalData.ovr) || 0}</strong>
+          <small>${escapeHtml(evalData.ovrTierLabel || '')}</small>
+        </button>
+        <div class="eval-active-chip"><span>Score</span><strong>${Number(evalData.score) || 0}</strong></div>
+        <div class="eval-active-chip ${fitClass}"><span>Fit Delta</span><strong>${signed(fitDelta)}</strong></div>
+      </div>
+      <details class="eval-active-details">
+        <summary>Details + Notes</summary>
+        <ul>${notes.length ? notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('') : '<li>No additional evaluator notes.</li>'}</ul>
+        <p class="eval-active-phrase">"${escapeHtml(evalData.phrase || 'No phrase available.')}"</p>
+      </details>
+    </article>
+  `;
+
+  const ovrButton = host.querySelector('.eval-active-ovr-btn');
+  if (ovrButton) {
+    ovrButton.addEventListener('click', () => openOVRBreakdown(evalData));
+  }
+}
+
+function spawnNextAssignment() {
+  round4State.currentAssignment = round4State.queue[round4State.queueIndex] || null;
+  renderActivePlaque();
+}
+
+function getRevealConfig() {
+  const incoming = round4State.revealConfig || {};
+  const now = Date.now();
+
+  const initialDelayMs = Math.max(0, Number(incoming.initialDelayMs) || 2200);
+  const stepIntervalMs = Math.max(1300, Number(incoming.stepIntervalMs) || 1950);
+  const dockDurationMs = Math.max(700, Number(incoming.dockDurationMs) || 980);
+  const finalResultsDelayMs = Math.max(900, Number(incoming.finalResultsDelayMs) || 1900);
+  const startAtMs = Number(incoming.startAtMs) || (now + initialDelayMs);
+
+  return {
+    startAtMs,
+    initialDelayMs,
+    stepIntervalMs,
+    dockDurationMs,
+    finalResultsDelayMs
+  };
+}
+
+function loadImageAsset(url) {
+  const normalized = normalizeImageUrl(url);
+  if (!normalized) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    const done = () => resolve();
+
+    image.decoding = 'async';
+    image.loading = 'eager';
+    image.referrerPolicy = 'no-referrer';
+    image.onload = done;
+    image.onerror = done;
+    image.src = normalized;
+
+    window.setTimeout(done, 1700);
+  });
+}
+
+function preloadCinematicAssets() {
+  if (round4State.preloadPromise) return round4State.preloadPromise;
+
+  const urls = round4State.queue
+    .map((assignment) => assignment && assignment.evalData ? assignment.evalData.imageUrl : null)
+    .map((url) => normalizeImageUrl(url))
+    .filter(Boolean);
+
+  const uniqueUrls = Array.from(new Set(urls));
+  const totalAssets = uniqueUrls.length;
+  let completedAssets = 0;
+
+  updateLoadingDockProgress(0, totalAssets || 1, 'Preloading portraits and cache assets...');
+
+  const preloadTasks = uniqueUrls.map((url) => loadImageAsset(url)
+    .catch(() => null)
+    .then(() => {
+      completedAssets += 1;
+      updateLoadingDockProgress(completedAssets, totalAssets || 1, 'Preloading portraits and cache assets...');
+    }));
+
+  const settlePromise = Promise.all(preloadTasks)
+    .catch(() => null)
+    .then(() => {
+      round4State.preloadDone = true;
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets ready. Finalizing cinematic stage...');
+      return true;
+    });
+
+  round4State.preloadPromise = Promise.race([
+    settlePromise,
+    new Promise((resolve) => window.setTimeout(() => {
+      round4State.preloadDone = true;
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets stabilized. Starting reveal...');
+      resolve(true);
+    }, 3200))
+  ]);
+
+  return round4State.preloadPromise;
+}
+
+function scheduleNextAutoReveal() {
+  if (round4State.sequenceComplete) return;
+  if (round4State.revealTimer) {
+    window.clearTimeout(round4State.revealTimer);
+    round4State.revealTimer = null;
+  }
+
+  const config = getRevealConfig();
+  const now = Date.now();
+  const targetAt = config.startAtMs + (round4State.queueIndex * config.stepIntervalMs);
+  const waitMs = Math.max(0, targetAt - now);
+
+  round4State.revealTimer = window.setTimeout(() => {
+    round4State.revealTimer = null;
+    if (round4State.transitionRunning) {
+      scheduleNextAutoReveal();
+      return;
+    }
+    handleNextCharacter(() => {
+      if (!round4State.sequenceComplete) {
+        scheduleNextAutoReveal();
+      }
+    });
+  }, waitMs);
+}
+
+function finishSequenceIfComplete() {
+  if (round4State.placements.length < round4State.queue.length) return;
+  round4State.sequenceComplete = true;
+  round4State.currentAssignment = null;
+  renderActivePlaque();
+
+  if (round4State.revealTimer) {
+    window.clearTimeout(round4State.revealTimer);
+    round4State.revealTimer = null;
+  }
+
+  const completion = document.getElementById('evalCompletionBadge');
+  const status = document.getElementById('evalFinalStatus');
+  if (completion) {
+    completion.hidden = false;
+    completion.textContent = `All ${round4State.queue.length} characters placed`;
+  }
+  if (status) status.textContent = 'Reveal complete. Confirm when your screen is ready to continue.';
+
+  const continueBtn = document.getElementById('evalContinueBtn');
+  if (continueBtn) {
+    continueBtn.disabled = false;
+    continueBtn.textContent = '✅ CONFIRM & CONTINUE';
+  }
+
+  renderFinalLeaderboard();
+}
+
+function animateDockTransition(assignment, onDone) {
+  const config = getRevealConfig();
+  const dockDurationMs = config.dockDurationMs;
+  const active = document.getElementById('evalActivePlaque');
+  const target = document.querySelector(`.eval-slot[data-team-index='${assignment.teamIndex}'][data-slot-index='${assignment.slotIndex}']`);
+  if (!active || !target) {
+    onDone();
+    return;
+  }
+
+  const startRect = active.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const clone = active.cloneNode(true);
+  clone.classList.add('eval-flight-clone');
+  clone.style.left = `${startRect.left}px`;
+  clone.style.top = `${startRect.top}px`;
+  clone.style.width = `${startRect.width}px`;
+  clone.style.height = `${startRect.height}px`;
+  clone.style.transform = 'translate3d(0,0,0) scale(1)';
+  clone.style.opacity = '1';
+  clone.style.transitionDuration = `${dockDurationMs}ms, ${dockDurationMs}ms`;
+  document.body.appendChild(clone);
+  active.style.opacity = '0';
+
+  requestAnimationFrame(() => {
+    const dx = (targetRect.left + targetRect.width / 2) - (startRect.left + startRect.width / 2);
+    const dy = (targetRect.top + targetRect.height / 2) - (startRect.top + startRect.height / 2);
+    clone.style.transform = `translate3d(${dx}px, ${dy - 20}px, 0) scale(0.26)`;
+    clone.style.opacity = '0.94';
+  });
+
+  window.setTimeout(() => {
+    clone.remove();
+    onDone();
+  }, dockDurationMs);
+}
+
+function handleNextCharacter(onComplete) {
+  if (round4State.transitionRunning || !round4State.currentAssignment) return;
+  round4State.transitionRunning = true;
+
+  const assignment = round4State.currentAssignment;
+  animateDockTransition(assignment, () => {
+    round4State.placements.push(assignment);
+    round4State.evalLookup[assignment.key] = assignment.evalData;
+    round4State.queueIndex += 1;
+    round4State.transitionRunning = false;
+
+    updateEvalProgress(round4State.placements.length, round4State.queue.length);
+    renderTeamBoards();
+
+    if (round4State.placements.length >= round4State.queue.length) {
+      finishSequenceIfComplete();
+      if (typeof onComplete === 'function') onComplete();
+      return;
+    }
+
+    spawnNextAssignment();
+    if (typeof onComplete === 'function') onComplete();
+  });
+}
+
+function bindCinematicControls() {
+  return;
+}
+
+function getLeaderboardTopPickImage(row) {
+  if (row && row.topPickImageUrl) {
+    return resolveCharacterImage(row.topPickImageUrl, row.topPick || 'Top Pick');
+  }
+
+  const playerName = row && row.playerName ? row.playerName : '';
+  const team = round4State.teams.find((entry) => entry.playerName === playerName);
+  if (!team || !Array.isArray(team.evaluations)) {
+    return buildMissingCharacterImage('No Portrait');
+  }
+
+  const topPickName = row && row.topPick ? String(row.topPick) : '';
+  const found = team.evaluations.find((entry) => String(entry.character || '').toLowerCase() === topPickName.toLowerCase());
+  if (found) {
+    return resolveCharacterImage(found.imageUrl, found.character || 'Top Pick');
+  }
+
+  const firstWithImage = team.evaluations.find((entry) => normalizeImageUrl(entry.imageUrl));
+  if (firstWithImage) {
+    return resolveCharacterImage(firstWithImage.imageUrl, firstWithImage.character || 'Top Pick');
+  }
+
+  return buildMissingCharacterImage(topPickName || 'Top Pick');
+}
+
+function renderFinalLeaderboard() {
+  const container = document.getElementById('evalLeaderboardContainer');
+  if (!container || !Array.isArray(round4State.finalLeaderboard)) return;
+
+  const ranked = round4State.finalLeaderboard.slice().sort((a, b) => {
+    const points = (Number(b && b.round4Points) || 0) - (Number(a && a.round4Points) || 0);
+    if (points !== 0) return points;
+    const ovr = (Number(b && b.totalOVR) || 0) - (Number(a && a.totalOVR) || 0);
+    if (ovr !== 0) return ovr;
+    return String(a && a.playerName ? a.playerName : '').localeCompare(String(b && b.playerName ? b.playerName : ''));
+  });
+
+  container.innerHTML = `
+    <section class="eval-leaderboard-rich" aria-label="Round 4 detailed leaderboard">
+      <header class="eval-leaderboard-rich-head">
+        <h3>Round 4 Leaderboard</h3>
+        <p>Expanded with top pick portraits, OVR tiers, and score breakdown.</p>
+      </header>
+      <div class="eval-leaderboard-rich-list">
+        ${ranked.map((row, index) => {
+          const tierClass = getTierClassFromOVR(Number(row && row.totalOVR) || 0);
+          const topPickImage = getLeaderboardTopPickImage(row);
+          const roundPoints = Number(row && row.round4Points) || 0;
+          const previousTotal = Number(row && row.previousTotalScore) || 0;
+          const totalScore = Number(row && row.totalScore) || roundPoints;
+          const scoreGain = totalScore - previousTotal;
+
+          return `
+            <article class="eval-lb-row ${tierClass}" aria-label="${escapeHtml(row && row.playerName ? row.playerName : 'Unknown')} leaderboard row">
+              <div class="eval-lb-rank">#${index + 1}</div>
+              <div class="eval-lb-player">
+                <h4 class="${tierClass}">${escapeHtml(row && row.playerName ? row.playerName : 'Unknown')}</h4>
+                <p class="eval-lb-sub">Team OVR ${Number(row && row.totalOVR) || 0} • Chemistry ${signed(Number(row && row.chemistryBonus) || 0)}</p>
+              </div>
+              <div class="eval-lb-top-pick">
+                <img src="${escapeHtml(topPickImage)}" alt="${escapeHtml(row && row.topPick ? row.topPick : 'Top pick')} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
+                <div>
+                  <small>Top Pick</small>
+                  <strong class="${tierClass}">${escapeHtml(row && row.topPick ? row.topPick : 'N/A')}</strong>
+                </div>
+              </div>
+              <div class="eval-lb-stats">
+                <span><small>Round 4</small><b>${roundPoints}</b></span>
+                <span><small>Before</small><b>${previousTotal}</b></span>
+                <span><small>Gain</small><b>${signed(scoreGain)}</b></span>
+                <span><small>Total</small><b>${totalScore}</b></span>
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderCinematicSequence() {
+  buildCinematicData();
+  round4State.placements = [];
+  round4State.queueIndex = 0;
+  round4State.currentAssignment = null;
+  round4State.transitionRunning = false;
+  round4State.sequenceComplete = false;
+  round4State.evalLookup = Object.create(null);
+
+  updateEvalProgress(0, round4State.queue.length);
+  renderTeamBoards();
+  spawnNextAssignment();
+  bindCinematicControls();
+
+  const subtitle = document.getElementById('evalLoadingSubtitle');
+  if (subtitle) subtitle.textContent = 'Preloading portraits and smoothing reveal timeline...';
+  setLoadingBotContext(null, null, 'Validating portrait cache and timeline locks before reveal...');
+
+  const status = document.getElementById('evalFinalStatus');
+  if (status) status.textContent = 'Preparing assets for pristine synchronized reveal...';
+
+  preloadCinematicAssets().finally(() => {
+    setLoadingBotContext(null, null, 'Assets verified. Initiating cinematic placements now.');
+    scheduleNextAutoReveal();
+
+    const loading = document.getElementById('evalLoading');
+    if (loading) loading.style.display = 'none';
+    if (status) status.textContent = 'Synchronized reveal in progress...';
+    round4State.isEvaluating = false;
+    round4State.rendered = true;
+  });
+}
+
+function requestFinalResults() {
+  if (round4State.finalResultsRequested || !window.socket) return;
+  round4State.finalResultsRequested = true;
+
+  const continueBtn = document.getElementById('evalContinueBtn');
+  const status = document.getElementById('evalFinalStatus');
+  if (continueBtn) {
+    continueBtn.disabled = true;
+    continueBtn.textContent = 'Waiting for others...';
+  }
+  if (status) status.textContent = 'Waiting for players...';
+
+  window.socket.emit('requestFinalResults');
+}
+
+function toggleEvalScenario() {
+  const box = document.getElementById('evalScenarioBox');
+  if (!box) return;
+  box.classList.toggle('is-condensed');
+}
+
+function switchEvalTab() {
+  return;
+}
+
+function setupOVRVisualInteractions(modal) {
+  if (!modal) return;
+  const shell = modal.querySelector('.ovr-visual-shell');
+  if (!shell) return;
+
+  const rows = Array.from(shell.querySelectorAll('.ovr-visual-bar-row'));
+  let activeRow = null;
+
+  const activateRow = (row) => {
+    rows.forEach((entry) => entry.classList.remove('is-emphasis'));
+    if (!row) {
+      shell.style.setProperty('--focus-hue', '38');
+      activeRow = null;
+      return;
+    }
+
+    row.classList.add('is-emphasis');
+    const hue = row.getAttribute('data-hue') || '38';
+    shell.style.setProperty('--focus-hue', hue);
+    activeRow = row;
+  };
+
+  rows.forEach((row) => {
+    row.tabIndex = 0;
+    row.addEventListener('mouseenter', () => activateRow(row));
+    row.addEventListener('focus', () => activateRow(row));
+    row.addEventListener('click', () => activateRow(activeRow === row ? null : row));
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        activateRow(activeRow === row ? null : row);
+      }
+    });
+  });
+
+  shell.addEventListener('mouseleave', () => activateRow(activeRow));
+
+  shell.addEventListener('pointermove', (event) => {
+    const rect = shell.getBoundingClientRect();
+    const relativeX = (event.clientX - rect.left) / rect.width;
+    const relativeY = (event.clientY - rect.top) / rect.height;
+
+    const tiltX = (relativeY - 0.5) * -8;
+    const tiltY = (relativeX - 0.5) * 9;
+    shell.style.setProperty('--tilt-x', `${tiltX.toFixed(2)}deg`);
+    shell.style.setProperty('--tilt-y', `${tiltY.toFixed(2)}deg`);
+    shell.style.setProperty('--glint-x', `${Math.round(relativeX * 100)}%`);
+    shell.style.setProperty('--glint-y', `${Math.round(relativeY * 100)}%`);
+  });
+
+  shell.addEventListener('pointerleave', () => {
+    shell.style.setProperty('--tilt-x', '0deg');
+    shell.style.setProperty('--tilt-y', '0deg');
+    shell.style.setProperty('--glint-x', '50%');
+    shell.style.setProperty('--glint-y', '35%');
+  });
+}
+
+function openOVRBreakdown(evalData) {
+  const modal = document.getElementById('ovrBreakdownModal');
+  if (!modal || !evalData) return;
+
+  const modalContent = modal.querySelector('.ovr-modal-content');
+  const tierClass = getTierClassFromEval(evalData);
+  if (modalContent) {
+    modalContent.classList.remove('tier-icon', 'tier-legendary', 'tier-epic', 'tier-rare', 'tier-gold', 'tier-silver', 'tier-bronze');
+    modalContent.classList.add('ovr-tiered', tierClass);
+    modalContent.setAttribute('data-tier', tierClass.replace('tier-', ''));
+  }
+
+  const modalTitle = document.getElementById('modalTitle');
+  if (modalTitle) modalTitle.textContent = `OVR Breakdown — ${evalData.character}`;
+
+  const modalImage = document.getElementById('modalCharacterImage');
+  const modalImageWrap = document.getElementById('modalCharacterImageWrap');
+  if (modalImage) {
+    const imageSrc = resolveCharacterImage(evalData.imageUrl, 'No Portrait');
+    const hasImage = Boolean(normalizeImageUrl(evalData.imageUrl));
+    modalImage.src = imageSrc;
+    modalImage.alt = `${evalData.character} portrait`;
+    if (modalImageWrap) modalImageWrap.classList.toggle('missing', !hasImage);
+    modalImage.onerror = function onModalImageError() {
+      this.onerror = null;
+      this.src = buildMissingCharacterImage('No Portrait');
+      if (modalImageWrap) modalImageWrap.classList.add('missing');
+    };
+  }
+
+  const summaryEl = document.getElementById('modalCharacterSummary');
+  if (summaryEl) summaryEl.textContent = evalData.breakdown && evalData.breakdown.characterSummary ? evalData.breakdown.characterSummary : 'No information available.';
+
+  const scenarioEl = document.getElementById('modalScenarioRelevance');
+  if (scenarioEl) scenarioEl.textContent = evalData.breakdown && evalData.breakdown.scenarioRelevance ? evalData.breakdown.scenarioRelevance : 'No scenario analysis available.';
+
+  const scenarioKeywordsEl = document.getElementById('modalScenarioKeywords');
+  if (scenarioKeywordsEl) {
+    const scenarioKeywords = evalData.breakdown && evalData.breakdown.keywordMatches ? evalData.breakdown.keywordMatches.scenario || [] : [];
+    scenarioKeywordsEl.innerHTML = scenarioKeywords.length
+      ? `<span class="ovr-keywords-label">Keywords:</span>${scenarioKeywords.map((kw) => `<span class="ovr-keyword-chip">${escapeHtml(kw)}</span>`).join('')}`
+      : '<span class="ovr-keywords-empty">No keyword matches</span>';
+  }
+
+  const twistEl = document.getElementById('modalTwistRelevance');
+  if (twistEl) twistEl.textContent = evalData.breakdown && evalData.breakdown.twistRelevance ? evalData.breakdown.twistRelevance : 'No twist analysis available.';
+
+  const twistKeywordsEl = document.getElementById('modalTwistKeywords');
+  if (twistKeywordsEl) {
+    const twistKeywords = evalData.breakdown && evalData.breakdown.keywordMatches ? evalData.breakdown.keywordMatches.twist || [] : [];
+    twistKeywordsEl.innerHTML = twistKeywords.length
+      ? `<span class="ovr-keywords-label">Keywords:</span>${twistKeywords.map((kw) => `<span class="ovr-keyword-chip">${escapeHtml(kw)}</span>`).join('')}`
+      : '<span class="ovr-keywords-empty">No keyword matches</span>';
+  }
+
+  const scoreBreakdownEl = document.getElementById('modalScoreBreakdown');
+  if (scoreBreakdownEl && evalData.breakdown && Array.isArray(evalData.breakdown.scoreBreakdown)) {
+    const steps = evalData.breakdown.scoreBreakdown;
+    scoreBreakdownEl.innerHTML = `
+      <div class="score-mini-header"><span class="score-mini-title">Score Flow</span><span class="score-mini-total"><strong>${Number(evalData.score) || 0}/30</strong></span></div>
+      <div class="score-mini-legend">
+        ${steps.map((step) => {
+          const points = Number(step && step.points) || 0;
+          const sign = points > 0 ? '+' : '';
+          const cls = points > 0 ? 'positive' : points < 0 ? 'negative' : 'neutral';
+          const label = step && step.step ? step.step : 'Step';
+          const desc = step && step.description ? step.description : '';
+          return `<span class="score-mini-chip ${cls}" title="${escapeHtml(desc)}"><strong>${escapeHtml(label)}</strong> ${sign}${points}</span>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  const ovrBreakdownEl = document.querySelector('.ovr-breakdown-items');
+  if (ovrBreakdownEl && evalData.breakdown && evalData.breakdown.ovrBreakdown) {
+    const ovr = evalData.breakdown.ovrBreakdown;
+    const percentages = ovr.percentages || {};
+    const ovrTierClass = tierClass;
+    const safeFinalOVR = Math.max(0, Math.min(99, Number(ovr.finalOVR) || 0));
+    const toPct = (value) => {
+      const numeric = Number(value) || 0;
+      return Math.max(0, Math.min(100, Math.round(numeric)));
+    };
+
+    const basePct = toPct(percentages.scoreContribution || 0);
+    const rarityPct = toPct(percentages.rarityContribution || 0);
+    const attributePct = toPct(percentages.attributeContribution || 0);
+    const scenarioPct = Math.max(-100, Math.min(100, Math.round(Number(percentages.scenarioEffect) || 0)));
+    const scenarioSigned = scenarioPct > 0 ? `+${scenarioPct}` : `${scenarioPct}`;
+
+    ovrBreakdownEl.innerHTML = `
+      <div class="ovr-visual-shell ${ovrTierClass}">
+        <div class="ovr-visual-ring-wrap">
+          <div class="ovr-visual-ring" style="--ovr-fill:${safeFinalOVR};">
+            <div class="ovr-visual-center">
+              <b>${safeFinalOVR}</b>
+            </div>
+          </div>
+          <div class="ovr-visual-chipset" aria-label="OVR composition quick stats">
+            <span class="ovr-chip ovr-chip-base">Base ${ovr.baseFromScore}</span>
+            <span class="ovr-chip ovr-chip-rarity">Rarity ${ovr.rarityBonus}</span>
+            <span class="ovr-chip ovr-chip-attr">Attr ${ovr.attributeBonus}</span>
+            <span class="ovr-chip ovr-chip-scenario">Fit ${scenarioSigned}%</span>
+          </div>
+        </div>
+        <div class="ovr-visual-bars">
+          <div class="ovr-visual-bar-row" data-hue="208">
+            <span>Base Score</span>
+            <div class="ovr-visual-bar"><i class="bar-base" style="width:${basePct}%;--delay:0.02s;"></i></div>
+            <b>${ovr.baseFromScore} (${basePct}%)</b>
+          </div>
+          <div class="ovr-visual-bar-row" data-hue="34">
+            <span>Rarity Bonus</span>
+            <div class="ovr-visual-bar"><i class="bar-rarity" style="width:${rarityPct}%;--delay:0.09s;"></i></div>
+            <b>${ovr.rarityBonus} (${rarityPct}%)</b>
+          </div>
+          <div class="ovr-visual-bar-row" data-hue="262">
+            <span>Attribute Bonus</span>
+            <div class="ovr-visual-bar"><i class="bar-attr" style="width:${attributePct}%;--delay:0.16s;"></i></div>
+            <b>${ovr.attributeBonus} (${attributePct}%)</b>
+          </div>
+          <div class="ovr-visual-bar-row ${scenarioPct < 0 ? 'is-negative' : 'is-positive'}" data-hue="144">
+            <span>Scenario Effect</span>
+            <div class="ovr-visual-bar"><i class="bar-scenario" style="width:${Math.abs(scenarioPct)}%;--delay:0.23s;"></i></div>
+            <b>${scenarioSigned}% (×${Number(ovr.scenarioMultiplier || 1).toFixed(2)})</b>
+          </div>
+        </div>
+      </div>
+      ${typeof ovr.scenarioDelta === 'number' ? `<div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Scenario Delta</div><div class="ovr-breakdown-value">${ovr.scenarioDelta > 0 ? '+' : ''}${ovr.scenarioDelta}</div></div>` : ''}
+      <div class="ovr-breakdown-item ovr-breakdown-total ${ovrTierClass}"><div class="ovr-breakdown-label"><strong>Final OVR</strong></div><div class="ovr-breakdown-value"><strong>${ovr.finalOVR}/99</strong></div></div>
+      ${ovr.scenarioDeltaNarrative ? `<p class="ovr-scenario-narrative">${escapeHtml(ovr.scenarioDeltaNarrative)}</p>` : ''}
+    `;
+
+    setupOVRVisualInteractions(modal);
+  }
+
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeOVRBreakdown() {
+  const modal = document.getElementById('ovrBreakdownModal');
+  if (!modal) return;
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+}
+
+if (typeof window !== 'undefined' && !window.__round4SocketBound) {
+  window.__round4SocketBound = true;
+  const socketPoll = setInterval(() => {
+    if (!window.socket) return;
+    clearInterval(socketPoll);
+
+    window.socket.on('round4Evaluated', (data) => {
+      if (!data || round4State.transitionRunning) return;
+      if (round4State.evaluationId && round4State.evaluationId === data.evaluationId && round4State.rendered) return;
+
+      round4State.evaluationId = data.evaluationId || null;
+      round4State.allTeamEvaluations = data.allTeamEvaluations || data.teamEvaluations || {};
+      round4State.finalLeaderboard = Array.isArray(data.finalLeaderboard) ? data.finalLeaderboard : [];
+      round4State.revealConfig = data.revealTimeline || null;
+
+      const loading = document.getElementById('evalLoading');
+      const title = document.getElementById('evalLoadingTitle');
+      const subtitle = document.getElementById('evalLoadingSubtitle');
+      if (loading) loading.style.display = 'flex';
+      if (title) title.textContent = 'Rendering cinematic reveal...';
+      if (subtitle) subtitle.textContent = 'Building team boards and reveal order.';
+      setLoadingBotContext(data && data.scenario, data && data.twist, 'Evaluation complete. Constructing synchronized reveal sequence...');
+
+      window.setTimeout(renderCinematicSequence, 180);
+    });
+
+    window.socket.on('round4EvaluationError', (error) => {
+      const message = error && error.message ? error.message : 'Unknown error';
+      alert(`Error evaluating teams: ${message}`);
+      const loading = document.getElementById('evalLoading');
+      if (loading) loading.style.display = 'none';
+    });
+
+    window.socket.on('finalResultsWaiting', (data) => {
+      const status = document.getElementById('evalFinalStatus');
+      if (!status) return;
+      const readyCount = Number(data && data.readyCount) || 0;
+      const totalPlayers = Number(data && data.totalPlayers) || 0;
+      status.textContent = `Waiting for players: ${readyCount}/${totalPlayers}`;
+
+      const continueBtn = document.getElementById('evalContinueBtn');
+      if (continueBtn && round4State.finalResultsRequested) {
+        continueBtn.textContent = `⏳ WAITING (${readyCount}/${totalPlayers})`;
+      }
+    });
+  }, 100);
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeOVRBreakdown();
+    return;
+  }
+});
+
+window.initRound4Evaluation = initRound4Evaluation;
+window.toggleEvalScenario = toggleEvalScenario;
+window.requestFinalResults = requestFinalResults;
+window.openOVRBreakdown = openOVRBreakdown;
+window.closeOVRBreakdown = closeOVRBreakdown;
+window.switchEvalTab = switchEvalTab;
+/*
+// Round 4 Cinematic Evaluation Controller
+
+const round4State = {
+  isEvaluating: false,
+  rendered: false,
+  allTeamEvaluations: null,
+  finalLeaderboard: null,
+  totalCharacters: 0,
+  totalTeams: 0,
+  evaluationId: null,
+  finalResultsRequested: false,
+  teams: [],
+  queue: [],
+  placements: [],
+  queueIndex: 0,
+  currentAssignment: null,
+  transitionRunning: false,
+  sequenceComplete: false,
+  evalLookup: Object.create(null)
+};
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildMissingCharacterImage(label = 'No Image') {
+  const safeLabel = escapeHtml(label);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="${safeLabel}">
+      <defs>
+        <linearGradient id="fallbackBg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#1f2430"/>
+          <stop offset="100%" stop-color="#2e3647"/>
+        </linearGradient>
+      </defs>
+      <rect width="256" height="256" rx="22" fill="url(#fallbackBg)"/>
+      <circle cx="128" cy="94" r="40" fill="#55607a"/>
+      <rect x="54" y="148" width="148" height="58" rx="29" fill="#55607a"/>
+      <text x="128" y="234" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#d0d8ea">${safeLabel}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function normalizeImageUrl(url) {
+  if (!url) return null;
+  const raw = String(url).trim();
+  if (!raw) return null;
+  if (raw.startsWith('//')) return `https:${raw}`;
+  return raw;
+}
+
+function resolveCharacterImage(url, fallbackLabel = 'No Image') {
+  return normalizeImageUrl(url) || buildMissingCharacterImage(fallbackLabel);
+}
+
+function getScenarioDelta(evalData) {
+  const ovrBreakdown = evalData && evalData.breakdown ? evalData.breakdown.ovrBreakdown : null;
+  if (ovrBreakdown && Number.isFinite(Number(ovrBreakdown.scenarioDelta))) {
+    return Number(ovrBreakdown.scenarioDelta);
+  }
+  if (ovrBreakdown && Number.isFinite(Number(ovrBreakdown.scenarioMultiplier))) {
+    return Math.round((Number(ovrBreakdown.scenarioMultiplier) - 1) * 20);
+  }
+  return 0;
+}
+
+function getOVRTierFromValue(ovr) {
+  if (ovr >= 99) return { tier: 'icon', label: 'Icon' };
+  if (ovr >= 95) return { tier: 'legendary', label: 'Legendary' };
+  if (ovr >= 90) return { tier: 'epic', label: 'Epic' };
+  if (ovr >= 85) return { tier: 'rare', label: 'Rare' };
+  if (ovr >= 75) return { tier: 'gold', label: 'Gold' };
+  if (ovr >= 65) return { tier: 'silver', label: 'Silver' };
+  return { tier: 'bronze', label: 'Bronze' };
+}
+
+function signed(value) {
+  const numeric = Number(value) || 0;
+  return numeric > 0 ? `+${numeric}` : `${numeric}`;
+}
+
+function boardStateClass(filledCount) {
+  if (filledCount >= 6) return 'is-complete';
+  if (filledCount >= 4) return 'is-filling-low';
+  if (filledCount >= 2) return 'is-filling-mid';
+  return 'is-fuzzy';
+}
+
+function updateEvalProgress(current, total) {
+  const progress = document.getElementById('evalProgress');
+  const bar = document.getElementById('evalProgressBar');
+  const fill = bar ? bar.querySelector('.eval-progress-fill') : null;
+  const pct = document.getElementById('evalProgressPct');
+  const safeTotal = Math.max(1, Number(total) || 0);
+  const safeCurrent = Math.max(0, Number(current) || 0);
+  const percent = Math.max(0, Math.min(100, Math.round((safeCurrent / safeTotal) * 100)));
+
+  if (progress) progress.textContent = String(safeCurrent);
+  if (fill) fill.style.width = `${percent}%`;
+  if (bar) bar.setAttribute('aria-valuenow', String(percent));
+  if (pct) pct.textContent = `${percent}%`;
+}
+
+function clearEvalSurface() {
+  const boards = document.getElementById('evalTeamBoards');
+  const hero = document.getElementById('evalHeroHost');
+  const leaderboard = document.getElementById('evalLeaderboardContainer');
+  if (boards) boards.innerHTML = '';
+  if (hero) hero.innerHTML = '';
+  if (leaderboard) leaderboard.innerHTML = '';
+}
+
+function resetCinematicState() {
+  round4State.teams = [];
+  round4State.queue = [];
+  round4State.placements = [];
+  round4State.queueIndex = 0;
+  round4State.currentAssignment = null;
+  round4State.transitionRunning = false;
+  round4State.sequenceComplete = false;
+  round4State.evalLookup = Object.create(null);
+
+  const completion = document.getElementById('evalCompletionBadge');
+  const replay = document.getElementById('evalReplayBtn');
+  const next = document.getElementById('evalNextCharacterBtn');
+  const continueBtn = document.getElementById('evalContinueBtn');
+  const status = document.getElementById('evalFinalStatus');
+  if (completion) completion.hidden = true;
+  if (replay) replay.hidden = true;
+  if (next) {
+    next.disabled = true;
+    next.textContent = 'Next Character';
+  }
+  if (continueBtn) {
+    continueBtn.disabled = true;
+    continueBtn.textContent = 'Continue to Final Results';
+  }
+  if (status) status.textContent = '';
+}
+
+function initRound4Evaluation(data) {
+  const scenario = data && data.scenario ? data.scenario : 'Unknown scenario';
+  const twist = data && data.twist ? data.twist : 'Unknown twist';
+  const finalTeams = data && data.finalTeams ? data.finalTeams : {};
+
+  const evalScreen = document.getElementById('round4EvalScreen');
+  if (evalScreen) {
+    document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
+    evalScreen.classList.add('active');
+  }
+
+  const scenarioText = document.getElementById('evalScenarioText');
+  const twistText = document.getElementById('evalTwistText');
+  const causalityText = document.getElementById('evalContextCausality');
+  if (scenarioText) scenarioText.textContent = scenario;
+  if (twistText) twistText.textContent = twist;
+  if (causalityText) {
+    causalityText.textContent = 'One plaque at a time: inspect, then dock to team board. Fit delta shows scenario/twist impact.';
+  }
+
+  round4State.totalCharacters = Object.values(finalTeams).reduce((sum, team) => sum + (Array.isArray(team) ? team.length : 0), 0);
+  round4State.totalTeams = Object.keys(finalTeams || {}).length;
+
+  const evalTotal = document.getElementById('evalTotal');
+  const evalTeamCount = document.getElementById('evalTeamCount');
+  if (evalTotal) evalTotal.textContent = String(round4State.totalCharacters);
+  if (evalTeamCount) evalTeamCount.textContent = String(round4State.totalTeams);
+
+  updateEvalProgress(0, round4State.totalCharacters);
+  clearEvalSurface();
+  resetCinematicState();
+
+  const loading = document.getElementById('evalLoading');
+  const loadingTitle = document.getElementById('evalLoadingTitle');
+  const loadingSubtitle = document.getElementById('evalLoadingSubtitle');
+  if (loading) loading.style.display = 'flex';
+  if (loadingTitle) loadingTitle.textContent = 'Evaluating teams...';
+  if (loadingSubtitle) loadingSubtitle.textContent = 'Merging cached intel from earlier rounds with final scoring.';
+
+  round4State.isEvaluating = true;
+  round4State.rendered = false;
+  round4State.evaluationId = null;
+  round4State.finalResultsRequested = false;
+  round4State.allTeamEvaluations = null;
+  round4State.finalLeaderboard = null;
+
+  if (window.socket) {
+    window.socket.emit('evaluateRound4');
+  }
+}
+
+function getTeamOrderNames() {
+  const fromLeaderboard = Array.isArray(round4State.finalLeaderboard)
+    ? round4State.finalLeaderboard.map((row) => row && row.playerName).filter(Boolean)
+    : [];
+  const fromEvaluations = Object.keys(round4State.allTeamEvaluations || {});
+  const seen = new Set();
+  const ordered = [];
+  [...fromLeaderboard, ...fromEvaluations].forEach((name) => {
+    if (!seen.has(name)) {
+      seen.add(name);
+      ordered.push(name);
+    }
+  });
+  return ordered;
+}
+
+function buildCinematicData() {
+  const all = round4State.allTeamEvaluations || {};
+  const teamNames = getTeamOrderNames();
+  const teams = [];
+  const queue = [];
+
+  teamNames.forEach((playerName, teamIndex) => {
+    const teamData = all[playerName] || {};
+    const evaluations = Array.isArray(teamData.evaluations) ? teamData.evaluations.slice(0, 6) : [];
+    const teamSummary = teamData.teamSummary || {};
+
+    const normalizedEvaluations = evaluations.map((entry, slotIndex) => {
+      const normalized = {
+        ...entry,
+        fitDelta: getScenarioDelta(entry),
+        roleType: entry.roleType || entry.characterType || 'Balanced',
+        shortReason: entry.reason || 'No short reason available.',
+        rarity: entry.rarity || 'Common',
+        notes: Array.isArray(entry.notes) ? entry.notes.slice(0, 4) : [],
+        ovrTierLabel: (entry.ovrTier && entry.ovrTier.label) || (typeof entry.ovrTier === 'string' ? entry.ovrTier : getOVRTierFromValue(entry.ovr).label)
+      };
+
+      queue.push({
+        teamIndex,
+        slotIndex,
+        teamName: playerName,
+        evalData: normalized,
+        key: `${teamIndex}-${slotIndex}`
+      });
+      return normalized;
+    });
+
+    teams.push({
+      teamIndex,
+      playerName,
+      teamSummary,
+      evaluations: normalizedEvaluations
+    });
+  });
+
+  round4State.teams = teams;
+  round4State.queue = queue;
+  round4State.totalCharacters = queue.length;
+  round4State.totalTeams = teams.length;
+
+  const evalTotal = document.getElementById('evalTotal');
+  const evalTeamCount = document.getElementById('evalTeamCount');
+  if (evalTotal) evalTotal.textContent = String(round4State.totalCharacters);
+  if (evalTeamCount) evalTeamCount.textContent = String(round4State.totalTeams);
+}
+
+function findPlacement(teamIndex, slotIndex) {
+  return round4State.placements.find((item) => item.teamIndex === teamIndex && item.slotIndex === slotIndex) || null;
+}
+
+function renderTeamBoards() {
+  const container = document.getElementById('evalTeamBoards');
+  if (!container) return;
+
+  const html = round4State.teams.map((team) => {
+    const filled = round4State.placements.filter((item) => item.teamIndex === team.teamIndex).length;
+    const boardClass = boardStateClass(filled);
+    const slots = Array.from({ length: 6 }).map((_, slotIndex) => {
+      const placed = findPlacement(team.teamIndex, slotIndex);
+      if (!placed) {
+        return `<div class="eval-slot" data-team-index="${team.teamIndex}" data-slot-index="${slotIndex}" aria-hidden="true"></div>`;
+      }
+
+      const evalData = placed.evalData;
+      const image = resolveCharacterImage(evalData.imageUrl, evalData.character || 'No Portrait');
+      return `
+        <div class="eval-slot is-filled" data-team-index="${team.teamIndex}" data-slot-index="${slotIndex}">
+          <button class="eval-docked-plaque" type="button" data-eval-key="${escapeHtml(placed.key)}" aria-label="View OVR breakdown for ${escapeHtml(evalData.character || 'character')}">
+            <img
+              src="${escapeHtml(image)}"
+              alt="${escapeHtml(evalData.character || 'Character')} portrait"
+              loading="lazy"
+              decoding="async"
+              referrerpolicy="no-referrer"
+              onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';"
+            >
+            <span>
+              <span class="eval-docked-name">${escapeHtml(evalData.character || 'Unknown')}</span>
+              <span class="eval-docked-ovr">OVR ${Number(evalData.ovr) || 0}</span>
+            </span>
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <section class="eval-team-board ${boardClass}" data-team-board="${team.teamIndex}">
+        <header class="eval-team-board-head">
+          <h3>${escapeHtml(team.playerName)}</h3>
+          <p>${filled}/6 placed • Team OVR ${Number(team.teamSummary && team.teamSummary.totalOVR) || 0}</p>
+        </header>
+        <div class="eval-team-slots">${slots}</div>
+      </section>
+    `;
+  }).join('');
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('.eval-docked-plaque').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.getAttribute('data-eval-key');
+      if (!key || !round4State.evalLookup[key]) return;
+      openOVRBreakdown(round4State.evalLookup[key]);
+    });
+  });
+}
+
+function renderActivePlaque() {
+  const host = document.getElementById('evalHeroHost');
+  if (!host) return;
+
+  const assignment = round4State.currentAssignment;
+  if (!assignment) {
+    host.innerHTML = '';
+    return;
+  }
+
+  const evalData = assignment.evalData;
+  const fitDelta = Number(evalData.fitDelta) || 0;
+  const fitClass = fitDelta >= 0 ? 'fit-positive' : 'fit-negative';
+  const notes = Array.isArray(evalData.notes) ? evalData.notes : [];
+  const image = resolveCharacterImage(evalData.imageUrl, evalData.character || 'No Portrait');
+
+  host.innerHTML = `
+    <article id="evalActivePlaque" class="eval-active-plaque" aria-live="polite">
+      <div class="eval-active-head">
+        <img
+          src="${escapeHtml(image)}"
+          alt="${escapeHtml(evalData.character || 'Character')} portrait"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+          onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';"
+        >
+        <div>
+          <h3>${escapeHtml(evalData.character || 'Unknown')}</h3>
+          <p>${escapeHtml(evalData.roleType || 'Balanced')} • ${escapeHtml(evalData.rarity || 'Common')}</p>
+          <p>${escapeHtml(evalData.shortReason || 'No reason provided.')}</p>
+        </div>
+      </div>
+
+      <div class="eval-active-metrics">
+        <button class="eval-active-ovr-btn" type="button" aria-label="View OVR breakdown for ${escapeHtml(evalData.character || 'character')}">
+          <span>OVR</span>
+          <strong>${Number(evalData.ovr) || 0}</strong>
+          <small>${escapeHtml(evalData.ovrTierLabel || '')}</small>
+        </button>
+        <div class="eval-active-chip">
+          <span>Score</span>
+          <strong>${Number(evalData.score) || 0}</strong>
+        </div>
+        <div class="eval-active-chip ${fitClass}">
+          <span>Fit Delta</span>
+          <strong>${signed(fitDelta)}</strong>
+        </div>
+      </div>
+
+      <details class="eval-active-details">
+        <summary>Details + Notes</summary>
+        <ul>${notes.length ? notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('') : '<li>No additional evaluator notes.</li>'}</ul>
+        <p class="eval-active-phrase">"${escapeHtml(evalData.phrase || 'No phrase available.')}"</p>
+      </details>
+    </article>
+  `;
+
+  const ovrBtn = host.querySelector('.eval-active-ovr-btn');
+  if (ovrBtn) {
+    ovrBtn.addEventListener('click', () => openOVRBreakdown(evalData));
+    ovrBtn.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openOVRBreakdown(evalData);
+      }
+    });
+  }
+}
+
+function updateNextButtonLabel() {
+  const next = document.getElementById('evalNextCharacterBtn');
+  if (!next) return;
+  const total = round4State.queue.length;
+  const done = round4State.placements.length;
+  if (done >= total) {
+    next.textContent = 'All Characters Placed';
+    next.disabled = true;
+    return;
+  }
+  next.textContent = `Next Character (${Math.min(done + 1, total)}/${total})`;
+}
+
+function spawnNextAssignment() {
+  round4State.currentAssignment = round4State.queue[round4State.queueIndex] || null;
+  renderActivePlaque();
+  updateNextButtonLabel();
+
+  const next = document.getElementById('evalNextCharacterBtn');
+  if (next) {
+    const enabled = Boolean(round4State.currentAssignment) && !round4State.transitionRunning;
+    next.disabled = !enabled;
+  }
+}
+
+function finishSequenceIfComplete() {
+  if (round4State.placements.length < round4State.queue.length) return;
+  round4State.sequenceComplete = true;
+  round4State.currentAssignment = null;
+  renderActivePlaque();
+
+  const completion = document.getElementById('evalCompletionBadge');
+  const replay = document.getElementById('evalReplayBtn');
+  const continueBtn = document.getElementById('evalContinueBtn');
+
+  if (completion) {
+    completion.hidden = false;
+    completion.textContent = `All ${round4State.queue.length} characters placed`;
+  }
+  if (replay) replay.hidden = false;
+  if (continueBtn) continueBtn.disabled = false;
+
+  updateNextButtonLabel();
+  renderFinalLeaderboard();
+}
+
+function animateDockTransition(assignment, onDone) {
+  const active = document.getElementById('evalActivePlaque');
+  const target = document.querySelector(`.eval-slot[data-team-index='${assignment.teamIndex}'][data-slot-index='${assignment.slotIndex}']`);
+  if (!active || !target) {
+    onDone();
+    return;
+  }
+
+  const startRect = active.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const clone = active.cloneNode(true);
+  clone.classList.add('eval-flight-clone');
+  clone.style.left = `${startRect.left}px`;
+  clone.style.top = `${startRect.top}px`;
+  clone.style.width = `${startRect.width}px`;
+  clone.style.height = `${startRect.height}px`;
+  clone.style.transform = 'translate3d(0,0,0) scale(1)';
+  clone.style.opacity = '1';
+  document.body.appendChild(clone);
+
+  active.style.opacity = '0';
+
+  requestAnimationFrame(() => {
+    const dx = (targetRect.left + (targetRect.width / 2)) - (startRect.left + (startRect.width / 2));
+    const dy = (targetRect.top + (targetRect.height / 2)) - (startRect.top + (startRect.height / 2));
+    clone.style.transform = `translate3d(${dx}px, ${dy - 20}px, 0) scale(0.26)`;
+    clone.style.opacity = '0.94';
+  });
+
+  window.setTimeout(() => {
+    clone.remove();
+    onDone();
+  }, 560);
+}
+
+function handleNextCharacter() {
+  if (round4State.transitionRunning || !round4State.currentAssignment) return;
+  round4State.transitionRunning = true;
+
+  const next = document.getElementById('evalNextCharacterBtn');
+  if (next) next.disabled = true;
+
+  const assignment = round4State.currentAssignment;
+  animateDockTransition(assignment, () => {
+    round4State.placements.push(assignment);
+    round4State.evalLookup[assignment.key] = assignment.evalData;
+    round4State.queueIndex += 1;
+    round4State.transitionRunning = false;
+
+    updateEvalProgress(round4State.placements.length, round4State.queue.length);
+    renderTeamBoards();
+
+    if (round4State.placements.length >= round4State.queue.length) {
+      finishSequenceIfComplete();
+      return;
+    }
+
+    spawnNextAssignment();
+  });
+}
+
+function bindCinematicControls() {
+  const next = document.getElementById('evalNextCharacterBtn');
+  const replay = document.getElementById('evalReplayBtn');
+
+  if (next && !next.dataset.bound) {
+    next.dataset.bound = 'true';
+    next.addEventListener('click', handleNextCharacter);
+  }
+
+  if (replay && !replay.dataset.bound) {
+    replay.dataset.bound = 'true';
+    replay.addEventListener('click', () => {
+      round4State.placements = [];
+      round4State.queueIndex = 0;
+      round4State.currentAssignment = null;
+      round4State.transitionRunning = false;
+      round4State.sequenceComplete = false;
+      round4State.evalLookup = Object.create(null);
+
+      const completion = document.getElementById('evalCompletionBadge');
+      if (completion) completion.hidden = true;
+      replay.hidden = true;
+
+      const continueBtn = document.getElementById('evalContinueBtn');
+      if (continueBtn) continueBtn.disabled = true;
+
+      updateEvalProgress(0, round4State.queue.length);
+      renderTeamBoards();
+      spawnNextAssignment();
+    });
+  }
+}
+
+function renderFinalLeaderboard() {
+  const container = document.getElementById('evalLeaderboardContainer');
+  if (!container || !Array.isArray(round4State.finalLeaderboard)) return;
+
+  const ranked = round4State.finalLeaderboard.slice().sort((a, b) => {
+    const points = (Number(b && b.round4Points) || 0) - (Number(a && a.round4Points) || 0);
+    if (points !== 0) return points;
+    const ovr = (Number(b && b.totalOVR) || 0) - (Number(a && a.totalOVR) || 0);
+    if (ovr !== 0) return ovr;
+    return String(a && a.playerName ? a.playerName : '').localeCompare(String(b && b.playerName ? b.playerName : ''));
+  });
+
+  container.innerHTML = `
+    <div class="eval-leaderboard-mini">
+      <h3>Round 4 Leaderboard</h3>
+      <ol>
+        ${ranked.map((row, index) => `
+          <li>
+            <span>${index + 1}. ${escapeHtml(row.playerName || 'Unknown')}</span>
+            <span>${Number(row.round4Points) || 0} pts • OVR ${Number(row.totalOVR) || 0}</span>
+          </li>
+        `).join('')}
+      </ol>
+    </div>
+  `;
+}
+
+function renderCinematicSequence() {
+  buildCinematicData();
+  round4State.placements = [];
+  round4State.queueIndex = 0;
+  round4State.currentAssignment = null;
+  round4State.transitionRunning = false;
+  round4State.sequenceComplete = false;
+  round4State.evalLookup = Object.create(null);
+
+  updateEvalProgress(0, round4State.queue.length);
+  renderTeamBoards();
+  spawnNextAssignment();
+  bindCinematicControls();
+
+  const loading = document.getElementById('evalLoading');
+  if (loading) loading.style.display = 'none';
+
+  round4State.isEvaluating = false;
+  round4State.rendered = true;
+}
+
+function requestFinalResults() {
+  if (round4State.finalResultsRequested) return;
+  if (!window.socket) return;
+  round4State.finalResultsRequested = true;
+
+  const continueBtn = document.getElementById('evalContinueBtn');
+  const status = document.getElementById('evalFinalStatus');
+  if (continueBtn) {
+    continueBtn.disabled = true;
+    continueBtn.textContent = 'Waiting for others...';
+  }
+  if (status) status.textContent = 'Waiting for players...';
+
+  window.socket.emit('requestFinalResults');
+}
+
+function toggleEvalScenario() {
+  const box = document.getElementById('evalScenarioBox');
+  if (!box) return;
+  box.classList.toggle('is-condensed');
+}
+
+function switchEvalTab() {
+  return;
+}
+
+function openOVRBreakdown(evalData) {
+  const modal = document.getElementById('ovrBreakdownModal');
+  if (!modal || !evalData) return;
+
+  const modalTitle = document.getElementById('modalTitle');
+  if (modalTitle) modalTitle.textContent = `OVR Breakdown — ${evalData.character}`;
+
+  const modalImage = document.getElementById('modalCharacterImage');
+  const modalImageWrap = document.getElementById('modalCharacterImageWrap');
+  if (modalImage) {
+    const imageSrc = resolveCharacterImage(evalData.imageUrl, 'No Portrait');
+    const hasImage = Boolean(normalizeImageUrl(evalData.imageUrl));
+    modalImage.src = imageSrc;
+    modalImage.alt = `${evalData.character} portrait`;
+    if (modalImageWrap) modalImageWrap.classList.toggle('missing', !hasImage);
+    modalImage.onerror = function onModalImageError() {
+      this.onerror = null;
+      this.src = buildMissingCharacterImage('No Portrait');
+      if (modalImageWrap) modalImageWrap.classList.add('missing');
+    };
+  }
+
+  const summaryEl = document.getElementById('modalCharacterSummary');
+  if (summaryEl) {
+    summaryEl.textContent = evalData.breakdown && evalData.breakdown.characterSummary
+      ? evalData.breakdown.characterSummary
+      : 'No information available.';
+  }
+
+  const scenarioEl = document.getElementById('modalScenarioRelevance');
+  if (scenarioEl) {
+    scenarioEl.textContent = evalData.breakdown && evalData.breakdown.scenarioRelevance
+      ? evalData.breakdown.scenarioRelevance
+      : 'No scenario analysis available.';
+  }
+
+  const scenarioKeywordsEl = document.getElementById('modalScenarioKeywords');
+  if (scenarioKeywordsEl) {
+    const scenarioKeywords = evalData.breakdown && evalData.breakdown.keywordMatches
+      ? evalData.breakdown.keywordMatches.scenario || []
+      : [];
+    scenarioKeywordsEl.innerHTML = scenarioKeywords.length
+      ? `<span class="ovr-keywords-label">Keywords:</span>${scenarioKeywords.map((kw) => `<span class="ovr-keyword-chip">${escapeHtml(kw)}</span>`).join('')}`
+      : '<span class="ovr-keywords-empty">No keyword matches</span>';
+  }
+
+  const twistEl = document.getElementById('modalTwistRelevance');
+  if (twistEl) {
+    twistEl.textContent = evalData.breakdown && evalData.breakdown.twistRelevance
+      ? evalData.breakdown.twistRelevance
+      : 'No twist analysis available.';
+  }
+
+  const twistKeywordsEl = document.getElementById('modalTwistKeywords');
+  if (twistKeywordsEl) {
+    const twistKeywords = evalData.breakdown && evalData.breakdown.keywordMatches
+      ? evalData.breakdown.keywordMatches.twist || []
+      : [];
+    twistKeywordsEl.innerHTML = twistKeywords.length
+      ? `<span class="ovr-keywords-label">Keywords:</span>${twistKeywords.map((kw) => `<span class="ovr-keyword-chip">${escapeHtml(kw)}</span>`).join('')}`
+      : '<span class="ovr-keywords-empty">No keyword matches</span>';
+  }
+
+  const scoreBreakdownEl = document.getElementById('modalScoreBreakdown');
+  if (scoreBreakdownEl && evalData.breakdown && Array.isArray(evalData.breakdown.scoreBreakdown)) {
+    const steps = evalData.breakdown.scoreBreakdown;
+    scoreBreakdownEl.innerHTML = `
+      <div class="score-mini-header">
+        <span class="score-mini-title">Score Flow</span>
+        <span class="score-mini-total"><strong>${Number(evalData.score) || 0}/30</strong></span>
+      </div>
+      <div class="score-mini-legend">
+        ${steps.map((step) => {
+          const points = Number(step && step.points) || 0;
+          const sign = points > 0 ? '+' : '';
+          const cls = points > 0 ? 'positive' : points < 0 ? 'negative' : 'neutral';
+          const label = step && step.step ? step.step : 'Step';
+          const desc = step && step.description ? step.description : '';
+          return `<span class="score-mini-chip ${cls}" title="${escapeHtml(desc)}"><strong>${escapeHtml(label)}</strong> ${sign}${points}</span>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  const ovrBreakdownEl = document.querySelector('.ovr-breakdown-items');
+  if (ovrBreakdownEl && evalData.breakdown && evalData.breakdown.ovrBreakdown) {
+    const ovr = evalData.breakdown.ovrBreakdown;
+    const percentages = ovr.percentages || {};
+    ovrBreakdownEl.innerHTML = `
+      <div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Base from Score</div><div class="ovr-breakdown-value">${ovr.baseFromScore} (${percentages.scoreContribution || 0}%)</div></div>
+      <div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Rarity Bonus</div><div class="ovr-breakdown-value">${ovr.rarityBonus} (${percentages.rarityContribution || 0}%)</div></div>
+      <div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Attribute Bonus</div><div class="ovr-breakdown-value">${ovr.attributeBonus} (${percentages.attributeContribution || 0}%)</div></div>
+      <div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Scenario Fit</div><div class="ovr-breakdown-value">×${Number(ovr.scenarioMultiplier || 1).toFixed(2)} (${(percentages.scenarioEffect || 0) > 0 ? '+' : ''}${percentages.scenarioEffect || 0}%)</div></div>
+      ${typeof ovr.scenarioDelta === 'number' ? `<div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Scenario Delta</div><div class="ovr-breakdown-value">${ovr.scenarioDelta > 0 ? '+' : ''}${ovr.scenarioDelta}</div></div>` : ''}
+      <div class="ovr-breakdown-item ovr-breakdown-total"><div class="ovr-breakdown-label"><strong>Final OVR</strong></div><div class="ovr-breakdown-value"><strong>${ovr.finalOVR}/99</strong></div></div>
+      ${ovr.scenarioDeltaNarrative ? `<div class="ovr-breakdown-item"><div class="ovr-breakdown-label">Why Scenario Changed OVR</div><div class="ovr-breakdown-value">${escapeHtml(ovr.scenarioDeltaNarrative)}</div></div>` : ''}
+    `;
+  }
+
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeOVRBreakdown() {
+  const modal = document.getElementById('ovrBreakdownModal');
+  if (!modal) return;
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+}
+
+if (typeof window !== 'undefined' && !window.__round4SocketBound) {
+  window.__round4SocketBound = true;
+  const socketPoll = setInterval(() => {
+    if (!window.socket) return;
+    clearInterval(socketPoll);
+
+    window.socket.on('round4Evaluated', (data) => {
+      if (!data) return;
+      if (round4State.transitionRunning) return;
+      if (round4State.evaluationId && round4State.evaluationId === data.evaluationId && round4State.rendered) return;
+
+      round4State.evaluationId = data.evaluationId || null;
+      round4State.allTeamEvaluations = data.allTeamEvaluations || data.teamEvaluations || {};
+      round4State.finalLeaderboard = Array.isArray(data.finalLeaderboard) ? data.finalLeaderboard : [];
+
+      const loading = document.getElementById('evalLoading');
+      const title = document.getElementById('evalLoadingTitle');
+      const subtitle = document.getElementById('evalLoadingSubtitle');
+      if (loading) loading.style.display = 'flex';
+      if (title) title.textContent = 'Rendering cinematic reveal...';
+      if (subtitle) subtitle.textContent = 'Building team boards and reveal order.';
+
+      window.setTimeout(renderCinematicSequence, 80);
+    });
+
+    window.socket.on('round4EvaluationError', (error) => {
+      const message = error && error.message ? error.message : 'Unknown error';
+      alert(`Error evaluating teams: ${message}`);
+      const loading = document.getElementById('evalLoading');
+      if (loading) loading.style.display = 'none';
+    });
+
+    window.socket.on('finalResultsWaiting', (data) => {
+      const status = document.getElementById('evalFinalStatus');
+      if (!status) return;
+      const readyCount = Number(data && data.readyCount) || 0;
+      const totalPlayers = Number(data && data.totalPlayers) || 0;
+      status.textContent = `Waiting for players: ${readyCount}/${totalPlayers}`;
+    });
+  }, 100);
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeOVRBreakdown();
+    return;
+  }
+
+  if ((event.key === 'Enter' || event.key === ' ') && document.getElementById('round4EvalScreen')?.classList.contains('active')) {
+    const targetTag = document.activeElement && document.activeElement.tagName;
+    if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') return;
+    if (round4State.sequenceComplete || round4State.transitionRunning) return;
+    event.preventDefault();
+    handleNextCharacter();
+  }
+});
+
+window.initRound4Evaluation = initRound4Evaluation;
+window.toggleEvalScenario = toggleEvalScenario;
+window.requestFinalResults = requestFinalResults;
+window.openOVRBreakdown = openOVRBreakdown;
+window.closeOVRBreakdown = closeOVRBreakdown;
+window.switchEvalTab = switchEvalTab;// Round 4 Evaluation Screen Controller
 
 let round4State = {
   isEvaluating: false,
@@ -11,7 +1865,8 @@ let round4State = {
   evaluationId: null,
   rendered: false,
   rendering: false,
-  finalResultsRequested: false
+  finalResultsRequested: false,
+  activeTab: 'overview'
 };
 
 function buildMissingCharacterImage(label = 'No Image') {
@@ -78,6 +1933,88 @@ function getEmotionIconPath(evalData) {
   return `/img/emotions/${safeEmotion}.png`;
 }
 
+function getTeamDomId(playerName) {
+  return `eval-team-${String(playerName || 'team').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+}
+
+function formatSigned(value) {
+  const numeric = Number(value) || 0;
+  return numeric > 0 ? `+${numeric}` : `${numeric}`;
+}
+
+function getScenarioDelta(evalData) {
+  const ovrBreakdown = evalData && evalData.breakdown ? evalData.breakdown.ovrBreakdown : null;
+  if (ovrBreakdown && Number.isFinite(Number(ovrBreakdown.scenarioDelta))) {
+    return Number(ovrBreakdown.scenarioDelta);
+  }
+
+  if (ovrBreakdown && Number.isFinite(Number(ovrBreakdown.scenarioMultiplier))) {
+    const multiplier = Number(ovrBreakdown.scenarioMultiplier);
+    return Math.round((multiplier - 1) * 20);
+  }
+
+  return 0;
+}
+
+function getFitTone(delta) {
+  if (delta >= 2) return 'boost';
+  if (delta <= -2) return 'drag';
+  return 'neutral';
+}
+
+function buildCausalitySummary(evalData) {
+  const ovrBreakdown = evalData && evalData.breakdown ? evalData.breakdown.ovrBreakdown : null;
+  const baseScore = ovrBreakdown
+    ? (Number(ovrBreakdown.baseFromScore) || 0) + (Number(ovrBreakdown.rarityBonus) || 0) + (Number(ovrBreakdown.attributeBonus) || 0)
+    : null;
+
+  const delta = getScenarioDelta(evalData);
+  return {
+    baseScore,
+    delta,
+    tone: getFitTone(delta)
+  };
+}
+
+function switchEvalTab(tabName = 'overview') {
+  const tabs = ['overview', 'teams', 'leaderboard'];
+  const nextTab = tabs.includes(tabName) ? tabName : 'overview';
+
+  tabs.forEach((tab) => {
+    const button = document.getElementById(`evalTab${tab.charAt(0).toUpperCase()}${tab.slice(1)}`);
+    const panel = document.getElementById(`evalPanel${tab.charAt(0).toUpperCase()}${tab.slice(1)}`);
+
+    const isActive = tab === nextTab;
+    if (button) {
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    }
+
+    if (panel) {
+      panel.classList.toggle('active', isActive);
+      if (isActive) {
+        panel.removeAttribute('hidden');
+      } else {
+        panel.setAttribute('hidden', 'hidden');
+      }
+    }
+  });
+
+  round4State.activeTab = nextTab;
+}
+
+function openTeamInTeamsPanel(playerName) {
+  switchEvalTab('teams');
+  const targetId = getTeamDomId(playerName);
+  const target = document.getElementById(targetId);
+  if (!target) return;
+
+  if (target.tagName.toLowerCase() === 'details') {
+    target.open = true;
+  }
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function updateEvalProgress(current, total) {
   const progress = document.getElementById('evalProgress');
   const bar = document.getElementById('evalProgressBar');
@@ -109,13 +2046,20 @@ function initRound4Evaluation(data) {
   // Display scenario
   const scenarioText = document.getElementById('evalScenarioText');
   const twistText = document.getElementById('evalTwistText');
+  const causalityText = document.getElementById('evalContextCausality');
   if (scenarioText) scenarioText.textContent = scenario;
-  if (twistText) twistText.textContent = `🔄 Twist: ${twist}`;
+  if (twistText) twistText.textContent = twist;
+  if (causalityText) {
+    causalityText.textContent = 'Compare Fit Delta on each card: high base stats can still drop when twist fit is weak.';
+  }
   
   // Calculate total characters to evaluate (up to 36)
   const totalCharacters = Object.values(finalTeams).reduce((sum, team) => sum + team.length, 0);
+  const totalTeams = Object.keys(finalTeams || {}).length;
   const evalTotal = document.getElementById('evalTotal');
   if (evalTotal) evalTotal.textContent = totalCharacters;
+  const evalTeamCount = document.getElementById('evalTeamCount');
+  if (evalTeamCount) evalTeamCount.textContent = String(totalTeams);
 
   updateEvalProgress(0, totalCharacters);
 
@@ -133,7 +2077,7 @@ function initRound4Evaluation(data) {
   round4State.isEvaluating = true;
   round4State.evaluations = [];
   round4State.currentIndex = 0;
-  round4State.totalTeams = Object.keys(finalTeams).length;
+  round4State.totalTeams = totalTeams;
   round4State.totalCharacters = totalCharacters;
   round4State.evaluationId = null;
   round4State.rendered = false;
@@ -142,6 +2086,19 @@ function initRound4Evaluation(data) {
 
   const container = document.getElementById('evalCardsContainer');
   if (container) container.innerHTML = '';
+
+  const overview = document.getElementById('evalTeamOverview');
+  if (overview) overview.innerHTML = '';
+
+  const leaderboard = document.getElementById('evalLeaderboardContainer');
+  if (leaderboard) leaderboard.innerHTML = '';
+
+  switchEvalTab('overview');
+
+  const scenarioGuide = document.getElementById('evalScenarioContent');
+  const scenarioGuideIcon = document.getElementById('evalScenarioIcon');
+  if (scenarioGuide) scenarioGuide.style.display = 'none';
+  if (scenarioGuideIcon) scenarioGuideIcon.textContent = '▶';
 
   const continueBtn = document.getElementById('evalContinueBtn');
   if (continueBtn) {
@@ -205,60 +2162,104 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
 
 // Sequential display with delays - iterate through all teams and their characters
 async function displayAllTeamEvaluationsSequentially() {
-  const container = document.getElementById('evalCardsContainer');
-  if (!container) return;
-
+  const teamContainer = document.getElementById('evalCardsContainer');
+  const overviewContainer = document.getElementById('evalTeamOverview');
+  if (!teamContainer || !overviewContainer) return;
   if (!round4State.allTeamEvaluations) return;
+
   round4State.rendering = true;
 
   const loading = document.getElementById('evalLoading');
   if (loading) loading.style.display = 'flex';
-  
-  container.innerHTML = '';
-  
+
+  teamContainer.innerHTML = '';
+  overviewContainer.innerHTML = '';
+
+  const teamFragment = document.createDocumentFragment();
+  const overviewFragment = document.createDocumentFragment();
+
   let charIndex = 0;
-  const allTeams = Object.entries(round4State.allTeamEvaluations);
-  const charDelay = getCharacterRevealDelay(round4State.totalCharacters);
-  const summaryDelay = 220;
-  const leaderboardDelay = 220;
-  
-  // For each team
+  const allTeams = Object.entries(round4State.allTeamEvaluations).sort(([, teamA], [, teamB]) => {
+    const ovrA = Number(teamA && teamA.teamSummary && teamA.teamSummary.totalOVR) || 0;
+    const ovrB = Number(teamB && teamB.teamSummary && teamB.teamSummary.totalOVR) || 0;
+    if (ovrB !== ovrA) return ovrB - ovrA;
+    return 0;
+  });
+
   for (const [playerName, teamData] of allTeams) {
+    const safeSummary = teamData && teamData.teamSummary ? teamData.teamSummary : {};
+
+    const shell = document.createElement('details');
+    shell.className = 'eval-team-shell';
+    shell.id = getTeamDomId(playerName);
+    shell.open = allTeams[0] && allTeams[0][0] === playerName;
+
     const teamBlock = document.createElement('section');
     teamBlock.className = 'eval-team-block';
-
-    // Add team header
-    const teamHeader = document.createElement('div');
-    teamHeader.className = 'eval-team-header';
-    const heading = document.createElement('h2');
-    heading.textContent = `🎮 ${playerName}'s Team`;
-    teamHeader.appendChild(heading);
-    teamBlock.appendChild(teamHeader);
 
     const teamCards = document.createElement('div');
     teamCards.className = 'eval-team-cards';
     teamBlock.appendChild(teamCards);
-    
-    // For each character in team
-    for (const evalData of teamData.evaluations) {
+
+    const evaluations = Array.isArray(teamData && teamData.evaluations)
+      ? [...teamData.evaluations].sort((a, b) => (Number(b && b.ovr) || 0) - (Number(a && a.ovr) || 0))
+      : [];
+    const fitDeltas = evaluations.map((entry) => getScenarioDelta(entry));
+    const fitDeltaAvg = fitDeltas.length
+      ? Math.round(fitDeltas.reduce((sum, value) => sum + value, 0) / fitDeltas.length)
+      : 0;
+    const fitTone = getFitTone(fitDeltaAvg);
+
+    const shellSummary = document.createElement('summary');
+    shellSummary.className = 'eval-team-shell-summary';
+    shellSummary.innerHTML = `
+      <div class="eval-team-shell-heading">
+        <strong>🎮 ${escapeHtml(playerName)}</strong>
+        <span class="eval-team-shell-sub">Tap to ${shell.open ? 'collapse' : 'expand'} evaluations</span>
+      </div>
+      <div class="eval-team-shell-kpis">
+        <span>OVR ${Number(safeSummary.totalOVR) || 0}</span>
+        <span>AVG ${Number(safeSummary.averageOVR) || 0}</span>
+        <span>Chem ${Number(safeSummary.chemistryBonus) >= 0 ? '+' : ''}${Number(safeSummary.chemistryBonus) || 0}</span>
+        <span class="eval-fit-chip ${fitTone}">Fit ${formatSigned(fitDeltaAvg)}</span>
+      </div>
+    `;
+    shell.appendChild(shellSummary);
+
+    for (const evalData of evaluations) {
       renderEvalCard(evalData, teamCards);
       charIndex++;
       updateEvalProgress(charIndex, round4State.totalCharacters);
-      
-      await new Promise(resolve => setTimeout(resolve, charDelay));
     }
-    
-    // Add team summary after all characters
-    renderTeamSummary(playerName, teamData.teamSummary, teamBlock);
-    await new Promise(resolve => setTimeout(resolve, summaryDelay));
 
-    container.appendChild(teamBlock);
+    renderTeamSummary(playerName, safeSummary, teamBlock);
+    shell.appendChild(teamBlock);
+    teamFragment.appendChild(shell);
+
+    const overviewCard = document.createElement('button');
+    overviewCard.type = 'button';
+    overviewCard.className = 'eval-overview-card';
+    overviewCard.setAttribute('aria-label', `Open detailed view for ${playerName}`);
+    overviewCard.innerHTML = `
+      <h3>${escapeHtml(playerName)}</h3>
+      <div class="eval-overview-stats">
+        <span><strong>Team OVR</strong> ${Number(safeSummary.totalOVR) || 0}</span>
+        <span><strong>Average</strong> ${Number(safeSummary.averageOVR) || 0}</span>
+        <span><strong>Chemistry</strong> ${Number(safeSummary.chemistryBonus) >= 0 ? '+' : ''}${Number(safeSummary.chemistryBonus) || 0}</span>
+        <span class="eval-overview-fit ${fitTone}"><strong>Fit</strong> ${formatSigned(fitDeltaAvg)}</span>
+      </div>
+      <p class="eval-overview-top"><strong>Top Pick:</strong> ${escapeHtml(safeSummary.topPick || 'N/A')}</p>
+    `;
+    overviewCard.addEventListener('click', () => openTeamInTeamsPanel(playerName));
+    overviewFragment.appendChild(overviewCard);
   }
-  
-  // Display final leaderboard after all character evals
-  await new Promise(resolve => setTimeout(resolve, leaderboardDelay));
+
+  teamContainer.appendChild(teamFragment);
+  overviewContainer.appendChild(overviewFragment);
+
   displayFinalLeaderboard();
   updateEvalProgress(round4State.totalCharacters, round4State.totalCharacters);
+
   if (loading) loading.style.display = 'none';
   round4State.rendering = false;
   round4State.rendered = true;
@@ -268,13 +2269,13 @@ async function displayAllTeamEvaluationsSequentially() {
 function renderEvalCard(evalData, container) {
   if (!container) return;
 
-  // Filter out "Low relevance" notes since detail is now in modal
-  const notes = Array.isArray(evalData.notes) 
-    ? evalData.notes.filter(note => !note.toLowerCase().includes('low relevance')).slice(0, 2) 
+  const notes = Array.isArray(evalData.notes)
+    ? evalData.notes.filter(note => !note.toLowerCase().includes('low relevance')).slice(0, 3)
     : [];
-  const notesHtml = notes.map(note => `<li>${escapeHtml(note)}</li>`).join('');
+  const notesHtml = notes.length
+    ? notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')
+    : '<li>No extra evaluator notes.</li>';
   
-  // Determine OVR tier and color
   const ovrTier = evalData.ovrTier || getOVRTierFromValue(evalData.ovr);
   const ovrClass = `ovr-${ovrTier.tier}`;
   const rarity = evalData.rarity || 'Common';
@@ -284,6 +2285,11 @@ function renderEvalCard(evalData, container) {
   const emotionIconPath = getEmotionIconPath(evalData);
   const portraitSrc = resolveCharacterImage(evalData.imageUrl, 'No Portrait');
   const hasPortrait = Boolean(normalizeImageUrl(evalData.imageUrl));
+  const causality = buildCausalitySummary(evalData);
+  const topNote = notes[0] || evalData.reason || 'No immediate fit warning.';
+  const detailSummaryLabel = notes.length > 1 || evalData.phrase
+    ? `Details (${Math.max(1, notes.length)} notes)`
+    : 'Details';
   
   const card = document.createElement('div');
   card.className = `eval-card eval-card-${evalData.emotion}`;
@@ -309,28 +2315,42 @@ function renderEvalCard(evalData, container) {
       </div>
     </div>
     <div class="eval-card-stats">
-      <div class="eval-score" title="Score: 0-30">
-        <span class="eval-score-value">${evalData.score}</span>
-        <span class="eval-score-max">/30</span>
-      </div>
       <div class="eval-ovr ${ovrClass} eval-ovr-clickable" title="Click for detailed breakdown" role="button" tabindex="0" aria-label="View OVR breakdown for ${escapeHtml(evalData.character)}">
         <div class="eval-ovr-label">OVR</div>
         <div class="eval-ovr-value">${evalData.ovr}</div>
         <div class="eval-ovr-tier">${ovrTier.label}</div>
       </div>
+      <div class="eval-score" title="Score: 0-30">
+        <span class="eval-score-value">${evalData.score}</span>
+        <span class="eval-score-max">/30</span>
+      </div>
+      <div class="eval-fit-chip ${causality.tone}" title="Scenario/Twist effect on final OVR">
+        Fit ${formatSigned(causality.delta)}
+      </div>
     </div>
+    <div class="eval-causality-row ${causality.tone}">
+      <span class="eval-causality-base">Base ${causality.baseScore === null ? '—' : causality.baseScore}</span>
+      <span class="eval-causality-arrow">→</span>
+      <span class="eval-causality-fit">Context ${formatSigned(causality.delta)}</span>
+      <span class="eval-causality-arrow">→</span>
+      <span class="eval-causality-final">OVR ${evalData.ovr}</span>
+    </div>
+    <p class="eval-card-primary-note">${escapeHtml(topNote)}</p>
     <div class="eval-card-meta">
       <span class="eval-rarity" title="Rarity">${escapeHtml(rarity)}</span>
       <span class="eval-type" title="Character Type">${escapeHtml(characterType)}</span>
     </div>
-    <div class="eval-card-notes" aria-label="Evaluation notes">
-      <ul>
-        ${notesHtml}
-      </ul>
-    </div>
-    <div class="eval-card-phrase">
-      <p>"${escapeHtml(evalData.phrase)}"</p>
-    </div>
+    <details class="eval-card-details">
+      <summary>${detailSummaryLabel}</summary>
+      <div class="eval-card-notes" aria-label="Evaluation notes">
+        <ul>
+          ${notesHtml}
+        </ul>
+      </div>
+      <div class="eval-card-phrase">
+        <p>"${escapeHtml(evalData.phrase || 'No phrase available.')}"</p>
+      </div>
+    </details>
   `;
   
   // Add click handler to OVR element
@@ -362,8 +2382,14 @@ function getOVRTierFromValue(ovr) {
 // Render team summary
 function renderTeamSummary(playerName, summary, container) {
   if (!container) return;
+  const safeSummary = summary && typeof summary === 'object' ? summary : {};
+  const totalOVR = Number(safeSummary.totalOVR) || 0;
+  const averageOVR = Number(safeSummary.averageOVR) || 0;
+  const chemistryBonus = Number(safeSummary.chemistryBonus) || 0;
+  const topPick = safeSummary.topPick || 'N/A';
+  const highestOVR = Number(safeSummary.highestOVR) || 0;
   
-  const chemistryDetails = Array.isArray(summary.chemistryDetails) ? summary.chemistryDetails : [];
+  const chemistryDetails = Array.isArray(safeSummary.chemistryDetails) ? safeSummary.chemistryDetails : [];
   const chemistryLines = chemistryDetails.length
     ? chemistryDetails.map(detail => {
       const matches = Array.isArray(detail.matches) ? detail.matches.map(escapeHtml).join(', ') : 'N/A';
@@ -372,30 +2398,30 @@ function renderTeamSummary(playerName, summary, container) {
     }).join('')
     : '<li>No clear chemistry patterns detected.</li>';
 
-  const summaryDiv = document.createElement('div');
+  const summaryDiv = document.createElement('details');
   summaryDiv.className = 'eval-team-summary';
   summaryDiv.innerHTML = `
-    <h3>📊 ${escapeHtml(playerName)}'s Team Summary</h3>
+    <summary class="eval-team-summary-toggle">📊 ${escapeHtml(playerName)} Team Summary</summary>
     <div class="summary-stats">
       <div class="summary-stat">
         <label>Team OVR</label>
-        <span class="summary-value">${summary.totalOVR}</span>
+        <span class="summary-value">${totalOVR}</span>
       </div>
       <div class="summary-stat">
-        <label>Average OVR</label>
-        <span class="summary-value">${summary.averageOVR}</span>
+        <label>Average</label>
+        <span class="summary-value">${averageOVR}</span>
       </div>
       <div class="summary-stat">
         <label>Chemistry</label>
-        <span class="summary-value">${summary.chemistryBonus >= 0 ? '+' : ''}${summary.chemistryBonus}</span>
+        <span class="summary-value">${chemistryBonus >= 0 ? '+' : ''}${chemistryBonus}</span>
       </div>
       <div class="summary-stat">
+        <label>Highest</label>
+        <span class="summary-value">${highestOVR}</span>
+      </div>
+      <div class="summary-stat summary-stat-wide">
         <label>Top Pick</label>
-        <span class="summary-value-text">${escapeHtml(summary.topPick)}</span>
-      </div>
-      <div class="summary-stat">
-        <label>Highest OVR</label>
-        <span class="summary-value">${summary.highestOVR || 0}</span>
+        <span class="summary-value-text">${escapeHtml(topPick)}</span>
       </div>
     </div>
     <div class="summary-chemistry">
@@ -412,12 +2438,11 @@ function renderTeamSummary(playerName, summary, container) {
 // Display final leaderboard after all character evaluations
 function displayFinalLeaderboard() {
   if (!round4State.finalLeaderboard) return;
-  
-  const container = document.getElementById('evalCardsContainer');
+
+  const container = document.getElementById('evalLeaderboardContainer');
   if (!container) return;
 
-  const existing = container.querySelector('.eval-final-leaderboard');
-  if (existing) existing.remove();
+  container.innerHTML = '';
   
   const leaderboardDiv = document.createElement('div');
   leaderboardDiv.className = 'eval-final-leaderboard';
@@ -752,3 +2777,5 @@ window.toggleEvalScenario = toggleEvalScenario;
 window.requestFinalResults = requestFinalResults;
 window.openOVRBreakdown = openOVRBreakdown;
 window.closeOVRBreakdown = closeOVRBreakdown;
+window.switchEvalTab = switchEvalTab;
+*/

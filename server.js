@@ -10,6 +10,10 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(express.static(__dirname + '/public'));
 
+app.get('/temp', (req, res) => {
+  res.sendFile(__dirname + '/public/temp/index.html');
+});
+
 initWordCache();
 registerSocketHandlers(io);
 

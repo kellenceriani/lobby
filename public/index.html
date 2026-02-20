@@ -425,56 +425,76 @@
     </div>
   </div>
 
-  <!-- ==================== ROUND 4 AI EVALUATION SCREEN (NEW) ==================== -->
+  <!-- ==================== ROUND 4 AI EVALUATION SCREEN (CINEMATIC) ==================== -->
   <div id="round4EvalScreen" class="screen">
     <div class="eval-header-sticky">
       <div class="eval-header-content">
-        <h2 class="eval-title">⚡ Round 4: AI Evaluation</h2>
-        <div class="eval-round-info">
-          <span class="round-label">FINAL ROUND</span>
-          <span class="eval-progress"><span id="evalProgress">0</span> / <span id="evalTotal">0</span></span>
+        <div class="eval-header-main">
+          <h2 class="eval-title">⚡ Round 4: Final AI Verdict</h2>
+          <p class="eval-title-sub">AI ORACLE EVALUATOR • Tier-Weighted Analysis</p>
+          <div id="evalScenarioBox" class="eval-header-context" aria-label="Round 4 scenario context">
+            <p class="eval-header-scenario"><strong>S:</strong> <span id="evalScenarioText"></span></p>
+            <p class="eval-header-twist"><strong>T:</strong> <span id="evalTwistText"></span></p>
+            <p class="eval-header-causality" id="evalContextCausality" aria-live="polite"></p>
+          </div>
         </div>
-      </div>
-    </div>
-    
-    <div id="evalScenarioBox" class="eval-scenario-box">
-      <button class="btn-collapse" onclick="toggleEvalScenario()" aria-label="Toggle scenario visibility">
-        <span id="evalScenarioIcon">▼</span> Scenario & Twist
-      </button>
-      <div id="evalScenarioContent" class="eval-scenario-content">
-        <p id="evalScenarioText"></p>
-        <p id="evalTwistText" class="eval-twist-highlight"></p>
+        <div class="eval-round-info" aria-live="polite">
+          <span class="round-label">FINAL ROUND</span>
+          <span class="eval-progress"><span id="evalProgress">0</span>/<span id="evalTotal">0</span></span>
+          <span class="eval-progress">Teams: <span id="evalTeamCount">0</span></span>
+        </div>
       </div>
     </div>
 
-    <div id="evalLoading" class="eval-loading" aria-live="polite">
-      <div class="eval-loading-spinner" aria-hidden="true"></div>
-      <div class="eval-loading-text">
-        <strong id="evalLoadingTitle">Evaluating teams...</strong>
-        <span id="evalLoadingSubtitle">Using cached round intel + final scoring.</span>
-        <div class="eval-progress-row">
-          <div
-            id="evalProgressBar"
-            class="eval-progress-bar"
-            role="progressbar"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow="0"
-          >
-            <span class="eval-progress-fill" style="width: 0%;"></span>
+    <section class="eval-cinematic-stage" aria-label="Round 4 cinematic reveal stage">
+      <div id="evalLoading" class="eval-loading eval-loading-dock" aria-live="polite">
+        <div class="eval-loading-ambient" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="eval-loading-core">
+          <div class="eval-loading-spinner" aria-hidden="true"></div>
+          <div class="eval-loading-text">
+            <strong id="evalLoadingTitle">Evaluating teams...</strong>
+            <span id="evalLoadingSubtitle">Using cached round intel + final scoring.</span>
+            <div class="eval-loading-bot" aria-live="polite">
+              <div class="eval-loading-bot-head">🤖 AI Evaluator</div>
+              <p class="eval-loading-bot-line"><strong>Scenario:</strong> <span id="evalLoadScenario">-</span></p>
+              <p class="eval-loading-bot-line"><strong>Twist:</strong> <span id="evalLoadTwist">-</span></p>
+              <p class="eval-loading-bot-speech" id="evalLoadBotSpeech">Preparing data pipelines and tier visual synthesis...</p>
+            </div>
+            <div class="eval-loading-counts">
+              <span>Assets Ready:</span>
+              <b><span id="evalLoadFetched">0</span>/<span id="evalLoadTotal">0</span></b>
+            </div>
+            <div class="eval-progress-row">
+              <div id="evalProgressBar" class="eval-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span class="eval-progress-fill" style="width: 0%;"></span>
+              </div>
+              <span id="evalProgressPct" class="eval-progress-pct">0%</span>
+            </div>
+            <div class="eval-progress-row eval-progress-row-preload">
+              <div id="evalPreloadBar" class="eval-progress-bar eval-progress-bar-mega" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="evalPreloadFill" class="eval-progress-fill" style="width: 0%;"></span>
+              </div>
+              <span id="evalPreloadPct" class="eval-progress-pct">0%</span>
+            </div>
           </div>
-          <span id="evalProgressPct" class="eval-progress-pct">0%</span>
         </div>
       </div>
+
+      <div id="evalTeamBoards" class="eval-team-boards"></div>
+      <div id="evalHeroHost" class="eval-hero-host"></div>
+    </section>
+
+    <div class="eval-stage-actions">
+      <span id="evalCompletionBadge" class="eval-completion-badge" hidden>All 18 characters placed</span>
     </div>
-    
-    <div class="eval-container">
-      <div id="evalCardsContainer" class="eval-cards-container"></div>
-    </div>
+
+    <section id="evalLeaderboardContainer" class="eval-leaderboard-container"></section>
 
     <div class="eval-actions">
-      <button id="evalContinueBtn" class="btn btn-success" onclick="requestFinalResults()" disabled>
-        Continue to Final Results
+      <button id="evalContinueBtn" class="btn btn-success" type="button" onclick="requestFinalResults()" disabled>
+        ✅ CONFIRM & CONTINUE
       </button>
       <div id="evalFinalStatus" class="eval-final-status" aria-live="polite"></div>
     </div>

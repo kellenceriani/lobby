@@ -619,10 +619,19 @@ function registerSocketHandlers(io) {
           };
         });
 
+        const revealTimeline = {
+          startAtMs: Date.now() + 2200,
+          initialDelayMs: 2200,
+          stepIntervalMs: 1950,
+          dockDurationMs: 980,
+          finalResultsDelayMs: 1900
+        };
+
         const payload = {
           evaluationId,
           allTeamEvaluations: scored.teamEvaluations,
           finalLeaderboard: evalLeaderboard,
+          revealTimeline,
           isTie,
           tiedPlayers: tiedTeams
         };

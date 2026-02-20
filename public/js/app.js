@@ -69,6 +69,40 @@ function resolveConnectionDebugEnabled() {
   }
 }
 
+function shouldAutoOpenRound4Loading() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    return params.get('debugRound4Loading') === '1';
+  } catch (error) {
+    return false;
+  }
+}
+
+function openRound4LoadingDebugView() {
+  if (typeof window.initRound4Evaluation !== 'function') return;
+
+  const debugData = {
+    scenario: 'PULL OFF A HEIST',
+    twist: 'WITH GODZILLA AS BANKER',
+    finalTeams: {
+      ALPHA: [
+        { name: 'Batman', ovr: 92 },
+        { name: 'Sherlock Holmes', ovr: 89 }
+      ],
+      BRAVO: [
+        { name: 'Hermione Granger', ovr: 90 },
+        { name: 'Dwayne Johnson', ovr: 87 }
+      ],
+      CHARLIE: [
+        { name: 'Gandalf', ovr: 95 },
+        { name: 'SpongeBob', ovr: 84 }
+      ]
+    }
+  };
+
+  window.initRound4Evaluation(debugData);
+}
+
 function getSocketTransportName() {
   return socket && socket.io && socket.io.engine && socket.io.engine.transport
     ? socket.io.engine.transport.name
@@ -235,10 +269,25 @@ function rememberInstallPromptDismissal() {
   }
 }
 
+function isJoinScreenActive() {
+  const joinScreen = document.getElementById('join');
+  return Boolean(joinScreen && joinScreen.classList.contains('active'));
+}
+
+function syncInstallPromptReopenVisibility() {
+  const reopenBtn = document.getElementById('installPromptReopen');
+  if (!reopenBtn) return;
+
+  const shouldShowReopen = isLikelyMobileDevice()
+    && !isStandaloneDisplayMode()
+    && isJoinScreenActive();
+
+  reopenBtn.hidden = !shouldShowReopen;
+}
+
 function hideInstallPrompt() {
   const root = document.getElementById('installPrompt');
   const instructionEl = document.getElementById('installPromptInstruction');
-  const reopenBtn = document.getElementById('installPromptReopen');
   if (!root) return;
   root.style.display = 'none';
   root.hidden = true;
@@ -247,10 +296,7 @@ function hideInstallPrompt() {
     instructionEl.hidden = true;
   }
 
-  if (reopenBtn) {
-    const shouldShowReopen = isLikelyMobileDevice() && !isStandaloneDisplayMode();
-    reopenBtn.hidden = !shouldShowReopen;
-  }
+  syncInstallPromptReopenVisibility();
 }
 
 function showPersistentInstallInstruction(message) {
@@ -309,6 +355,9 @@ function showInstallPrompt({ copy, actionLabel, onAction }) {
 function installFullscreenPromptFlow() {
   if (installPromptState.initialized) return;
   installPromptState.initialized = true;
+
+  document.addEventListener('screenChanged', syncInstallPromptReopenVisibility);
+  syncInstallPromptReopenVisibility();
 
   if (!isLikelyMobileDevice()) {
     hideInstallPrompt();
@@ -2077,35 +2126,11 @@ socket.on('round4Start', (data) => {
   console.log('🎮 Round 4 Start event received:', data);
   clearTimers();
   playPhaseShiftSound();
-  const finalTeamLabels = buildCharacterFetchLabels(data && data.finalTeams ? data.finalTeams : {}, {
-    maxPlayers: 6,
-    maxCharsPerPlayer: 3
-  });
-  
-  // Show transition message modal
-  showScreen('preRound');
-
-  startPreRoundLoadingSequence({
-    title: '🤖 FINAL ROUND: AI EVALUATION',
-    message: `Preparing ${Object.keys(data.finalTeams || {}).length} final teams for evaluator scoring…`,
-    stages: [
-      'Locking final rosters…',
-      'Loading cached intel from rounds 1-3…',
-      'Preparing evaluator pipeline…',
-      'Starting AI evaluation…'
-    ],
-    durationMs: 5000,
-    showCountdown: false,
-    characterLabels: finalTeamLabels,
-    onComplete: () => {
-      console.log('⏰ Transition timeout complete, starting evaluation...');
-      if (typeof window.initRound4Evaluation === 'function') {
-        window.initRound4Evaluation(data);
-      } else {
-        console.error('❌ Round 4 evaluation function not found');
-      }
-    }
-  });
+  if (typeof window.initRound4Evaluation === 'function') {
+    window.initRound4Evaluation(data);
+  } else {
+    console.error('❌ Round 4 evaluation function not found');
+  }
 });
 
 function castVote(playerName) {
@@ -3079,3 +3104,9 @@ window.lockVote = lockVote;
 window.readyForNextRound = readyForNextRound;
 window.sendPlayAgain = sendPlayAgain;
 window.goToLobby = goToLobby;
+
+if (shouldAutoOpenRound4Loading()) {
+  window.setTimeout(() => {
+    openRound4LoadingDebugView();
+  }, 0);
+}

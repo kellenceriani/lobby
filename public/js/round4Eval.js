@@ -31,17 +31,21 @@ const round4State = {
   teamBoardCollapsed: Object.create(null),
   loadingReadyToStart: false,
   loadingScenario: '',
-  loadingTwist: ''
+  loadingTwist: '',
+  animationPrimed: false,
+  animationPrimePromise: null
 };
+
+const IMAGE_PRELOAD_CACHE = new Map();
 
 const REVEAL_TIER_PROFILES = {
   lowest: {
-    anticipationMs: 200,
-    anticipationLift: 14,
-    anticipationTilt: -1.5,
-    flightMs: 880,
-    settleMs: 220,
-    cadencePadMs: 120,
+    anticipationMs: 280,
+    anticipationLift: 16,
+    anticipationTilt: -1.8,
+    flightMs: 920,
+    settleMs: 260,
+    cadencePadMs: 160,
     flightArcPx: 30,
     spinDeg: 0,
     midScale: 0.88,
@@ -53,12 +57,12 @@ const REVEAL_TIER_PROFILES = {
     crashLanding: false
   },
   bronze: {
-    anticipationMs: 260,
-    anticipationLift: 18,
-    anticipationTilt: -2.4,
-    flightMs: 980,
-    settleMs: 260,
-    cadencePadMs: 140,
+    anticipationMs: 320,
+    anticipationLift: 21,
+    anticipationTilt: -2.7,
+    flightMs: 1020,
+    settleMs: 300,
+    cadencePadMs: 190,
     flightArcPx: 42,
     spinDeg: 22,
     midScale: 0.86,
@@ -70,12 +74,12 @@ const REVEAL_TIER_PROFILES = {
     crashLanding: false
   },
   silver: {
-    anticipationMs: 560,
-    anticipationLift: 34,
-    anticipationTilt: -3.4,
-    flightMs: 1280,
+    anticipationMs: 460,
+    anticipationLift: 36,
+    anticipationTilt: -3.6,
+    flightMs: 1220,
     settleMs: 380,
-    cadencePadMs: 180,
+    cadencePadMs: 220,
     flightArcPx: 64,
     spinDeg: 112,
     midScale: 0.82,
@@ -87,12 +91,12 @@ const REVEAL_TIER_PROFILES = {
     crashLanding: false
   },
   gold: {
-    anticipationMs: 840,
-    anticipationLift: 48,
-    anticipationTilt: -4.8,
-    flightMs: 1480,
-    settleMs: 500,
-    cadencePadMs: 200,
+    anticipationMs: 560,
+    anticipationLift: 52,
+    anticipationTilt: -5,
+    flightMs: 1360,
+    settleMs: 440,
+    cadencePadMs: 240,
     flightArcPx: 94,
     spinDeg: 290,
     midScale: 0.79,
@@ -104,12 +108,12 @@ const REVEAL_TIER_PROFILES = {
     crashLanding: false
   },
   diamond: {
-    anticipationMs: 1180,
-    anticipationLift: 76,
-    anticipationTilt: -6.1,
-    flightMs: 1760,
-    settleMs: 660,
-    cadencePadMs: 260,
+    anticipationMs: 680,
+    anticipationLift: 78,
+    anticipationTilt: -6.3,
+    flightMs: 1520,
+    settleMs: 520,
+    cadencePadMs: 280,
     flightArcPx: 146,
     spinDeg: 640,
     midScale: 0.74,
@@ -121,12 +125,12 @@ const REVEAL_TIER_PROFILES = {
     crashLanding: false
   },
   elite: {
-    anticipationMs: 1640,
-    anticipationLift: 108,
-    anticipationTilt: -7.2,
-    flightMs: 2120,
-    settleMs: 940,
-    cadencePadMs: 340,
+    anticipationMs: 780,
+    anticipationLift: 110,
+    anticipationTilt: -7.4,
+    flightMs: 1680,
+    settleMs: 620,
+    cadencePadMs: 320,
     flightArcPx: 194,
     spinDeg: 980,
     midScale: 0.7,
@@ -302,7 +306,7 @@ function getRevealProfileForAssignment(assignment) {
   return {
     ...fallbackBase,
     revealTier: fallbackTier,
-    offsetMs: (Number(round4State.queueIndex) || 0) * 1950,
+    offsetMs: (Number(round4State.queueIndex) || 0) * getRevealConfig().stepIntervalMs,
     totalMs: fallbackBase.anticipationMs + fallbackBase.flightMs + fallbackBase.settleMs + fallbackBase.cadencePadMs
   };
 }
@@ -319,7 +323,7 @@ function prepareRevealSequenceProfiles() {
       const revealTier = getRevealTierFromEval(assignment && assignment.evalData ? assignment.evalData : null);
       const base = REVEAL_TIER_PROFILES[revealTier] || REVEAL_TIER_PROFILES.bronze;
       const totalMs = base.anticipationMs + base.flightMs + base.settleMs + base.cadencePadMs;
-      const cadence = Math.max(config.stepIntervalMs, Math.round(totalMs * 0.86));
+      const cadence = Math.max(config.stepIntervalMs, Math.round(totalMs * 0.9));
 
       nextProfiles[assignment.key] = {
         ...base,
@@ -472,29 +476,46 @@ function updateLoadingDockProgress(current, total, label) {
   if (preloadBar) preloadBar.setAttribute('aria-valuenow', String(percent));
   if (preloadHint) {
     preloadHint.textContent = percent >= 100
-      ? 'Preload complete. Ready to start reveal.'
-      : 'Preparing synchronized reveal visual...';
+      ? 'Setup complete. Final evaluation is ready.'
+      : (label || 'Fetching intel and preparing reveal assets...');
   }
   if (stageCurrent) {
     stageCurrent.textContent = percent >= 100
-      ? 'Preload Stage: Ready'
-      : `Preload Stage: ${percent}%`;
-  }
-  if (!round4State.rendered && !round4State.loadingReadyToStart) {
-    const queueBar = document.getElementById('evalProgressBar');
-    const queueFill = queueBar ? queueBar.querySelector('.eval-progress-fill') : null;
-    const queuePct = document.getElementById('evalProgressPct');
-    if (queueFill) queueFill.style.width = `${percent}%`;
-    if (queueBar) queueBar.setAttribute('aria-valuenow', String(percent));
-    if (queuePct) queuePct.textContent = `${percent}%`;
+      ? 'Stage: Ready'
+      : (label ? `Stage: ${label}` : `Stage: ${percent}%`);
   }
   updateLoadingVisualGraph(timelinePercent, percent);
+}
+
+function setRevealCeremonyProgress(percent, stageLabel = '') {
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const queueBar = document.getElementById('evalProgressBar');
+  const queueFill = queueBar ? queueBar.querySelector('.eval-progress-fill') : null;
+  const queuePct = document.getElementById('evalProgressPct');
+  const stageCurrent = document.getElementById('evalStageCurrent');
+
+  if (queueFill) queueFill.style.width = `${safePercent}%`;
+  if (queueBar) queueBar.setAttribute('aria-valuenow', String(safePercent));
+  if (queuePct) queuePct.textContent = `${safePercent}%`;
+  if (stageCurrent && stageLabel) stageCurrent.textContent = `Stage: ${stageLabel}`;
+
+  updateLoadingVisualGraph(safePercent, readPercentText('evalPreloadPct'));
+}
+
+function triggerLoadingPriorityReveal(card) {
+  if (!card) return;
+  card.classList.remove('is-updated');
+  void card.offsetWidth;
+  card.classList.add('is-updated');
+  window.setTimeout(() => card.classList.remove('is-updated'), 650);
 }
 
 function setLoadingBotContext(scenario, twist, speech) {
   const scenarioHeroEl = document.getElementById('evalLoadScenarioHero');
   const twistHeroEl = document.getElementById('evalLoadTwistHero');
   const preloadHint = document.getElementById('evalPreloadHint');
+  const scenarioCard = scenarioHeroEl ? scenarioHeroEl.closest('.eval-priority-card') : null;
+  const twistCard = twistHeroEl ? twistHeroEl.closest('.eval-priority-card') : null;
 
   if (scenario) round4State.loadingScenario = String(scenario);
   if (twist) round4State.loadingTwist = String(twist);
@@ -504,6 +525,8 @@ function setLoadingBotContext(scenario, twist, speech) {
 
   if (scenarioHeroEl) scenarioHeroEl.textContent = currentScenario;
   if (twistHeroEl) twistHeroEl.textContent = currentTwist;
+  if (scenario) triggerLoadingPriorityReveal(scenarioCard);
+  if (twist) triggerLoadingPriorityReveal(twistCard);
   if (preloadHint && speech) preloadHint.textContent = speech;
 }
 
@@ -517,23 +540,52 @@ function setLoadingReadyState(isReady) {
   button.disabled = !round4State.loadingReadyToStart;
 
   if (round4State.loadingReadyToStart) {
-    button.textContent = '▶ START FINAL REVEAL';
-    if (hint) hint.textContent = 'All preload checks passed. Start reveal when ready.';
-    if (status) status.textContent = 'Preload complete. Start when your team is ready.';
+    button.textContent = 'START REVEAL CEREMONY';
+    if (hint) hint.textContent = 'Everything is staged. Start the reveal when everyone is ready.';
+    if (status) status.textContent = 'Showdown ready. Tap start to begin the final reveal.';
   } else {
-    button.textContent = '⏳ FINALIZING PRELOAD...';
+    button.textContent = 'PREPARING REVEAL CEREMONY...';
   }
 }
 
+function setRound4LoadingPhase(isLoadingPhase) {
+  const screen = document.getElementById('round4EvalScreen');
+  if (screen) {
+    screen.classList.toggle('is-loading-phase', Boolean(isLoadingPhase));
+  }
+
+  if (isLoadingPhase) {
+    const completion = document.getElementById('evalCompletionBadge');
+    const continueBtn = document.getElementById('evalContinueBtn');
+    if (completion) completion.hidden = true;
+    if (continueBtn) continueBtn.hidden = true;
+  }
+}
+
+function setHeaderContextPhase(phase) {
+  const screen = document.getElementById('round4EvalScreen');
+  const box = document.getElementById('evalScenarioBox');
+  const toggle = document.getElementById('evalContextToggle');
+
+  if (!screen || !box || !toggle) return;
+
+  const isRevealPhase = phase === 'reveal';
+  screen.classList.toggle('eval-context-hidden', !isRevealPhase);
+  box.classList.toggle('is-condensed', !isRevealPhase);
+  toggle.setAttribute('aria-expanded', isRevealPhase ? 'true' : 'false');
+}
+
 function startRound4Reveal() {
-  if (!round4State.preloadDone || !round4State.revealPrepared || !round4State.loadingReadyToStart || round4State.rendered) return;
+  if (!round4State.preloadDone || !round4State.revealPrepared || !round4State.animationPrimed || !round4State.loadingReadyToStart || round4State.rendered) return;
 
   ensureRevealAudioReady();
 
   const loading = document.getElementById('evalLoading');
   const status = document.getElementById('evalFinalStatus');
   if (loading) loading.style.display = 'none';
-  if (status) status.textContent = 'Synchronized reveal in progress...';
+  setRound4LoadingPhase(false);
+  setHeaderContextPhase('reveal');
+  if (status) status.textContent = 'Final showdown in progress...';
 
   setLoadingBotContext(null, null, '');
   scheduleNextAutoReveal();
@@ -610,6 +662,8 @@ function resetCinematicState() {
   round4State.preloadDone = false;
   round4State.revealPrepared = false;
   round4State.revealPreparePromise = null;
+  round4State.animationPrimePromise = null;
+  round4State.animationPrimed = false;
   round4State.revealProfiles = Object.create(null);
   clearQueuedAnimationTimers();
   round4State.teamBoardCollapsed = Object.create(null);
@@ -619,16 +673,20 @@ function resetCinematicState() {
   const boards = document.getElementById('evalTeamBoards');
   if (boards) boards.classList.remove('is-elite-crash');
 
+  setHeaderContextPhase('loading');
+  setRound4LoadingPhase(true);
+
   setLoadingReadyState(false);
 
   const completion = document.getElementById('evalCompletionBadge');
   const status = document.getElementById('evalFinalStatus');
   const continueBtn = document.getElementById('evalContinueBtn');
   if (completion) completion.hidden = true;
-  if (status) status.textContent = 'Synchronized reveal is starting...';
+  if (status) status.textContent = 'Preparing the final showdown...';
   if (continueBtn) {
+    continueBtn.hidden = true;
     continueBtn.disabled = true;
-    continueBtn.textContent = '✅ CONFIRM & CONTINUE';
+    continueBtn.textContent = '✅ LOCK IN & CONTINUE';
   }
 }
 
@@ -642,6 +700,7 @@ function initRound4Evaluation(data) {
     document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
     evalScreen.classList.add('active');
   }
+  setRound4LoadingPhase(true);
 
   round4State.totalCharacters = Object.values(finalTeams).reduce((sum, team) => sum + (Array.isArray(team) ? team.length : 0), 0);
   round4State.totalTeams = Object.keys(finalTeams || {}).length;
@@ -660,17 +719,18 @@ function initRound4Evaluation(data) {
   const causalityText = document.getElementById('evalContextCausality');
   if (scenarioText) scenarioText.textContent = scenario;
   if (twistText) twistText.textContent = twist;
-  if (causalityText) causalityText.textContent = '';
+  if (causalityText) causalityText.textContent = 'Scenario sets the lane. Twist bends the lane. OVR shows who still dominates.';
   setLoadingBotContext(scenario, twist, '');
 
   const loading = document.getElementById('evalLoading');
   const loadingTitle = document.getElementById('evalLoadingTitle');
   const loadingSubtitle = document.getElementById('evalLoadingSubtitle');
   if (loading) loading.style.display = 'flex';
-  if (loadingTitle) loadingTitle.textContent = 'Final reveal loading';
+  if (loadingTitle) loadingTitle.textContent = 'AI EVALUATOR ROUND';
   if (loadingSubtitle) loadingSubtitle.textContent = '';
   setLoadingReadyState(false);
-  updateLoadingDockProgress(0, Math.max(1, round4State.totalCharacters || 18), '');
+  setRevealCeremonyProgress(8, 'Initializing evaluator');
+  updateLoadingDockProgress(0, Math.max(1, round4State.totalCharacters || 18), 'Initializing evaluator');
 
   round4State.isEvaluating = true;
   round4State.rendered = false;
@@ -907,44 +967,155 @@ function loadImageAsset(url) {
   const normalized = normalizeImageUrl(url);
   if (!normalized) return Promise.resolve();
 
-  return new Promise((resolve) => {
-    const image = new Image();
-    const done = () => resolve();
+  if (IMAGE_PRELOAD_CACHE.has(normalized)) {
+    return IMAGE_PRELOAD_CACHE.get(normalized);
+  }
 
-    image.decoding = 'async';
-    image.loading = 'eager';
-    image.referrerPolicy = 'no-referrer';
-    image.onload = done;
-    image.onerror = done;
-    image.src = normalized;
+  const preloadTask = new Promise((resolve) => {
+    let settled = false;
+    let attempt = 0;
+    const maxAttempts = 3;
 
-    window.setTimeout(done, 1700);
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const loadAttempt = () => {
+      const image = new Image();
+      image.decoding = 'async';
+      image.loading = 'eager';
+      image.referrerPolicy = 'no-referrer';
+
+      const onDone = async () => {
+        if (typeof image.decode === 'function') {
+          try {
+            await image.decode();
+          } catch (error) {
+          }
+        }
+        finish();
+      };
+
+      image.onload = onDone;
+      image.onerror = () => {
+        attempt += 1;
+        if (attempt >= maxAttempts) {
+          finish();
+          return;
+        }
+        window.setTimeout(loadAttempt, 110 + (attempt * 120));
+      };
+
+      image.src = normalized;
+      window.setTimeout(() => {
+        if (!settled && attempt + 1 >= maxAttempts) finish();
+      }, 1800 + (attempt * 450));
+    };
+
+    loadAttempt();
   });
+
+  IMAGE_PRELOAD_CACHE.set(normalized, preloadTask);
+  return preloadTask;
+}
+
+async function runWithConcurrency(items, concurrency, mapper) {
+  const queue = Array.isArray(items) ? items : [];
+  const safeConcurrency = Math.max(1, Math.min(Number(concurrency) || 1, queue.length || 1));
+  let index = 0;
+
+  const workers = Array.from({ length: safeConcurrency }, async () => {
+    while (index < queue.length) {
+      const current = index;
+      index += 1;
+      await mapper(queue[current], current);
+    }
+  });
+
+  await Promise.all(workers);
+}
+
+function waitNextFrames(count = 2) {
+  const safeCount = Math.max(1, Number(count) || 1);
+  return new Promise((resolve) => {
+    let remaining = safeCount;
+    const step = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(step);
+    };
+    window.requestAnimationFrame(step);
+  });
+}
+
+function primeAnimationPipeline() {
+  if (round4State.animationPrimePromise) return round4State.animationPrimePromise;
+
+  round4State.animationPrimePromise = (async () => {
+    if (typeof document !== 'undefined' && document.fonts && typeof document.fonts.ready === 'object') {
+      try {
+        await Promise.race([
+          document.fonts.ready,
+          new Promise((resolve) => window.setTimeout(resolve, 900))
+        ]);
+      } catch (error) {
+      }
+    }
+
+    await waitNextFrames(3);
+
+    const stage = document.querySelector('#round4EvalScreen .eval-cinematic-stage');
+    const heroHost = document.getElementById('evalHeroHost');
+    const board = document.getElementById('evalTeamBoards');
+    const slots = Array.from(document.querySelectorAll('.eval-slot')).slice(0, 24);
+
+    if (stage) stage.getBoundingClientRect();
+    if (heroHost) heroHost.getBoundingClientRect();
+    if (board) board.getBoundingClientRect();
+    slots.forEach((slot) => {
+      slot.style.willChange = 'transform, opacity';
+      slot.getBoundingClientRect();
+    });
+
+    round4State.animationPrimed = true;
+    return true;
+  })();
+
+  return round4State.animationPrimePromise;
 }
 
 function preloadCinematicAssets() {
   if (round4State.preloadPromise) return round4State.preloadPromise;
 
-  const urls = round4State.queue
-    .map((assignment) => assignment && assignment.evalData ? assignment.evalData.imageUrl : null);
+  const urls = Array.from(new Set(
+    round4State.queue
+      .map((assignment) => assignment && assignment.evalData ? normalizeImageUrl(assignment.evalData.imageUrl) : null)
+      .filter(Boolean)
+  ));
 
   const totalAssets = urls.length;
   let completedAssets = 0;
 
-  updateLoadingDockProgress(0, totalAssets || 1, '');
+  updateLoadingDockProgress(0, totalAssets || 1, 'Preloading character assets');
 
-  const preloadTasks = urls.map((url) => loadImageAsset(url)
-    .catch(() => null)
-    .then(() => {
-      completedAssets += 1;
-      updateLoadingDockProgress(completedAssets, totalAssets || 1, '');
-    }));
-
-  const settlePromise = Promise.all(preloadTasks)
-    .catch(() => null)
+  const settlePromise = runWithConcurrency(urls, 4, async (url) => {
+    await loadImageAsset(url).catch(() => null);
+    completedAssets += 1;
+    updateLoadingDockProgress(completedAssets, totalAssets || 1, 'Preloading character assets');
+  })
     .then(() => {
       round4State.preloadDone = true;
-      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, '');
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets ready');
+      return true;
+    })
+    .catch(() => {
+      round4State.preloadDone = true;
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets ready');
       return true;
     });
 
@@ -952,7 +1123,7 @@ function preloadCinematicAssets() {
     settlePromise,
     new Promise((resolve) => window.setTimeout(() => {
       round4State.preloadDone = true;
-      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, '');
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets ready');
       resolve(true);
     }, 3200))
   ]);
@@ -1005,12 +1176,13 @@ function finishSequenceIfComplete() {
     completion.hidden = false;
     completion.textContent = `All ${round4State.queue.length} characters placed`;
   }
-  if (status) status.textContent = 'Reveal complete. Confirm when your screen is ready to continue.';
+  if (status) status.textContent = 'Reveal complete. Lock this result when your team is ready.';
 
   const continueBtn = document.getElementById('evalContinueBtn');
   if (continueBtn) {
+    continueBtn.hidden = false;
     continueBtn.disabled = false;
-    continueBtn.textContent = '✅ CONFIRM & CONTINUE';
+    continueBtn.textContent = '✅ LOCK IN & CONTINUE';
   }
 
   renderFinalLeaderboard();
@@ -1180,14 +1352,17 @@ function renderFinalLeaderboard() {
   container.innerHTML = `
     <section class="eval-leaderboard-rich" aria-label="Round 4 detailed leaderboard">
       <header class="eval-leaderboard-rich-head">
-        <h3>Round 4 Leaderboard</h3>
-        <p>Expanded with top pick portraits, OVR tiers, and score breakdown.</p>
+        <h3>Final Showdown Leaderboard</h3>
+        <p>Round 4 points, full-roster OVR, and top-pick spotlight.</p>
       </header>
       <div class="eval-leaderboard-rich-list">
         ${ranked.map((row, index) => {
           const tierClass = getTierClassFromOVR(Number(row && row.totalOVR) || 0);
           const topPickImage = getLeaderboardTopPickImage(row);
-          const cumulativeOVR = Number(row && row.totalOVR) || 0;
+          const cumulativeOVR = Number(row && row.cumulativeOVR);
+          const safeCumulativeOVR = Number.isFinite(cumulativeOVR)
+            ? cumulativeOVR
+            : Math.round((Number(row && row.averageOVR) || 0) * 6);
           const averageOVR = Number(row && row.averageOVR) || 0;
           const fastestLock = formatLockDuration(row && row.fastestLockMs);
           const roundPoints = Number(row && row.round4Points) || 0;
@@ -1207,10 +1382,10 @@ function renderFinalLeaderboard() {
                 </div>
               </div>
               <div class="eval-lb-stats">
-                <span><small>OVR CUM💦</small><b>${cumulativeOVR}</b></span>
-                <span><small>OVR AVG🧢</small><b>${averageOVR}</b></span>
-                <span><small>Fastest Lock🔒</small><b>${fastestLock}</b></span>
-                <span><small>Round 4 pts🫵</small><b>${roundPoints}</b></span>
+                <span><small>OVR CUM</small><b>${safeCumulativeOVR}</b></span>
+                <span><small>OVR AVG</small><b>${averageOVR}</b></span>
+                <span><small>FASTEST LOCK</small><b>${fastestLock}</b></span>
+                <span><small>R4 PTS</small><b>${roundPoints}</b></span>
               </div>
             </article>
           `;
@@ -1241,10 +1416,19 @@ function renderCinematicSequence() {
   const status = document.getElementById('evalFinalStatus');
   if (status) status.textContent = '';
 
+  setRevealCeremonyProgress(56, 'Building reveal sequence');
+  updateLoadingDockProgress(0, Math.max(1, round4State.queue.length || 1), 'Stabilizing fetch quality');
+
   Promise.allSettled([
     preloadCinematicAssets(),
-    prepareRevealSequenceProfiles()
+    prepareRevealSequenceProfiles(),
+    primeAnimationPipeline()
   ]).finally(() => {
+    if (!round4State.animationPrimed) {
+      round4State.animationPrimed = true;
+    }
+    setRevealCeremonyProgress(100, 'Reveal ceremony ready');
+    updateLoadingDockProgress(round4State.queue.length || 1, round4State.queue.length || 1, 'Reveal profile ready');
     setLoadingBotContext(null, null, '');
     setLoadingReadyState(true);
   });
@@ -1260,15 +1444,19 @@ function requestFinalResults() {
     continueBtn.disabled = true;
     continueBtn.textContent = 'Waiting for others...';
   }
-  if (status) status.textContent = 'Waiting for players...';
+  if (status) status.textContent = 'Waiting on players...';
 
   window.socket.emit('requestFinalResults');
 }
 
 function toggleEvalScenario() {
+  const screen = document.getElementById('round4EvalScreen');
   const box = document.getElementById('evalScenarioBox');
-  if (!box) return;
+  const toggle = document.getElementById('evalContextToggle');
+  if (!box || !toggle) return;
+  if (screen && screen.classList.contains('eval-context-hidden')) return;
   box.classList.toggle('is-condensed');
+  toggle.setAttribute('aria-expanded', box.classList.contains('is-condensed') ? 'false' : 'true');
 }
 
 function switchEvalTab() {
@@ -1501,9 +1689,11 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       const title = document.getElementById('evalLoadingTitle');
       const subtitle = document.getElementById('evalLoadingSubtitle');
       if (loading) loading.style.display = 'flex';
-      if (title) title.textContent = 'Final reveal loading';
+      if (title) title.textContent = 'AI EVALUATOR ROUND';
       if (subtitle) subtitle.textContent = '';
       setLoadingReadyState(false);
+      setRevealCeremonyProgress(38, 'Scoring final teams');
+      updateLoadingDockProgress(0, 100, 'Scoring final teams');
       setLoadingBotContext(data && data.scenario, data && data.twist, '');
 
       window.setTimeout(renderCinematicSequence, 180);
@@ -1522,7 +1712,7 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       if (!status) return;
       const readyCount = Number(data && data.readyCount) || 0;
       const totalPlayers = Number(data && data.totalPlayers) || 0;
-      status.textContent = `Waiting for players: ${readyCount}/${totalPlayers}`;
+      status.textContent = `Waiting on players: ${readyCount}/${totalPlayers}`;
 
       const continueBtn = document.getElementById('evalContinueBtn');
       if (continueBtn && round4State.finalResultsRequested) {
@@ -1985,7 +2175,7 @@ function finishSequenceIfComplete() {
   if (continueBtn) continueBtn.disabled = false;
 
   updateNextButtonLabel();
-  renderFinalLeaderboard();
+  renderLegacyLeaderboard();
 }
 
 function animateDockTransition(assignment, onDone) {
@@ -2082,7 +2272,7 @@ function bindCinematicControls() {
   }
 }
 
-function renderFinalLeaderboard() {
+function renderLegacyLeaderboard() {
   const container = document.getElementById('evalLeaderboardContainer');
   if (!container || !Array.isArray(round4State.finalLeaderboard)) return;
 
@@ -2101,7 +2291,7 @@ function renderFinalLeaderboard() {
         ${ranked.map((row, index) => `
           <li>
             <span>${index + 1}. ${escapeHtml(row.playerName || 'Unknown')}</span>
-            <span>${Number(row.round4Points) || 0} pts • OVR ${Number(row.totalOVR) || 0}</span>
+            <span>${Number(row.round4Points) || 0} pts • OVR ${Number(row.totalOVR) || 0} • CUM ${Number.isFinite(Number(row && row.cumulativeOVR)) ? Number(row.cumulativeOVR) : Math.round((Number(row && row.averageOVR) || 0) * 6)}</span>
           </li>
         `).join('')}
       </ol>

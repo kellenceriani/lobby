@@ -447,20 +447,34 @@
   </div>
 
   <!-- ==================== ROUND 4 AI EVALUATION SCREEN (CINEMATIC) ==================== -->
-  <div id="round4EvalScreen" class="screen">
+  <div id="round4EvalScreen" class="screen eval-context-hidden">
     <div class="eval-header-sticky">
       <div class="eval-header-content">
         <div class="eval-header-main">
-          <h2 class="eval-title">⚡ Round 4: Final AI Verdict</h2>
-          <p class="eval-title-sub">AI ORACLE EVALUATOR • Tier-Weighted Analysis</p>
-          <div id="evalScenarioBox" class="eval-header-context" aria-label="Round 4 scenario context">
-            <p class="eval-header-scenario"><strong>S:</strong> <span id="evalScenarioText"></span></p>
-            <p class="eval-header-twist"><strong>T:</strong> <span id="evalTwistText"></span></p>
+          <h2 class="eval-title">⚡ Round 4 · Evaluation Ceremony</h2>
+          <p class="eval-title-sub">Final roster under AI review</p>
+          <button
+            id="evalContextToggle"
+            class="eval-context-toggle"
+            type="button"
+            onclick="toggleEvalScenario()"
+            aria-controls="evalScenarioBox"
+            aria-expanded="false"
+            aria-label="Toggle Round 4 context"
+          >
+            <span class="eval-context-toggle-eyebrow">Critical Context</span>
+            <span class="eval-context-toggle-line">
+              <strong>Scenario + Twist</strong>
+              <span id="evalContextToggleIcon" class="eval-context-toggle-icon" aria-hidden="true">▾</span>
+            </span>
+          </button>
+          <div id="evalScenarioBox" class="eval-header-context is-condensed" aria-label="Round 4 scenario context">
+            <p class="eval-header-scenario"><strong>Scenario:</strong> <span id="evalScenarioText"></span></p>
+            <p class="eval-header-twist"><strong>Twist:</strong> <span id="evalTwistText"></span></p>
             <p class="eval-header-causality" id="evalContextCausality" aria-live="polite"></p>
           </div>
         </div>
         <div class="eval-round-info" aria-live="polite">
-          <span class="round-label">FINAL ROUND</span>
           <span class="eval-progress"><span id="evalProgress">0</span>/<span id="evalTotal">0</span></span>
           <span class="eval-progress">Teams: <span id="evalTeamCount">0</span></span>
         </div>
@@ -469,34 +483,29 @@
 
     <section class="eval-cinematic-stage" aria-label="Round 4 cinematic reveal stage">
       <div id="evalLoading" class="eval-loading eval-loading-dock" aria-live="polite">
-        <div class="eval-loading-ambient" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
         <div class="eval-loading-core">
+          <div class="eval-loading-ambient" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
           <div class="eval-loading-headline">
-            <div class="eval-loading-eyebrow">ROUND 4 // PRE-REVEAL SYNC</div>
-            <strong id="evalLoadingTitle">Final reveal loading</strong>
+            <strong id="evalLoadingTitle">AI EVALUATOR ROUND</strong>
             <span id="evalLoadingSubtitle"></span>
           </div>
 
           <section class="eval-loading-priority" aria-label="Round 4 priority context">
             <article class="eval-priority-card eval-priority-scenario">
-              <p class="eval-priority-label">1A · SCENARIO (PRIMARY DRIVER)</p>
+              <p class="eval-priority-label">Scenario Objective</p>
               <p id="evalLoadScenarioHero" class="eval-priority-value">-</p>
             </article>
             <article class="eval-priority-card eval-priority-twist">
-              <p class="eval-priority-label">1B · TWIST (PRESSURE MODIFIER)</p>
+              <p class="eval-priority-label">Twist Modifier</p>
               <p id="evalLoadTwistHero" class="eval-priority-value">-</p>
             </article>
           </section>
 
-          <section class="eval-loading-intent" aria-label="Loading phase intent">
-            <p><strong>Purpose:</strong> Preloading seamless scenario-driven reveal while final data locks in.</p>
-          </section>
-
           <section class="eval-loading-visual" aria-label="Advanced loading visualization">
             <div class="eval-visual-head">
-              <span>1C · LOADING VISUAL</span>
+              <span>Round 4 Loading</span>
               <span id="evalVisualBlendPct">0%</span>
             </div>
             <div id="evalVisualGraph" class="eval-visual-graph" aria-hidden="true">
@@ -504,7 +513,7 @@
             </div>
             <div class="eval-progress-stack">
               <div class="eval-progress-label-row">
-                <span>Animation Queue Readiness</span>
+                <span>Reveal Ceremony</span>
                 <span id="evalProgressPct" class="eval-progress-pct">0%</span>
               </div>
               <div id="evalProgressBar" class="eval-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -512,27 +521,27 @@
               </div>
 
               <div class="eval-progress-label-row eval-progress-label-row-preload">
-                <span>Asset + Cache Readiness</span>
+                <span>Asset Readiness</span>
                 <span id="evalPreloadPct" class="eval-progress-pct">0%</span>
               </div>
               <div id="evalPreloadBar" class="eval-progress-bar eval-progress-bar-mega" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span id="evalPreloadFill" class="eval-progress-fill" style="width: 0%;"></span>
               </div>
-              <p id="evalPreloadHint" class="eval-preload-hint">Finalizing synchronized preload...</p>
+              <p id="evalPreloadHint" class="eval-preload-hint">Setting up the final reveal...</p>
             </div>
           </section>
 
           <div class="eval-loading-metrics">
             <div class="eval-loading-counts">
-              <span>Assets Ready</span>
+              <span>Assets Loaded</span>
               <b><span id="evalLoadFetched">0</span>/<span id="evalLoadTotal">0</span></b>
             </div>
-            <span id="evalStageCurrent" class="eval-stage-current">Preload Stage</span>
+            <span id="evalStageCurrent" class="eval-stage-current">Setup Stage</span>
           </div>
 
           <div class="eval-loading-actions">
             <button id="evalStartRevealBtn" class="btn btn-success" type="button" onclick="startRound4Reveal()" disabled>
-              ⏳ FINALIZING PRELOAD...
+              PREPARING REVEAL CEREMONY...
             </button>
           </div>
         </div>
@@ -550,7 +559,7 @@
 
     <div class="eval-actions">
       <button id="evalContinueBtn" class="btn btn-success" type="button" onclick="requestFinalResults()" disabled>
-        ✅ CONFIRM & CONTINUE
+        ✅ LOCK IN & CONTINUE
       </button>
       <div id="evalFinalStatus" class="eval-final-status" aria-live="polite"></div>
     </div>

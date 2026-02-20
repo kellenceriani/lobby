@@ -609,13 +609,13 @@ function composeDynamicTwist({ difficulty = 'normal', scenarioText = '' }) {
   const domainLine = domainPool.length ? randomFrom(domainPool) : '';
 
   if (safeDifficulty === 'easy') {
-    return normalizeScenarioText([primary, domainLine].filter(Boolean).join(' | '));
+    return applyPromptBrevity([primary, domainLine].filter(Boolean).join(' | '), 'twist');
   }
 
   const modifier = Math.random() < (safeDifficulty === 'hard' ? 0.75 : 0.45)
     ? randomFrom(modifierPool)
     : '';
-  return normalizeScenarioText([primary, domainLine, modifier].filter(Boolean).join(' | '));
+  return applyPromptBrevity([primary, domainLine, modifier].filter(Boolean).join(' | '), 'twist');
 }
 
 function generateScenario(theme = 'all') {
@@ -634,7 +634,7 @@ function generateScenario(theme = 'all') {
     scenario = scenario.replace(`{${varName}}`, word);
   });
 
-  return { scenario, category };
+  return { scenario: applyPromptBrevity(scenario, 'scenario'), category };
 }
 
 function generateTwists(difficulty = 'normal', count = 4, scenarioText = '') {
@@ -671,7 +671,12 @@ function generateTwists(difficulty = 'normal', count = 4, scenarioText = '') {
   }
 
   const merged = Array.from(new Set([...pool, ...dynamicPool]));
-  return shufflePool(merged).slice(0, targetCount);
+  const concise = Array.from(new Set(
+    merged
+      .map((twist) => applyPromptBrevity(twist, 'twist'))
+      .filter(Boolean)
+  ));
+  return shufflePool(concise).slice(0, targetCount);
 }
 
 function generateScenarios(count = 3, theme = 'all', difficulty = 'normal') {
@@ -961,6 +966,157 @@ function normalizeScenarioText(value) {
     .toUpperCase();
 }
 
+const PROMPT_BREVITY_PROFILES = {
+  scenario: { targetMaxWords: 8, hardMaxWords: 11 },
+  twist: { targetMaxWords: 6, hardMaxWords: 8 },
+  finalScenario: { targetMaxWords: 4, hardMaxWords: 4 },
+  finalTwist: { targetMaxWords: 5, hardMaxWords: 5 }
+};
+
+const FINAL_SCENARIO_BREAK_TOKENS = /\b(?:ACROSS|BEFORE|WHILE|USING|AGAINST|IN|DURING|UNDER|THROUGH|VIA|WITH|AS)\b/;
+const PROMPT_ARTICLES = new Set(['A', 'AN', 'THE']);
+const PROMPT_WEAK_END_WORDS = new Set(['AND', 'OR', 'TO', 'FOR', 'WITH', 'IN', 'ON', 'AT', 'BY', 'OF', 'THE', 'A', 'AN', 'AS', 'IS', 'ARE', 'WAS', 'WERE', 'BE', 'BEEN', 'BEING']);
+const TWIST_PREFIX_TOKENS = new Set(['WITH', 'WHILE', 'UNDER', 'AS', 'BEFORE']);
+
+function trimTerminalGlueWords(text) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  while (words.length > 1 && PROMPT_WEAK_END_WORDS.has(words[words.length - 1])) {
+    words.pop();
+  }
+  return words.join(' ');
+}
+
+function chooseIndefiniteArticle(nextWord) {
+  if (!nextWord) return 'A';
+  return /^[AEIOU]/.test(String(nextWord).toUpperCase()) ? 'AN' : 'A';
+}
+
+function compressFinalScenarioText(value, maxWords) {
+  const normalized = normalizeScenarioText(value);
+  if (!normalized) return '';
+
+  const primarySegment = normalized.split('|')[0].trim();
+  const preConstraint = primarySegment.split(FINAL_SCENARIO_BREAK_TOKENS)[0].trim();
+  const source = preConstraint || primarySegment;
+  const words = source.split(/\s+/).filter(Boolean);
+  const safeMaxWords = Math.max(1, maxWords);
+  if (words.length <= safeMaxWords) {
+    return trimTerminalGlueWords(words.join(' '));
+  }
+
+  const action = words[0] || '';
+  let objectiveWords = words.slice(1);
+  let article = 'A';
+
+  if (objectiveWords.length && PROMPT_ARTICLES.has(objectiveWords[0])) {
+    article = objectiveWords.shift();
+  }
+
+  objectiveWords = objectiveWords.filter(Boolean);
+  const objectiveBudget = Math.max(1, safeMaxWords - 2);
+  const objectiveCore = objectiveWords.length > objectiveBudget
+    ? objectiveWords.slice(-objectiveBudget)
+    : objectiveWords;
+
+  if (article === 'A' || article === 'AN') {
+    article = chooseIndefiniteArticle(objectiveCore[0] || objectiveWords[0]);
+  }
+
+  const compactWords = [action, article, ...objectiveCore]
+    .filter(Boolean)
+    .slice(0, safeMaxWords);
+
+  return trimTerminalGlueWords(compactWords.join(' '));
+}
+
+function compressFinalTwistText(value, maxWords) {
+  const normalized = normalizeScenarioText(value);
+  if (!normalized) return '';
+
+  const primarySegment = normalized.split('|')[0].trim();
+  const words = primarySegment.split(/\s+/).filter(Boolean);
+  const safeMaxWords = Math.max(1, maxWords);
+  if (words.length <= safeMaxWords) {
+    return trimTerminalGlueWords(words.join(' '));
+  }
+
+  let compactWords = words.slice(0, safeMaxWords);
+  if (TWIST_PREFIX_TOKENS.has(words[0])) {
+    let tail = words.slice(1);
+    if (tail.length > 1 && PROMPT_ARTICLES.has(tail[0])) {
+      tail = tail.slice(1);
+    }
+
+    const tailBudget = Math.max(1, safeMaxWords - 1);
+    const chosenTail = tail.slice(0, tailBudget);
+    let nextTailIndex = tailBudget;
+
+    while (chosenTail.length && PROMPT_WEAK_END_WORDS.has(chosenTail[chosenTail.length - 1])) {
+      const replacement = tail[nextTailIndex];
+      if (replacement) {
+        chosenTail[chosenTail.length - 1] = replacement;
+        nextTailIndex += 1;
+      } else {
+        chosenTail.pop();
+      }
+    }
+
+    compactWords = [words[0], ...chosenTail].slice(0, safeMaxWords);
+  }
+
+  return trimTerminalGlueWords(compactWords.join(' '));
+}
+
+function countWords(value) {
+  return String(value || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+function applyPromptBrevity(value, profileKey = 'scenario') {
+  const profile = PROMPT_BREVITY_PROFILES[profileKey] || PROMPT_BREVITY_PROFILES.scenario;
+  const targetMaxWords = Math.max(1, Number(profile.targetMaxWords) || 1);
+  const hardMaxWords = Math.max(targetMaxWords, Number(profile.hardMaxWords) || targetMaxWords);
+
+  let normalized = normalizeScenarioText(value);
+  if (!normalized) return '';
+
+  if (profileKey === 'finalScenario') {
+    return compressFinalScenarioText(normalized, hardMaxWords);
+  }
+
+  if (profileKey === 'finalTwist') {
+    return compressFinalTwistText(normalized, hardMaxWords);
+  }
+
+  const segments = normalized.split('|').map(segment => segment.trim()).filter(Boolean);
+  if (segments.length > 1) {
+    const kept = [];
+    let usedWords = 0;
+
+    for (const segment of segments) {
+      const segmentWords = countWords(segment);
+      if (!segmentWords) continue;
+
+      if (usedWords + segmentWords <= hardMaxWords || kept.length === 0) {
+        kept.push(segment);
+        usedWords += segmentWords;
+      } else {
+        break;
+      }
+
+      if (usedWords >= targetMaxWords) break;
+    }
+
+    normalized = kept.join(' | ');
+  }
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length > hardMaxWords) {
+    normalized = words.slice(0, hardMaxWords).join(' ');
+  }
+
+  return normalized;
+}
+
 function generateFinalScenario(difficulty = 'normal') {
   const patternWeights = difficulty === 'hard'
     ? FINAL_SCENARIO_PATTERNS
@@ -983,7 +1139,7 @@ function generateFinalScenario(difficulty = 'normal') {
     values.OPPOSITION = randomFrom(FINAL_SCENARIO_COMPONENTS.OPPOSITION.slice(6));
   }
 
-  return normalizeScenarioText(fillTemplate(chosenPattern, values));
+  return applyPromptBrevity(fillTemplate(chosenPattern, values), 'finalScenario');
 }
 
 function generateFinalTwist(difficulty = 'normal', scenarioText = '') {
@@ -998,7 +1154,7 @@ function generateFinalTwist(difficulty = 'normal', scenarioText = '') {
   const domainPool = TWIST_DOMAIN_LIBRARY[randomFrom(domains)] || [];
   const domainConstraint = Math.random() > 0.4 ? randomFrom(domainPool) : '';
 
-  return normalizeScenarioText([prefix, domainConstraint].filter(Boolean).join(' | '));
+  return applyPromptBrevity([prefix, domainConstraint].filter(Boolean).join(' | '), 'finalTwist');
 }
 
 function generateFinalScenarioAndTwist(difficulty = 'normal') {
@@ -1046,7 +1202,7 @@ function createGameInstance(roomCode, players, settings) {
 
   if (settings.customScenario && settings.customScenario.trim()) {
     const customIndex = Math.floor(Math.random() * scenarios.length);
-    const customScenario = settings.customScenario.trim().toUpperCase();
+    const customScenario = applyPromptBrevity(settings.customScenario.trim(), 'scenario');
     scenarios[customIndex] = {
       scenario: customScenario,
       twists: generateTwists(difficulty, 6, customScenario),

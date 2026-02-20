@@ -6,43 +6,116 @@ const { normalizeInfoCandidate, extractProfessionFromWikipedia, pickBestInfoCand
 const FETCH_CACHE = new Map();
 const INFLIGHT_FETCHES = new Map();
 const CACHE_TTL = 60 * 60 * 1000;
+const JSON_URL_CACHE = new Map();
+const JSON_INFLIGHT = new Map();
+const JSON_CACHE_TTL = 2 * 60 * 1000;
 
-async function getJson(url, timeoutMs = 8000, retries = 2) {
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const json = await new Promise((resolve) => {
-      const request = https.get(
-        url,
-        {
-          headers: {
-            'User-Agent': 'LobbyWARS/1.3',
-            Accept: 'application/json'
-          }
-        },
-        (response) => {
-          let data = '';
-          response.on('data', chunk => { data += chunk; });
-          response.on('end', () => {
-            if (response.statusCode && response.statusCode >= 400) return resolve(null);
-            try {
-              resolve(JSON.parse(data));
-            } catch (error) {
-              resolve(null);
-            }
-          });
-        }
-      );
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
 
-      request.on('error', () => resolve(null));
-      request.setTimeout(timeoutMs, () => {
-        request.destroy();
-        resolve(null);
-      });
-    });
+function getCachedJson(url, ttlMs = JSON_CACHE_TTL) {
+  const key = String(url || '');
+  if (!key) return null;
+  const cached = JSON_URL_CACHE.get(key);
+  if (!cached) return null;
+  const maxAge = Math.max(250, Number(ttlMs) || JSON_CACHE_TTL);
+  if (Date.now() - cached.timestamp > maxAge) {
+    JSON_URL_CACHE.delete(key);
+    return null;
+  }
+  return cached.payload;
+}
 
-    if (json) return json;
+function setCachedJson(url, payload) {
+  const key = String(url || '');
+  if (!key || !payload) return;
+  JSON_URL_CACHE.set(key, {
+    payload,
+    timestamp: Date.now()
+  });
+}
+
+function isTransientStatus(statusCode) {
+  if (!Number.isFinite(Number(statusCode))) return true;
+  const status = Number(statusCode);
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+async function getJson(url, timeoutMs = 8000, retries = 2, options = {}) {
+  const forceRefresh = Boolean(options && options.forceRefresh);
+  const cacheTtlMs = Number(options && options.cacheTtlMs) || JSON_CACHE_TTL;
+  const inflightKey = String(url || '');
+
+  if (!forceRefresh) {
+    const cached = getCachedJson(inflightKey, cacheTtlMs);
+    if (cached) return cached;
+    if (JSON_INFLIGHT.has(inflightKey)) return JSON_INFLIGHT.get(inflightKey);
   }
 
-  return null;
+  const task = (async () => {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const result = await new Promise((resolve) => {
+        const request = https.get(
+          url,
+          {
+            headers: {
+              'User-Agent': 'LobbyWARS/1.3',
+              Accept: 'application/json'
+            }
+          },
+          (response) => {
+            let data = '';
+            response.on('data', chunk => { data += chunk; });
+            response.on('end', () => {
+              const statusCode = Number(response && response.statusCode) || 0;
+              if (statusCode >= 400) {
+                resolve({ json: null, transient: isTransientStatus(statusCode) });
+                return;
+              }
+              try {
+                resolve({ json: JSON.parse(data), transient: false });
+              } catch (error) {
+                resolve({ json: null, transient: true });
+              }
+            });
+          }
+        );
+
+        request.on('error', () => resolve({ json: null, transient: true }));
+        request.setTimeout(timeoutMs, () => {
+          request.destroy();
+          resolve({ json: null, transient: true });
+        });
+      });
+
+      if (result && result.json) {
+        setCachedJson(inflightKey, result.json);
+        return result.json;
+      }
+
+      if (!result || !result.transient || attempt >= retries) {
+        break;
+      }
+
+      const backoffMs = Math.min(1200, 140 * (2 ** attempt)) + Math.floor(Math.random() * 90);
+      await delay(backoffMs);
+    }
+
+    return null;
+  })();
+
+  if (!forceRefresh) {
+    JSON_INFLIGHT.set(inflightKey, task);
+  }
+
+  try {
+    return await task;
+  } finally {
+    if (!forceRefresh) {
+      JSON_INFLIGHT.delete(inflightKey);
+    }
+  }
 }
 
 function getCachedCharacter(name) {
@@ -1225,14 +1298,18 @@ async function fetchFromOMDb(character) {
 }
 
 async function fetchCharacterInfo(character, options = {}) {
-  const cached = getCachedCharacter(character);
-  if (cached) return cached;
+  const forceRefresh = Boolean(options && options.forceRefresh);
+  const mode = String(options.mode || 'default').toLowerCase();
+  const cacheKey = normalizeName(character).toLowerCase();
+  const inflightKey = `${cacheKey}:${mode}${forceRefresh ? ':refresh' : ''}`;
 
-  const key = normalizeName(character).toLowerCase();
-  if (INFLIGHT_FETCHES.has(key)) return INFLIGHT_FETCHES.get(key);
+  if (!forceRefresh) {
+    const cached = getCachedCharacter(character);
+    if (cached) return cached;
+    if (INFLIGHT_FETCHES.has(inflightKey)) return INFLIGHT_FETCHES.get(inflightKey);
+  }
 
   const task = (async () => {
-    const mode = String(options.mode || 'default').toLowerCase();
     const isRoundMode = mode === 'round';
     const stageOneTargetConfidence = isRoundMode ? 0.68 : 0.75;
     const preStageTwoTargetConfidence = isRoundMode ? 0.64 : 0.72;
@@ -1470,11 +1547,11 @@ async function fetchCharacterInfo(character, options = {}) {
     return null;
   })();
 
-  INFLIGHT_FETCHES.set(key, task);
+  INFLIGHT_FETCHES.set(inflightKey, task);
   try {
     return await task;
   } finally {
-    INFLIGHT_FETCHES.delete(key);
+    INFLIGHT_FETCHES.delete(inflightKey);
   }
 }
 

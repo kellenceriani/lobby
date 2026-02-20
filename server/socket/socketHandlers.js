@@ -626,6 +626,7 @@ function registerSocketHandlers(io) {
           return {
             playerName: teamRow.playerName,
             totalOVR: typeof teamRow.totalOVR === 'number' ? teamRow.totalOVR : 0,
+            cumulativeOVR: typeof teamRow.cumulativeOVR === 'number' ? teamRow.cumulativeOVR : 0,
             averageOVR: typeof teamRow.averageOVR === 'number' ? teamRow.averageOVR : 0,
             chemistryBonus: typeof teamRow.chemistryBonus === 'number' ? teamRow.chemistryBonus : 0,
             topPick: teamRow.topPick || 'N/A',

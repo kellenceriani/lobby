@@ -57,6 +57,8 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
   const fetchStartedAt = Date.now();
   const info = await fetchCharacterInfo(character, {
     mode: options && options.evaluationMode ? options.evaluationMode : 'default',
+    forceRefresh: Boolean(options && options.forceRefresh),
+    fetchCacheTtlMs: Number(options && options.fetchCacheTtlMs) || 0,
     contextHints: options && options.fetchContext && Array.isArray(options.fetchContext.contextHints)
       ? options.fetchContext.contextHints
       : [],

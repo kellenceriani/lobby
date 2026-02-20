@@ -3,6 +3,40 @@ const { getRandomPhrase } = require('../evaluator/presentation/phraseGenerator')
 const { calculateChemistryDetails } = require('../evaluator/team/chemistryCalculator');
 const { calculateRound4Points, describeRound4PointFormula } = require('./scoreScaling');
 
+const FINAL_REFINE_CONFIDENCE_THRESHOLD = 0.68;
+const MAX_REFINE_PER_TEAM = 1;
+
+function getInfoConfidence(evalData) {
+  return Number(evalData && evalData.scoreMeta && evalData.scoreMeta.infoConfidence) || 0;
+}
+
+function shouldRefineEvaluation(evalData) {
+  if (!evalData) return false;
+  const confidence = getInfoConfidence(evalData);
+  const trusted = Boolean(evalData && evalData.scoreMeta && evalData.scoreMeta.trustedInfo);
+  return !trusted || confidence < FINAL_REFINE_CONFIDENCE_THRESHOLD;
+}
+
+function chooseBetterEvaluation(primaryEval, refinedEval) {
+  if (!refinedEval) return primaryEval;
+  if (!primaryEval) return refinedEval;
+
+  const primaryConfidence = getInfoConfidence(primaryEval);
+  const refinedConfidence = getInfoConfidence(refinedEval);
+  const primaryTrusted = Boolean(primaryEval && primaryEval.scoreMeta && primaryEval.scoreMeta.trustedInfo);
+  const refinedTrusted = Boolean(refinedEval && refinedEval.scoreMeta && refinedEval.scoreMeta.trustedInfo);
+
+  if (refinedTrusted && !primaryTrusted) return refinedEval;
+  if (!refinedTrusted && primaryTrusted) return primaryEval;
+
+  if (refinedConfidence > primaryConfidence + 0.03) return refinedEval;
+  if (primaryConfidence > refinedConfidence + 0.03) return primaryEval;
+
+  return (Number(refinedEval.ovr) || 0) >= (Number(primaryEval.ovr) || 0)
+    ? refinedEval
+    : primaryEval;
+}
+
 async function mapWithConcurrency(items, concurrency, mapper) {
   const safeConcurrency = Math.max(1, Math.min(concurrency || 1, items.length || 1));
   const results = new Array(items.length);
@@ -53,12 +87,14 @@ async function evaluateRound4FromGame(game) {
   }));
 
   const evaluatedTeams = await mapWithConcurrency(teams, 2, async ({ playerName, roster, draftMeta }) => {
+    let teamRefineBudgetUsed = 0;
+
     const evaluations = await mapWithConcurrency(roster, 3, async (char) => {
       const draftedMeta = draftMeta.find((entry) =>
         entry && entry.character && entry.character.toLowerCase() === String(char).toLowerCase()
       );
 
-      const evalData = await scoreCharacter(char, scenario, twist, {
+      const baseOptions = {
         originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
         originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
         evaluationMode: 'final',
@@ -71,14 +107,34 @@ async function evaluateRound4FromGame(game) {
             ? Number(draftedMeta.draftedRound)
             : null
         }
-      });
+      };
 
-      evalData.phrase = getRandomPhrase(evalData.emotion);
-      return evalData;
+      const primaryEval = await scoreCharacter(char, scenario, twist, baseOptions);
+
+      let finalEval = primaryEval;
+      if (teamRefineBudgetUsed < MAX_REFINE_PER_TEAM && shouldRefineEvaluation(primaryEval)) {
+        teamRefineBudgetUsed += 1;
+        const refinedEval = await scoreCharacter(char, scenario, twist, {
+          ...baseOptions,
+          forceRefresh: true,
+          fetchCacheTtlMs: 45000,
+          fetchContext: {
+            ...baseOptions.fetchContext,
+            contextHints: ['final verification pass', 'quality recheck']
+          }
+        });
+        finalEval = chooseBetterEvaluation(primaryEval, refinedEval);
+      }
+
+      finalEval.phrase = getRandomPhrase(finalEval.emotion);
+      return finalEval;
     });
 
     const chemistryInfo = calculateChemistryDetails(roster);
     const chemistryBonus = chemistryInfo.bonus;
+    const cumulativeOVR = evaluations.length
+      ? Math.round(evaluations.reduce((sum, entry) => sum + (Number(entry && entry.ovr) || 0), 0))
+      : 0;
     const averageOVR = evaluations.length
       ? Math.round(evaluations.reduce((sum, e) => sum + e.ovr, 0) / evaluations.length)
       : 0;
@@ -93,6 +149,7 @@ async function evaluateRound4FromGame(game) {
       evaluations,
       teamSummary: {
         totalOVR: teamOVR,
+        cumulativeOVR,
         chemistryBonus,
         chemistryDetails: chemistryInfo.details,
         chemistryRawScore: typeof chemistryInfo.rawScore === 'number' ? chemistryInfo.rawScore : null,
@@ -134,6 +191,7 @@ async function evaluateRound4FromGame(game) {
       playerName,
       round4Points: roundPoints[playerName] || 0,
       totalOVR: teamData.teamSummary.totalOVR,
+      cumulativeOVR: teamData.teamSummary.cumulativeOVR,
       averageOVR: teamData.teamSummary.averageOVR,
       chemistryBonus: teamData.teamSummary.chemistryBonus,
       topPick: teamData.teamSummary.topPick,

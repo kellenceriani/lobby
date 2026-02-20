@@ -8,6 +8,7 @@ export function showScreen(screenId) {
   const screen = document.getElementById(screenId);
   if (screen) {
     screen.classList.add('active');
+    document.dispatchEvent(new CustomEvent('screenChanged', { detail: { screenId } }));
     const firstFocusable = screen.querySelector('input, button, [tabindex]:not([tabindex="-1"])');
     if (firstFocusable && !document.activeElement.matches('input[type="text"]')) {
       setTimeout(() => firstFocusable.focus(), 100);

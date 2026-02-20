@@ -237,9 +237,27 @@ function rememberInstallPromptDismissal() {
 
 function hideInstallPrompt() {
   const root = document.getElementById('installPrompt');
+  const instructionEl = document.getElementById('installPromptInstruction');
+  const reopenBtn = document.getElementById('installPromptReopen');
   if (!root) return;
   root.style.display = 'none';
   root.hidden = true;
+  if (instructionEl) {
+    instructionEl.textContent = '';
+    instructionEl.hidden = true;
+  }
+
+  if (reopenBtn) {
+    const shouldShowReopen = isLikelyMobileDevice() && !isStandaloneDisplayMode();
+    reopenBtn.hidden = !shouldShowReopen;
+  }
+}
+
+function showPersistentInstallInstruction(message) {
+  const instructionEl = document.getElementById('installPromptInstruction');
+  if (!instructionEl) return;
+  instructionEl.textContent = message;
+  instructionEl.hidden = false;
 }
 
 function showInstallPrompt({ copy, actionLabel, onAction }) {
@@ -251,14 +269,26 @@ function showInstallPrompt({ copy, actionLabel, onAction }) {
 
   const root = document.getElementById('installPrompt');
   const copyEl = document.getElementById('installPromptCopy');
+  const instructionEl = document.getElementById('installPromptInstruction');
   const actionBtn = document.getElementById('installPromptAction');
   const dismissBtn = document.getElementById('installPromptDismiss');
+  const closeBtn = document.getElementById('installPromptClose');
+  const reopenBtn = document.getElementById('installPromptReopen');
 
-  if (!root || !copyEl || !actionBtn || !dismissBtn) return;
+  if (!root || !copyEl || !actionBtn || !dismissBtn || !closeBtn) return;
 
   copyEl.textContent = copy;
+  if (instructionEl) {
+    instructionEl.textContent = '';
+    instructionEl.hidden = true;
+  }
   actionBtn.textContent = actionLabel;
   actionBtn.onclick = onAction;
+  closeBtn.onclick = () => {
+    installPromptState.sessionDismissed = true;
+    hideInstallPrompt();
+    rememberInstallPromptDismissal();
+  };
   dismissBtn.onclick = () => {
     installPromptState.sessionDismissed = true;
     hideInstallPrompt();
@@ -267,6 +297,13 @@ function showInstallPrompt({ copy, actionLabel, onAction }) {
 
   root.style.removeProperty('display');
   root.hidden = false;
+  if (reopenBtn) {
+    reopenBtn.hidden = true;
+    reopenBtn.onclick = () => {
+      installPromptState.sessionDismissed = false;
+      showInstallPrompt({ copy, actionLabel, onAction });
+    };
+  }
 }
 
 function installFullscreenPromptFlow() {
@@ -276,6 +313,47 @@ function installFullscreenPromptFlow() {
   if (!isLikelyMobileDevice()) {
     hideInstallPrompt();
     return;
+  }
+
+  const reopenBtn = document.getElementById('installPromptReopen');
+  if (reopenBtn) {
+    reopenBtn.onclick = () => {
+      installPromptState.sessionDismissed = false;
+      if (isIOS()) {
+        showInstallPrompt({
+          copy: 'Install to play in fullscreen with hidden browser bars.',
+          actionLabel: 'Install',
+          onAction: () => {
+            showPersistentInstallInstruction('Chrome on iOS: Share → More → Add to Home Screen. Safari on iOS: Share → Add to Home Screen.');
+          }
+        });
+        return;
+      }
+
+      showInstallPrompt({
+        copy: 'Install from your browser menu for true fullscreen mode and hidden browser bars.',
+        actionLabel: 'Install',
+        onAction: async () => {
+          const deferred = installPromptState.deferredPrompt;
+          if (deferred && typeof deferred.prompt === 'function') {
+            try {
+              deferred.prompt();
+              const choice = await deferred.userChoice;
+              if (choice && choice.outcome === 'accepted') {
+                installPromptState.sessionDismissed = true;
+                rememberInstallPromptDismissal();
+                hideInstallPrompt();
+              }
+            } catch (error) {
+              showPersistentInstallInstruction('Install prompt could not open. Use browser menu and choose Install App or Add to Home Screen.');
+            }
+            return;
+          }
+
+          showPersistentInstallInstruction('Use your browser menu and choose Install App or Add to Home Screen.');
+        }
+      });
+    };
   }
 
   if (isStandaloneDisplayMode()) {
@@ -312,20 +390,14 @@ function installFullscreenPromptFlow() {
       onAction: async () => {
         const deferred = installPromptState.deferredPrompt;
         if (!deferred) {
-          showToast('Install prompt is unavailable on this browser. Use browser menu → Install App/Add to Home Screen.', 'info', 7000);
-          installPromptState.sessionDismissed = true;
-          rememberInstallPromptDismissal();
-          hideInstallPrompt();
+          showPersistentInstallInstruction('Use your browser menu and choose Install App or Add to Home Screen.');
           return;
         }
 
         try {
           deferred.prompt();
         } catch (error) {
-          showToast('Install prompt could not open. Use browser menu → Install App/Add to Home Screen.', 'warning', 7000);
-          installPromptState.sessionDismissed = true;
-          rememberInstallPromptDismissal();
-          hideInstallPrompt();
+          showPersistentInstallInstruction('Native install prompt could not open. Use browser menu and choose Install App or Add to Home Screen.');
           return;
         }
 
@@ -336,10 +408,10 @@ function installFullscreenPromptFlow() {
             rememberInstallPromptDismissal();
             hideInstallPrompt();
           } else {
-            showToast('Install canceled. You can still install later from your browser menu.', 'info', 5000);
+            showPersistentInstallInstruction('Install canceled. You can still install later from your browser menu.');
           }
         } catch (error) {
-          showToast('Install result unavailable. You can install from your browser menu anytime.', 'info', 6000);
+          showPersistentInstallInstruction('Install result unavailable. You can install from your browser menu anytime.');
         }
 
         installPromptState.deferredPrompt = null;
@@ -352,18 +424,17 @@ function installFullscreenPromptFlow() {
     installPromptState.sessionDismissed = true;
     rememberInstallPromptDismissal();
     hideInstallPrompt();
+    const reopenBtnAfterInstall = document.getElementById('installPromptReopen');
+    if (reopenBtnAfterInstall) reopenBtnAfterInstall.hidden = true;
     showToast('Installed! Open LobbyWARS from your home screen for true fullscreen mode.', 'info', 5000);
   });
 
   if (isIOS()) {
     showInstallPrompt({
-      copy: 'For fullscreen on iPhone/iPad: Share → Add to Home Screen, then open from the icon.',
-      actionLabel: 'How',
+      copy: 'Install to play in fullscreen with hidden browser bars.',
+      actionLabel: 'Install',
       onAction: () => {
-        showToast('iOS: Tap Share, then Add to Home Screen. Launch from the home-screen icon.', 'info', 6500);
-        installPromptState.sessionDismissed = true;
-        rememberInstallPromptDismissal();
-        hideInstallPrompt();
+        showPersistentInstallInstruction('Chrome on iOS: Share → More → Add to Home Screen. Safari on iOS: Share → Add to Home Screen.');
       }
     });
     return;
@@ -384,18 +455,12 @@ function installFullscreenPromptFlow() {
             hideInstallPrompt();
           }
         } catch (error) {
-          showToast('Install prompt could not open. Use browser menu → Install App/Add to Home Screen.', 'warning', 7000);
-          installPromptState.sessionDismissed = true;
-          rememberInstallPromptDismissal();
-          hideInstallPrompt();
+          showPersistentInstallInstruction('Install prompt could not open. Use browser menu and choose Install App or Add to Home Screen.');
         }
         return;
       }
 
-      showToast('Use your browser menu and choose Install App or Add to Home Screen.', 'info', 6500);
-      installPromptState.sessionDismissed = true;
-      rememberInstallPromptDismissal();
-      hideInstallPrompt();
+      showPersistentInstallInstruction('Use your browser menu and choose Install App or Add to Home Screen.');
     }
   });
 }

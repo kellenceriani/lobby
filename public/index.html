@@ -28,12 +28,17 @@
   </div>
 
   <div id="installPrompt" class="install-prompt" role="dialog" aria-live="polite" aria-label="Install LobbyWARS" hidden>
+    <button id="installPromptClose" class="install-prompt-close" type="button" aria-label="Close install prompt">✕</button>
+    <div class="install-prompt-urgent">Fullscreen Recommended</div>
     <div class="install-prompt-copy" id="installPromptCopy">Install LobbyWARS for true fullscreen mode.</div>
+    <div id="installPromptInstruction" class="install-prompt-instruction" hidden></div>
     <div class="install-prompt-actions">
       <button id="installPromptAction" class="btn btn-primary" type="button" aria-label="Install app">Install</button>
       <button id="installPromptDismiss" class="btn btn-secondary" type="button" aria-label="Dismiss install prompt">Later</button>
     </div>
   </div>
+
+  <button id="installPromptReopen" class="install-prompt-reopen" type="button" aria-label="Show install help" hidden>❗</button>
 
   <!-- ==================== JOIN SCREEN ==================== -->
   <div id="join" class="screen active">

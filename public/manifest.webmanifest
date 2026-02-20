@@ -1,0 +1,25 @@
+{
+  "name": "LobbyWARS",
+  "short_name": "LobbyWARS",
+  "description": "Real-time multiplayer party game for 3-6 players",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffe6f0",
+  "theme_color": "#ff4081",
+  "icons": [
+    {
+      "src": "/img/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/img/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

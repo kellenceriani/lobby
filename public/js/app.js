@@ -27,6 +27,233 @@ import {
 const socket = io();
 window.socket = socket; // Expose to window for round4Eval.js
 
+const mobileChromeState = {
+  enabled: false,
+  fullscreenAttempted: false,
+  nudgeTimerIds: []
+};
+
+const installPromptState = {
+  deferredPrompt: null,
+  initialized: false
+};
+
+const INSTALL_PROMPT_DISMISS_KEY = 'lobbywars_install_prompt_dismiss_until_v1';
+const INSTALL_PROMPT_DISMISS_MS = 1000 * 60 * 60 * 24 * 7;
+
+function isLikelyMobileDevice() {
+  const ua = navigator.userAgent || '';
+  const coarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const hasTouch = navigator.maxTouchPoints > 0;
+  return /android|iphone|ipad|ipod|mobile|windows phone/i.test(ua) || coarsePointer || hasTouch;
+}
+
+function setMobileAppHeightVar() {
+  const viewportHeight = window.visualViewport
+    ? window.visualViewport.height
+    : window.innerHeight;
+  if (!viewportHeight || !Number.isFinite(viewportHeight)) return;
+  document.documentElement.style.setProperty('--app-height', `${Math.round(viewportHeight)}px`);
+}
+
+function nudgeBrowserChrome() {
+  if (!mobileChromeState.enabled) return;
+  if (window.scrollY > 0) return;
+  window.scrollTo(0, 1);
+}
+
+function clearChromeNudges() {
+  mobileChromeState.nudgeTimerIds.forEach((id) => clearTimeout(id));
+  mobileChromeState.nudgeTimerIds = [];
+}
+
+function scheduleChromeNudges() {
+  clearChromeNudges();
+  const delays = [0, 80, 180, 320, 600, 1000, 1600, 2400];
+  delays.forEach((delay) => {
+    const timerId = setTimeout(() => {
+      setMobileAppHeightVar();
+      nudgeBrowserChrome();
+    }, delay);
+    mobileChromeState.nudgeTimerIds.push(timerId);
+  });
+}
+
+function tryEnterFullscreenOnGesture() {
+  if (mobileChromeState.fullscreenAttempted) return;
+  if (document.fullscreenElement || document.webkitFullscreenElement) return;
+
+  const root = document.documentElement;
+  const requestFullscreen =
+    root.requestFullscreen
+    || root.webkitRequestFullscreen
+    || root.msRequestFullscreen;
+
+  if (typeof requestFullscreen !== 'function') return;
+
+  mobileChromeState.fullscreenAttempted = true;
+  try {
+    const maybePromise = requestFullscreen.call(root);
+    if (maybePromise && typeof maybePromise.catch === 'function') {
+      maybePromise.catch(() => {
+        mobileChromeState.fullscreenAttempted = false;
+      });
+    }
+  } catch (error) {
+    mobileChromeState.fullscreenAttempted = false;
+  }
+}
+
+function installMobileChromeController() {
+  if (!isLikelyMobileDevice()) return;
+
+  mobileChromeState.enabled = true;
+  document.body.classList.add('mobile-chrome-hack');
+  setMobileAppHeightVar();
+  scheduleChromeNudges();
+
+  const refreshLayoutAndChrome = () => {
+    setMobileAppHeightVar();
+    scheduleChromeNudges();
+  };
+
+  window.addEventListener('load', refreshLayoutAndChrome, { passive: true });
+  window.addEventListener('resize', refreshLayoutAndChrome, { passive: true });
+  window.addEventListener('orientationchange', refreshLayoutAndChrome, { passive: true });
+  window.addEventListener('pageshow', refreshLayoutAndChrome, { passive: true });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      refreshLayoutAndChrome();
+    }
+  });
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setMobileAppHeightVar, { passive: true });
+    window.visualViewport.addEventListener('scroll', setMobileAppHeightVar, { passive: true });
+  }
+
+  const unlockImmersiveMode = () => {
+    tryEnterFullscreenOnGesture();
+    nudgeBrowserChrome();
+  };
+
+  ['touchstart', 'touchend', 'pointerup', 'click'].forEach((eventName) => {
+    document.addEventListener(eventName, unlockImmersiveMode, { passive: true });
+  });
+}
+
+installMobileChromeController();
+
+function isStandaloneDisplayMode() {
+  const standaloneByMedia = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  const standaloneByNavigator = window.navigator.standalone === true;
+  return standaloneByMedia || standaloneByNavigator;
+}
+
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+}
+
+function canShowInstallPromptNow() {
+  try {
+    const dismissedUntil = Number(window.localStorage.getItem(INSTALL_PROMPT_DISMISS_KEY) || '0');
+    return Date.now() > dismissedUntil;
+  } catch (error) {
+    return true;
+  }
+}
+
+function rememberInstallPromptDismissal() {
+  try {
+    window.localStorage.setItem(INSTALL_PROMPT_DISMISS_KEY, String(Date.now() + INSTALL_PROMPT_DISMISS_MS));
+  } catch (error) {
+    // no-op
+  }
+}
+
+function hideInstallPrompt() {
+  const root = document.getElementById('installPrompt');
+  if (!root) return;
+  root.hidden = true;
+}
+
+function showInstallPrompt({ copy, actionLabel, onAction }) {
+  const root = document.getElementById('installPrompt');
+  const copyEl = document.getElementById('installPromptCopy');
+  const actionBtn = document.getElementById('installPromptAction');
+  const dismissBtn = document.getElementById('installPromptDismiss');
+
+  if (!root || !copyEl || !actionBtn || !dismissBtn) return;
+
+  copyEl.textContent = copy;
+  actionBtn.textContent = actionLabel;
+  actionBtn.onclick = onAction;
+  dismissBtn.onclick = () => {
+    hideInstallPrompt();
+    rememberInstallPromptDismissal();
+  };
+
+  root.hidden = false;
+}
+
+function installFullscreenPromptFlow() {
+  if (installPromptState.initialized) return;
+  installPromptState.initialized = true;
+
+  if (isStandaloneDisplayMode()) {
+    hideInstallPrompt();
+    return;
+  }
+
+  if (!canShowInstallPromptNow()) {
+    hideInstallPrompt();
+    return;
+  }
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    installPromptState.deferredPrompt = event;
+
+    showInstallPrompt({
+      copy: 'Install LobbyWARS to launch with fullscreen behavior and hidden browser bars.',
+      actionLabel: 'Install',
+      onAction: async () => {
+        const deferred = installPromptState.deferredPrompt;
+        if (!deferred) return;
+
+        deferred.prompt();
+        try {
+          await deferred.userChoice;
+        } catch (error) {
+          // no-op
+        }
+
+        installPromptState.deferredPrompt = null;
+        hideInstallPrompt();
+      }
+    });
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installPromptState.deferredPrompt = null;
+    hideInstallPrompt();
+    showToast('Installed! Open LobbyWARS from your home screen for true fullscreen mode.', 'info', 5000);
+  });
+
+  if (isIOS()) {
+    showInstallPrompt({
+      copy: 'For fullscreen on iPhone/iPad: Share → Add to Home Screen, then open from the icon.',
+      actionLabel: 'How',
+      onAction: () => {
+        showToast('iOS: Tap Share, then Add to Home Screen. Launch from the home-screen icon.', 'info', 6500);
+      }
+    });
+  }
+}
+
+installFullscreenPromptFlow();
+
 // ========================
 // SOUND SYSTEM
 // ========================

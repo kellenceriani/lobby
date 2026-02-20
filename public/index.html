@@ -449,35 +449,70 @@
     <section class="eval-cinematic-stage" aria-label="Round 4 cinematic reveal stage">
       <div id="evalLoading" class="eval-loading eval-loading-dock" aria-live="polite">
         <div class="eval-loading-ambient" aria-hidden="true">
-          <span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
         </div>
         <div class="eval-loading-core">
-          <div class="eval-loading-spinner" aria-hidden="true"></div>
-          <div class="eval-loading-text">
-            <strong id="evalLoadingTitle">Evaluating teams...</strong>
-            <span id="evalLoadingSubtitle">Using cached round intel + final scoring.</span>
-            <div class="eval-loading-bot" aria-live="polite">
-              <div class="eval-loading-bot-head">🤖 AI Evaluator</div>
-              <p class="eval-loading-bot-line"><strong>Scenario:</strong> <span id="evalLoadScenario">-</span></p>
-              <p class="eval-loading-bot-line"><strong>Twist:</strong> <span id="evalLoadTwist">-</span></p>
-              <p class="eval-loading-bot-speech" id="evalLoadBotSpeech">Preparing data pipelines and tier visual synthesis...</p>
+          <div class="eval-loading-headline">
+            <div class="eval-loading-eyebrow">ROUND 4 // PRE-REVEAL SYNC</div>
+            <strong id="evalLoadingTitle">Final reveal loading</strong>
+            <span id="evalLoadingSubtitle"></span>
+          </div>
+
+          <section class="eval-loading-priority" aria-label="Round 4 priority context">
+            <article class="eval-priority-card eval-priority-scenario">
+              <p class="eval-priority-label">1A · SCENARIO (PRIMARY DRIVER)</p>
+              <p id="evalLoadScenarioHero" class="eval-priority-value">-</p>
+            </article>
+            <article class="eval-priority-card eval-priority-twist">
+              <p class="eval-priority-label">1B · TWIST (PRESSURE MODIFIER)</p>
+              <p id="evalLoadTwistHero" class="eval-priority-value">-</p>
+            </article>
+          </section>
+
+          <section class="eval-loading-intent" aria-label="Loading phase intent">
+            <p><strong>Purpose:</strong> Preloading seamless scenario-driven reveal while final data locks in.</p>
+          </section>
+
+          <section class="eval-loading-visual" aria-label="Advanced loading visualization">
+            <div class="eval-visual-head">
+              <span>1C · LOADING VISUAL</span>
+              <span id="evalVisualBlendPct">0%</span>
             </div>
-            <div class="eval-loading-counts">
-              <span>Assets Ready:</span>
-              <b><span id="evalLoadFetched">0</span>/<span id="evalLoadTotal">0</span></b>
+            <div id="evalVisualGraph" class="eval-visual-graph" aria-hidden="true">
+              <span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span>
             </div>
-            <div class="eval-progress-row">
+            <div class="eval-progress-stack">
+              <div class="eval-progress-label-row">
+                <span>Animation Queue Readiness</span>
+                <span id="evalProgressPct" class="eval-progress-pct">0%</span>
+              </div>
               <div id="evalProgressBar" class="eval-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span class="eval-progress-fill" style="width: 0%;"></span>
               </div>
-              <span id="evalProgressPct" class="eval-progress-pct">0%</span>
-            </div>
-            <div class="eval-progress-row eval-progress-row-preload">
+
+              <div class="eval-progress-label-row eval-progress-label-row-preload">
+                <span>Asset + Cache Readiness</span>
+                <span id="evalPreloadPct" class="eval-progress-pct">0%</span>
+              </div>
               <div id="evalPreloadBar" class="eval-progress-bar eval-progress-bar-mega" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span id="evalPreloadFill" class="eval-progress-fill" style="width: 0%;"></span>
               </div>
-              <span id="evalPreloadPct" class="eval-progress-pct">0%</span>
+              <p id="evalPreloadHint" class="eval-preload-hint">Finalizing synchronized preload...</p>
             </div>
+          </section>
+
+          <div class="eval-loading-metrics">
+            <div class="eval-loading-counts">
+              <span>Assets Ready</span>
+              <b><span id="evalLoadFetched">0</span>/<span id="evalLoadTotal">0</span></b>
+            </div>
+            <span id="evalStageCurrent" class="eval-stage-current">Preload Stage</span>
+          </div>
+
+          <div class="eval-loading-actions">
+            <button id="evalStartRevealBtn" class="btn btn-success" type="button" onclick="startRound4Reveal()" disabled>
+              ⏳ FINALIZING PRELOAD...
+            </button>
           </div>
         </div>
       </div>

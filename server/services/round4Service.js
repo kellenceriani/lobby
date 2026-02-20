@@ -134,6 +134,7 @@ async function evaluateRound4FromGame(game) {
       playerName,
       round4Points: roundPoints[playerName] || 0,
       totalOVR: teamData.teamSummary.totalOVR,
+      averageOVR: teamData.teamSummary.averageOVR,
       chemistryBonus: teamData.teamSummary.chemistryBonus,
       topPick: teamData.teamSummary.topPick,
       topPickImageUrl: (teamData.evaluations.find((entry) => entry.character === teamData.teamSummary.topPick) || {}).imageUrl || null

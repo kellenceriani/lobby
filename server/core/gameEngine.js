@@ -1070,6 +1070,7 @@ function createGameInstance(roomCode, players, settings) {
       totalScore: 0,
       draftLocked: false,
       draftLockTime: null,
+      fastestDraftLockMs: null,
       voteLocked: false
     })),
     currentRound: 0,

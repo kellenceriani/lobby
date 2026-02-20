@@ -454,7 +454,12 @@ function registerSocketHandlers(io) {
       }
 
       player.draftLocked = true;
-      player.draftLockTime = Date.now() - game.roundStartTime;
+      const lockElapsedMs = Math.max(0, Date.now() - (Number(game.roundStartTime) || Date.now()));
+      player.draftLockTime = lockElapsedMs;
+      const previousBestLock = Number(player.fastestDraftLockMs);
+      if (!Number.isFinite(previousBestLock) || previousBestLock < 0 || lockElapsedMs < previousBestLock) {
+        player.fastestDraftLockMs = lockElapsedMs;
+      }
 
       io.to(room).emit('playerLocked', { playerName: name, phase: 'DRAFT' });
 
@@ -605,14 +610,20 @@ function registerSocketHandlers(io) {
         }, {});
 
         const evalLeaderboard = scored.finalLeaderboard.map((teamRow) => {
+          const sourcePlayer = game.players.find((player) => player.name === teamRow.playerName);
+          const fastestLockMs = sourcePlayer && Number.isFinite(Number(sourcePlayer.fastestDraftLockMs))
+            ? Math.max(0, Math.round(Number(sourcePlayer.fastestDraftLockMs)))
+            : null;
           const round4Points = Number(teamRow.round4Points) || 0;
           const totalScore = Number(totalScoreByPlayer[teamRow.playerName]) || round4Points;
           return {
             playerName: teamRow.playerName,
             totalOVR: typeof teamRow.totalOVR === 'number' ? teamRow.totalOVR : 0,
+            averageOVR: typeof teamRow.averageOVR === 'number' ? teamRow.averageOVR : 0,
             chemistryBonus: typeof teamRow.chemistryBonus === 'number' ? teamRow.chemistryBonus : 0,
             topPick: teamRow.topPick || 'N/A',
             topPickImageUrl: teamRow.topPickImageUrl || null,
+            fastestLockMs,
             round4Points,
             totalScore,
             previousTotalScore: totalScore - round4Points

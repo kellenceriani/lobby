@@ -22,8 +22,149 @@ const round4State = {
   pendingFinalResultsTimer: null,
   preloadPromise: null,
   preloadDone: false,
-  teamBoardCollapsed: Object.create(null)
+  revealPrepared: false,
+  revealPreparePromise: null,
+  revealProfiles: Object.create(null),
+  revealAudioContext: null,
+  revealAudioReady: false,
+  animationTimers: [],
+  teamBoardCollapsed: Object.create(null),
+  loadingReadyToStart: false,
+  loadingScenario: '',
+  loadingTwist: ''
 };
+
+const REVEAL_TIER_PROFILES = {
+  lowest: {
+    anticipationMs: 200,
+    anticipationLift: 14,
+    anticipationTilt: -1.5,
+    flightMs: 880,
+    settleMs: 220,
+    cadencePadMs: 120,
+    flightArcPx: 30,
+    spinDeg: 0,
+    midScale: 0.88,
+    endScale: 0.34,
+    endOpacity: 0.95,
+    flightEasing: 'cubic-bezier(0.22, 0.78, 0.32, 1)',
+    spotlight: false,
+    audioMode: 'none',
+    crashLanding: false
+  },
+  bronze: {
+    anticipationMs: 260,
+    anticipationLift: 18,
+    anticipationTilt: -2.4,
+    flightMs: 980,
+    settleMs: 260,
+    cadencePadMs: 140,
+    flightArcPx: 42,
+    spinDeg: 22,
+    midScale: 0.86,
+    endScale: 0.31,
+    endOpacity: 0.95,
+    flightEasing: 'cubic-bezier(0.17, 0.84, 0.25, 1)',
+    spotlight: false,
+    audioMode: 'none',
+    crashLanding: false
+  },
+  silver: {
+    anticipationMs: 560,
+    anticipationLift: 34,
+    anticipationTilt: -3.4,
+    flightMs: 1280,
+    settleMs: 380,
+    cadencePadMs: 180,
+    flightArcPx: 64,
+    spinDeg: 112,
+    midScale: 0.82,
+    endScale: 0.27,
+    endOpacity: 0.93,
+    flightEasing: 'cubic-bezier(0.15, 0.88, 0.18, 1)',
+    spotlight: false,
+    audioMode: 'none',
+    crashLanding: false
+  },
+  gold: {
+    anticipationMs: 840,
+    anticipationLift: 48,
+    anticipationTilt: -4.8,
+    flightMs: 1480,
+    settleMs: 500,
+    cadencePadMs: 200,
+    flightArcPx: 94,
+    spinDeg: 290,
+    midScale: 0.79,
+    endScale: 0.22,
+    endOpacity: 0.92,
+    flightEasing: 'cubic-bezier(0.11, 0.9, 0.13, 1)',
+    spotlight: false,
+    audioMode: 'accent',
+    crashLanding: false
+  },
+  diamond: {
+    anticipationMs: 1180,
+    anticipationLift: 76,
+    anticipationTilt: -6.1,
+    flightMs: 1760,
+    settleMs: 660,
+    cadencePadMs: 260,
+    flightArcPx: 146,
+    spinDeg: 640,
+    midScale: 0.74,
+    endScale: 0.18,
+    endOpacity: 0.9,
+    flightEasing: 'cubic-bezier(0.08, 0.94, 0.08, 1)',
+    spotlight: true,
+    audioMode: 'intense',
+    crashLanding: false
+  },
+  elite: {
+    anticipationMs: 1640,
+    anticipationLift: 108,
+    anticipationTilt: -7.2,
+    flightMs: 2120,
+    settleMs: 940,
+    cadencePadMs: 340,
+    flightArcPx: 194,
+    spinDeg: 980,
+    midScale: 0.7,
+    endScale: 0.13,
+    endOpacity: 0.88,
+    flightEasing: 'cubic-bezier(0.05, 0.98, 0.06, 1)',
+    spotlight: true,
+    audioMode: 'elite',
+    crashLanding: true
+  }
+};
+
+function readPercentText(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return 0;
+  const numeric = Number(String(el.textContent || '').replace('%', ''));
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : 0;
+}
+
+function updateLoadingVisualGraph(timelinePercent, preloadPercent) {
+  const bars = document.querySelectorAll('#evalVisualGraph .eval-visual-bar');
+  const blendEl = document.getElementById('evalVisualBlendPct');
+  if (!bars.length) return;
+
+  const timeline = Math.max(0, Math.min(100, Number(timelinePercent) || 0));
+  const preload = Math.max(0, Math.min(100, Number(preloadPercent) || 0));
+  const blend = Math.round((timeline * 0.35) + (preload * 0.65));
+  const activeCount = Math.max(0, Math.min(bars.length, Math.round((blend / 100) * bars.length)));
+
+  bars.forEach((bar, index) => {
+    const baseHeight = 26 + ((index * 13) % 44);
+    const pulseHeight = Math.min(100, baseHeight + Math.round(blend * 0.28));
+    bar.style.setProperty('--bar-height', `${pulseHeight}%`);
+    bar.classList.toggle('is-active', index < activeCount);
+  });
+
+  if (blendEl) blendEl.textContent = `${blend}%`;
+}
 
 function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -110,6 +251,206 @@ function getTierClassFromOVR(ovr) {
   return `tier-${tier.tier}`;
 }
 
+function getRevealTierFromEval(evalData) {
+  const ovr = Number(evalData && evalData.ovr) || 0;
+  const tierClass = String(getTierClassFromEval(evalData) || '').replace('tier-', '');
+
+  if (ovr >= 96) return 'elite';
+  if (ovr >= 90) return 'diamond';
+  if (ovr >= 78) return 'gold';
+  if (ovr >= 65) return 'silver';
+  if (ovr >= 50) return 'bronze';
+  if (ovr > 0) return 'lowest';
+
+  if (tierClass === 'icon' || tierClass === 'legendary') return 'elite';
+  if (tierClass === 'epic' || tierClass === 'rare') return 'diamond';
+  if (tierClass === 'gold') return 'gold';
+  if (tierClass === 'silver') return 'silver';
+  if (tierClass === 'bronze') return 'bronze';
+  return 'bronze';
+}
+
+function clearQueuedAnimationTimers() {
+  if (!Array.isArray(round4State.animationTimers)) {
+    round4State.animationTimers = [];
+    return;
+  }
+  round4State.animationTimers.forEach((id) => window.clearTimeout(id));
+  round4State.animationTimers = [];
+}
+
+function setAnimTimer(callback, delayMs) {
+  const id = window.setTimeout(() => {
+    round4State.animationTimers = round4State.animationTimers.filter((timerId) => timerId !== id);
+    callback();
+  }, Math.max(0, Number(delayMs) || 0));
+  round4State.animationTimers.push(id);
+  return id;
+}
+
+function sanitizeRevealTierClassList(classList) {
+  if (!classList) return;
+  classList.remove('reveal-tier-lowest', 'reveal-tier-bronze', 'reveal-tier-silver', 'reveal-tier-gold', 'reveal-tier-diamond', 'reveal-tier-elite', 'is-spotlight');
+}
+
+function getRevealProfileForAssignment(assignment) {
+  const fallbackTier = getRevealTierFromEval(assignment && assignment.evalData ? assignment.evalData : null);
+  const fallbackBase = REVEAL_TIER_PROFILES[fallbackTier] || REVEAL_TIER_PROFILES.bronze;
+  const profile = assignment && assignment.key ? round4State.revealProfiles[assignment.key] : null;
+  if (profile) return profile;
+
+  return {
+    ...fallbackBase,
+    revealTier: fallbackTier,
+    offsetMs: (Number(round4State.queueIndex) || 0) * 1950,
+    totalMs: fallbackBase.anticipationMs + fallbackBase.flightMs + fallbackBase.settleMs + fallbackBase.cadencePadMs
+  };
+}
+
+function prepareRevealSequenceProfiles() {
+  if (round4State.revealPreparePromise) return round4State.revealPreparePromise;
+
+  const config = getRevealConfig();
+  round4State.revealPreparePromise = Promise.resolve().then(() => {
+    const nextProfiles = Object.create(null);
+    let offsetMs = 0;
+
+    round4State.queue.forEach((assignment) => {
+      const revealTier = getRevealTierFromEval(assignment && assignment.evalData ? assignment.evalData : null);
+      const base = REVEAL_TIER_PROFILES[revealTier] || REVEAL_TIER_PROFILES.bronze;
+      const totalMs = base.anticipationMs + base.flightMs + base.settleMs + base.cadencePadMs;
+      const cadence = Math.max(config.stepIntervalMs, Math.round(totalMs * 0.86));
+
+      nextProfiles[assignment.key] = {
+        ...base,
+        revealTier,
+        offsetMs,
+        totalMs
+      };
+
+      offsetMs += cadence;
+    });
+
+    round4State.revealProfiles = nextProfiles;
+    round4State.revealPrepared = true;
+
+    const host = document.getElementById('evalHeroHost');
+    const boards = document.getElementById('evalTeamBoards');
+    if (host) host.getBoundingClientRect();
+    if (boards) boards.getBoundingClientRect();
+
+    return true;
+  }).catch(() => {
+    round4State.revealProfiles = Object.create(null);
+    round4State.revealPrepared = true;
+    return true;
+  });
+
+  return round4State.revealPreparePromise;
+}
+
+function ensureRevealAudioReady() {
+  if (round4State.revealAudioReady) return;
+  if (typeof window === 'undefined') return;
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+
+  if (!round4State.revealAudioContext) {
+    round4State.revealAudioContext = new AudioCtx();
+  }
+
+  const context = round4State.revealAudioContext;
+  if (context && context.state === 'suspended') {
+    context.resume().catch(() => null);
+  }
+  round4State.revealAudioReady = true;
+}
+
+function playEliteRevealAudio(profile, stage) {
+  if (!profile || !profile.audioMode || profile.audioMode === 'none') return;
+  const context = round4State.revealAudioContext;
+  if (!context) return;
+
+  const now = context.currentTime;
+  const mainGain = context.createGain();
+  mainGain.connect(context.destination);
+
+  if (stage === 'launch') {
+    const launchPeakByMode = {
+      accent: 0.032,
+      intense: 0.045,
+      elite: 0.058
+    };
+    const launchPeak = launchPeakByMode[profile.audioMode] || 0.03;
+
+    const osc = context.createOscillator();
+    const gain = context.createGain();
+    osc.type = profile.audioMode === 'elite' ? 'sawtooth' : 'triangle';
+    osc.frequency.setValueAtTime(profile.audioMode === 'accent' ? 220 : 170, now);
+    osc.frequency.exponentialRampToValueAtTime(profile.audioMode === 'accent' ? 520 : 690, now + 0.42);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(launchPeak, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.48);
+    osc.connect(gain);
+    gain.connect(mainGain);
+    osc.start(now);
+    osc.stop(now + 0.5);
+    return;
+  }
+
+  const impactPeakByMode = {
+    accent: 0.08,
+    intense: 0.11,
+    elite: 0.14
+  };
+  const impactPeak = impactPeakByMode[profile.audioMode] || 0.07;
+
+  const impact = context.createOscillator();
+  const impactGain = context.createGain();
+  impact.type = profile.audioMode === 'elite' ? 'triangle' : 'sine';
+  impact.frequency.setValueAtTime(profile.audioMode === 'accent' ? 170 : 130, now);
+  impact.frequency.exponentialRampToValueAtTime(profile.audioMode === 'accent' ? 84 : 46, now + 0.25);
+  impactGain.gain.setValueAtTime(0.0001, now);
+  impactGain.gain.exponentialRampToValueAtTime(impactPeak, now + 0.02);
+  impactGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+  impact.connect(impactGain);
+  impactGain.connect(mainGain);
+  impact.start(now);
+  impact.stop(now + 0.35);
+}
+
+function triggerPoolCrashEffects(assignment, profile) {
+  if (!profile || !profile.crashLanding) return;
+
+  const boards = document.getElementById('evalTeamBoards');
+  if (boards) {
+    boards.classList.remove('is-elite-crash');
+    boards.classList.add('is-elite-crash');
+    setAnimTimer(() => boards.classList.remove('is-elite-crash'), 860);
+  }
+
+  const board = document.querySelector(`.eval-team-board[data-team-board='${assignment.teamIndex}']`);
+  if (board) {
+    board.classList.remove('is-elite-hit');
+    board.classList.add('is-elite-hit');
+    setAnimTimer(() => board.classList.remove('is-elite-hit'), 760);
+  }
+}
+
+function triggerSlotImpact(target, profile) {
+  if (!target || !profile) return;
+  target.classList.remove('is-impacting', 'impact-lowest', 'impact-bronze', 'impact-silver', 'impact-gold', 'impact-diamond', 'impact-elite', 'impact-elite-crash');
+  target.classList.add('is-impacting', `impact-${profile.revealTier}`);
+  if (profile.crashLanding) {
+    target.classList.add('impact-elite-crash');
+  }
+  const clearMs = Math.max(260, Number(profile.settleMs) || 260) + (profile.crashLanding ? 220 : 0);
+  setAnimTimer(() => {
+    target.classList.remove('is-impacting', `impact-${profile.revealTier}`, 'impact-elite-crash');
+  }, clearMs);
+}
+
 function updateLoadingDockProgress(current, total, label) {
   const safeTotal = Math.max(1, Number(total) || 1);
   const safeCurrent = Math.max(0, Math.min(safeTotal, Number(current) || 0));
@@ -119,30 +460,99 @@ function updateLoadingDockProgress(current, total, label) {
   const currentEl = document.getElementById('evalLoadFetched');
   const pctEl = document.getElementById('evalPreloadPct');
   const fillEl = document.getElementById('evalPreloadFill');
-  const subtitle = document.getElementById('evalLoadingSubtitle');
-  const botSpeech = document.getElementById('evalLoadBotSpeech');
+  const preloadHint = document.getElementById('evalPreloadHint');
+  const stageCurrent = document.getElementById('evalStageCurrent');
+  const preloadBar = document.getElementById('evalPreloadBar');
+  const timelinePercent = readPercentText('evalProgressPct');
 
   if (totalEl) totalEl.textContent = String(safeTotal);
   if (currentEl) currentEl.textContent = String(safeCurrent);
   if (pctEl) pctEl.textContent = `${percent}%`;
   if (fillEl) fillEl.style.width = `${percent}%`;
-  if (subtitle && label) subtitle.textContent = label;
-  if (botSpeech && label) botSpeech.textContent = label;
+  if (preloadBar) preloadBar.setAttribute('aria-valuenow', String(percent));
+  if (preloadHint) {
+    preloadHint.textContent = percent >= 100
+      ? 'Preload complete. Ready to start reveal.'
+      : 'Preparing synchronized reveal visual...';
+  }
+  if (stageCurrent) {
+    stageCurrent.textContent = percent >= 100
+      ? 'Preload Stage: Ready'
+      : `Preload Stage: ${percent}%`;
+  }
+  if (!round4State.rendered && !round4State.loadingReadyToStart) {
+    const queueBar = document.getElementById('evalProgressBar');
+    const queueFill = queueBar ? queueBar.querySelector('.eval-progress-fill') : null;
+    const queuePct = document.getElementById('evalProgressPct');
+    if (queueFill) queueFill.style.width = `${percent}%`;
+    if (queueBar) queueBar.setAttribute('aria-valuenow', String(percent));
+    if (queuePct) queuePct.textContent = `${percent}%`;
+  }
+  updateLoadingVisualGraph(timelinePercent, percent);
 }
 
 function setLoadingBotContext(scenario, twist, speech) {
-  const scenarioEl = document.getElementById('evalLoadScenario');
-  const twistEl = document.getElementById('evalLoadTwist');
-  const speechEl = document.getElementById('evalLoadBotSpeech');
+  const scenarioHeroEl = document.getElementById('evalLoadScenarioHero');
+  const twistHeroEl = document.getElementById('evalLoadTwistHero');
+  const preloadHint = document.getElementById('evalPreloadHint');
 
-  if (scenarioEl && scenario) scenarioEl.textContent = scenario;
-  if (twistEl && twist) twistEl.textContent = twist;
-  if (speechEl && speech) speechEl.textContent = speech;
+  if (scenario) round4State.loadingScenario = String(scenario);
+  if (twist) round4State.loadingTwist = String(twist);
+
+  const currentScenario = round4State.loadingScenario || 'Unknown scenario';
+  const currentTwist = round4State.loadingTwist || 'Unknown twist';
+
+  if (scenarioHeroEl) scenarioHeroEl.textContent = currentScenario;
+  if (twistHeroEl) twistHeroEl.textContent = currentTwist;
+  if (preloadHint && speech) preloadHint.textContent = speech;
+}
+
+function setLoadingReadyState(isReady) {
+  round4State.loadingReadyToStart = Boolean(isReady);
+  const button = document.getElementById('evalStartRevealBtn');
+  const hint = document.getElementById('evalPreloadHint');
+  const status = document.getElementById('evalFinalStatus');
+
+  if (!button) return;
+  button.disabled = !round4State.loadingReadyToStart;
+
+  if (round4State.loadingReadyToStart) {
+    button.textContent = '▶ START FINAL REVEAL';
+    if (hint) hint.textContent = 'All preload checks passed. Start reveal when ready.';
+    if (status) status.textContent = 'Preload complete. Start when your team is ready.';
+  } else {
+    button.textContent = '⏳ FINALIZING PRELOAD...';
+  }
+}
+
+function startRound4Reveal() {
+  if (!round4State.preloadDone || !round4State.revealPrepared || !round4State.loadingReadyToStart || round4State.rendered) return;
+
+  ensureRevealAudioReady();
+
+  const loading = document.getElementById('evalLoading');
+  const status = document.getElementById('evalFinalStatus');
+  if (loading) loading.style.display = 'none';
+  if (status) status.textContent = 'Synchronized reveal in progress...';
+
+  setLoadingBotContext(null, null, '');
+  scheduleNextAutoReveal();
+  round4State.isEvaluating = false;
+  round4State.rendered = true;
 }
 
 function signed(value) {
   const numeric = Number(value) || 0;
   return numeric > 0 ? `+${numeric}` : `${numeric}`;
+}
+
+function formatLockDuration(ms) {
+  const numeric = Number(ms);
+  if (!Number.isFinite(numeric) || numeric < 0) return '—';
+  const totalSeconds = Math.max(0, Math.round(numeric / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function boardStateClass(filledCount) {
@@ -165,6 +575,7 @@ function updateEvalProgress(current, total) {
   if (fill) fill.style.width = `${percent}%`;
   if (bar) bar.setAttribute('aria-valuenow', String(percent));
   if (pct) pct.textContent = `${percent}%`;
+  updateLoadingVisualGraph(percent, readPercentText('evalPreloadPct'));
 }
 
 function clearEvalSurface() {
@@ -197,7 +608,18 @@ function resetCinematicState() {
   round4State.revealConfig = null;
   round4State.preloadPromise = null;
   round4State.preloadDone = false;
+  round4State.revealPrepared = false;
+  round4State.revealPreparePromise = null;
+  round4State.revealProfiles = Object.create(null);
+  clearQueuedAnimationTimers();
   round4State.teamBoardCollapsed = Object.create(null);
+  round4State.loadingScenario = '';
+  round4State.loadingTwist = '';
+
+  const boards = document.getElementById('evalTeamBoards');
+  if (boards) boards.classList.remove('is-elite-crash');
+
+  setLoadingReadyState(false);
 
   const completion = document.getElementById('evalCompletionBadge');
   const status = document.getElementById('evalFinalStatus');
@@ -221,16 +643,6 @@ function initRound4Evaluation(data) {
     evalScreen.classList.add('active');
   }
 
-  const scenarioText = document.getElementById('evalScenarioText');
-  const twistText = document.getElementById('evalTwistText');
-  const causalityText = document.getElementById('evalContextCausality');
-  if (scenarioText) scenarioText.textContent = scenario;
-  if (twistText) twistText.textContent = twist;
-  if (causalityText) {
-    causalityText.textContent = 'Focus shifts to the currently filling team. Completed teams auto-collapse until all are complete.';
-  }
-  setLoadingBotContext(scenario, twist, 'Calibrating tier-weighted model against scenario and twist constraints...');
-
   round4State.totalCharacters = Object.values(finalTeams).reduce((sum, team) => sum + (Array.isArray(team) ? team.length : 0), 0);
   round4State.totalTeams = Object.keys(finalTeams || {}).length;
 
@@ -243,13 +655,22 @@ function initRound4Evaluation(data) {
   clearEvalSurface();
   resetCinematicState();
 
+  const scenarioText = document.getElementById('evalScenarioText');
+  const twistText = document.getElementById('evalTwistText');
+  const causalityText = document.getElementById('evalContextCausality');
+  if (scenarioText) scenarioText.textContent = scenario;
+  if (twistText) twistText.textContent = twist;
+  if (causalityText) causalityText.textContent = '';
+  setLoadingBotContext(scenario, twist, '');
+
   const loading = document.getElementById('evalLoading');
   const loadingTitle = document.getElementById('evalLoadingTitle');
   const loadingSubtitle = document.getElementById('evalLoadingSubtitle');
   if (loading) loading.style.display = 'flex';
-  if (loadingTitle) loadingTitle.textContent = 'Evaluating teams...';
-  if (loadingSubtitle) loadingSubtitle.textContent = 'Merging cached intel from earlier rounds with final scoring.';
-  updateLoadingDockProgress(0, Math.max(1, round4State.totalCharacters || 18), 'Queued for cinematic preload...');
+  if (loadingTitle) loadingTitle.textContent = 'Final reveal loading';
+  if (loadingSubtitle) loadingSubtitle.textContent = '';
+  setLoadingReadyState(false);
+  updateLoadingDockProgress(0, Math.max(1, round4State.totalCharacters || 18), '');
 
   round4State.isEvaluating = true;
   round4State.rendered = false;
@@ -426,7 +847,7 @@ function renderActivePlaque() {
   const notes = Array.isArray(evalData.notes) ? evalData.notes : [];
 
   host.innerHTML = `
-    <article id="evalActivePlaque" class="eval-active-plaque ${tierClass}" aria-live="polite">
+    <article id="evalActivePlaque" class="eval-active-plaque ${tierClass} reveal-tier-${getRevealTierFromEval(evalData)}" data-reveal-tier="${getRevealTierFromEval(evalData)}" aria-live="polite">
       <div class="eval-active-head">
         <img src="${escapeHtml(image)}" alt="${escapeHtml(evalData.character || 'Character')} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
         <div>
@@ -505,28 +926,25 @@ function preloadCinematicAssets() {
   if (round4State.preloadPromise) return round4State.preloadPromise;
 
   const urls = round4State.queue
-    .map((assignment) => assignment && assignment.evalData ? assignment.evalData.imageUrl : null)
-    .map((url) => normalizeImageUrl(url))
-    .filter(Boolean);
+    .map((assignment) => assignment && assignment.evalData ? assignment.evalData.imageUrl : null);
 
-  const uniqueUrls = Array.from(new Set(urls));
-  const totalAssets = uniqueUrls.length;
+  const totalAssets = urls.length;
   let completedAssets = 0;
 
-  updateLoadingDockProgress(0, totalAssets || 1, 'Preloading portraits and cache assets...');
+  updateLoadingDockProgress(0, totalAssets || 1, '');
 
-  const preloadTasks = uniqueUrls.map((url) => loadImageAsset(url)
+  const preloadTasks = urls.map((url) => loadImageAsset(url)
     .catch(() => null)
     .then(() => {
       completedAssets += 1;
-      updateLoadingDockProgress(completedAssets, totalAssets || 1, 'Preloading portraits and cache assets...');
+      updateLoadingDockProgress(completedAssets, totalAssets || 1, '');
     }));
 
   const settlePromise = Promise.all(preloadTasks)
     .catch(() => null)
     .then(() => {
       round4State.preloadDone = true;
-      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets ready. Finalizing cinematic stage...');
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, '');
       return true;
     });
 
@@ -534,7 +952,7 @@ function preloadCinematicAssets() {
     settlePromise,
     new Promise((resolve) => window.setTimeout(() => {
       round4State.preloadDone = true;
-      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets stabilized. Starting reveal...');
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, '');
       resolve(true);
     }, 3200))
   ]);
@@ -550,8 +968,10 @@ function scheduleNextAutoReveal() {
   }
 
   const config = getRevealConfig();
+  const assignment = round4State.queue[round4State.queueIndex] || null;
+  const profile = getRevealProfileForAssignment(assignment);
   const now = Date.now();
-  const targetAt = config.startAtMs + (round4State.queueIndex * config.stepIntervalMs);
+  const targetAt = config.startAtMs + (Number(profile.offsetMs) || (round4State.queueIndex * config.stepIntervalMs));
   const waitMs = Math.max(0, targetAt - now);
 
   round4State.revealTimer = window.setTimeout(() => {
@@ -597,40 +1017,98 @@ function finishSequenceIfComplete() {
 }
 
 function animateDockTransition(assignment, onDone) {
-  const config = getRevealConfig();
-  const dockDurationMs = config.dockDurationMs;
+  const profile = getRevealProfileForAssignment(assignment);
   const active = document.getElementById('evalActivePlaque');
+  const host = document.getElementById('evalHeroHost');
   const target = document.querySelector(`.eval-slot[data-team-index='${assignment.teamIndex}'][data-slot-index='${assignment.slotIndex}']`);
   if (!active || !target) {
     onDone();
     return;
   }
 
-  const startRect = active.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  const clone = active.cloneNode(true);
-  clone.classList.add('eval-flight-clone');
-  clone.style.left = `${startRect.left}px`;
-  clone.style.top = `${startRect.top}px`;
-  clone.style.width = `${startRect.width}px`;
-  clone.style.height = `${startRect.height}px`;
-  clone.style.transform = 'translate3d(0,0,0) scale(1)';
-  clone.style.opacity = '1';
-  clone.style.transitionDuration = `${dockDurationMs}ms, ${dockDurationMs}ms`;
-  document.body.appendChild(clone);
-  active.style.opacity = '0';
+  sanitizeRevealTierClassList(active.classList);
+  active.classList.add(`reveal-tier-${profile.revealTier}`, 'is-reveal-anticipating');
+  active.style.setProperty('--reveal-anticipation-ms', `${profile.anticipationMs}ms`);
+  active.style.setProperty('--reveal-lift', `${profile.anticipationLift}px`);
+  active.style.setProperty('--reveal-tilt', `${profile.anticipationTilt}deg`);
 
-  requestAnimationFrame(() => {
+  if (host) {
+    sanitizeRevealTierClassList(host.classList);
+    host.classList.add(`reveal-tier-${profile.revealTier}`);
+    if (profile.spotlight) {
+      host.classList.add('is-spotlight');
+    }
+  }
+
+  setAnimTimer(() => {
+    const startRect = active.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const clone = active.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.classList.remove('is-reveal-anticipating');
+    clone.classList.add('eval-flight-clone', `reveal-tier-${profile.revealTier}`);
+    clone.style.left = `${startRect.left}px`;
+    clone.style.top = `${startRect.top}px`;
+    clone.style.width = `${startRect.width}px`;
+    clone.style.height = `${startRect.height}px`;
+    clone.style.transform = 'translate3d(0,0,0) rotate(0deg) scale(1)';
+    clone.style.opacity = '1';
+    document.body.appendChild(clone);
+
+    active.style.visibility = 'hidden';
+    playEliteRevealAudio(profile, 'launch');
+
     const dx = (targetRect.left + targetRect.width / 2) - (startRect.left + startRect.width / 2);
     const dy = (targetRect.top + targetRect.height / 2) - (startRect.top + startRect.height / 2);
-    clone.style.transform = `translate3d(${dx}px, ${dy - 20}px, 0) scale(0.26)`;
-    clone.style.opacity = '0.94';
-  });
+    const arcY = Math.min(dy - profile.flightArcPx, -Math.abs(profile.flightArcPx));
 
-  window.setTimeout(() => {
-    clone.remove();
-    onDone();
-  }, dockDurationMs);
+    const flightFrames = [
+      { transform: 'translate3d(0,0,0) rotate(0deg) scale(1)', opacity: 1, offset: 0 },
+      {
+        transform: `translate3d(${Math.round(dx * 0.34)}px, ${Math.round(arcY * 0.82)}px, 0) rotate(${Math.round(profile.spinDeg * 0.34)}deg) scale(${Math.max(profile.midScale + 0.08, 0.78)})`,
+        opacity: 0.99,
+        offset: 0.34
+      },
+      {
+        transform: `translate3d(${Math.round(dx * 0.7)}px, ${Math.round(arcY)}px, 0) rotate(${Math.round(profile.spinDeg * 0.72)}deg) scale(${profile.midScale})`,
+        opacity: 0.97,
+        offset: 0.7
+      }
+    ];
+
+    if (profile.crashLanding) {
+      flightFrames.push({
+        transform: `translate3d(${Math.round(dx)}px, ${Math.round(dy + 10)}px, 0) rotate(${Math.round(profile.spinDeg + 120)}deg) scale(${Math.max(0.08, profile.endScale * 0.72)})`,
+        opacity: Math.max(0.76, profile.endOpacity - 0.16),
+        offset: 0.92
+      });
+    }
+
+    flightFrames.push({
+      transform: `translate3d(${Math.round(dx)}px, ${Math.round(dy)}px, 0) rotate(${Math.round(profile.spinDeg)}deg) scale(${profile.endScale})`,
+      opacity: profile.endOpacity,
+      offset: 1
+    });
+
+    clone.animate(flightFrames, {
+      duration: profile.flightMs,
+      easing: profile.flightEasing,
+      fill: 'forwards'
+    });
+
+    setAnimTimer(() => {
+      clone.remove();
+      active.style.visibility = '';
+      active.classList.remove('is-reveal-anticipating');
+      if (host) {
+        sanitizeRevealTierClassList(host.classList);
+      }
+      triggerSlotImpact(target, profile);
+      triggerPoolCrashEffects(assignment, profile);
+      playEliteRevealAudio(profile, 'impact');
+      onDone();
+    }, profile.flightMs + 12);
+  }, profile.anticipationMs);
 }
 
 function handleNextCharacter(onComplete) {
@@ -709,10 +1187,10 @@ function renderFinalLeaderboard() {
         ${ranked.map((row, index) => {
           const tierClass = getTierClassFromOVR(Number(row && row.totalOVR) || 0);
           const topPickImage = getLeaderboardTopPickImage(row);
+          const cumulativeOVR = Number(row && row.totalOVR) || 0;
+          const averageOVR = Number(row && row.averageOVR) || 0;
+          const fastestLock = formatLockDuration(row && row.fastestLockMs);
           const roundPoints = Number(row && row.round4Points) || 0;
-          const previousTotal = Number(row && row.previousTotalScore) || 0;
-          const totalScore = Number(row && row.totalScore) || roundPoints;
-          const scoreGain = totalScore - previousTotal;
 
           return `
             <article class="eval-lb-row ${tierClass}" aria-label="${escapeHtml(row && row.playerName ? row.playerName : 'Unknown')} leaderboard row">
@@ -729,10 +1207,10 @@ function renderFinalLeaderboard() {
                 </div>
               </div>
               <div class="eval-lb-stats">
-                <span><small>Round 4</small><b>${roundPoints}</b></span>
-                <span><small>Before</small><b>${previousTotal}</b></span>
-                <span><small>Gain</small><b>${signed(scoreGain)}</b></span>
-                <span><small>Total</small><b>${totalScore}</b></span>
+                <span><small>OVR CUM💦</small><b>${cumulativeOVR}</b></span>
+                <span><small>OVR AVG🧢</small><b>${averageOVR}</b></span>
+                <span><small>Fastest Lock🔒</small><b>${fastestLock}</b></span>
+                <span><small>Round 4 pts🫵</small><b>${roundPoints}</b></span>
               </div>
             </article>
           `;
@@ -757,21 +1235,18 @@ function renderCinematicSequence() {
   bindCinematicControls();
 
   const subtitle = document.getElementById('evalLoadingSubtitle');
-  if (subtitle) subtitle.textContent = 'Preloading portraits and smoothing reveal timeline...';
-  setLoadingBotContext(null, null, 'Validating portrait cache and timeline locks before reveal...');
+  if (subtitle) subtitle.textContent = '';
+  setLoadingBotContext(null, null, '');
 
   const status = document.getElementById('evalFinalStatus');
-  if (status) status.textContent = 'Preparing assets for pristine synchronized reveal...';
+  if (status) status.textContent = '';
 
-  preloadCinematicAssets().finally(() => {
-    setLoadingBotContext(null, null, 'Assets verified. Initiating cinematic placements now.');
-    scheduleNextAutoReveal();
-
-    const loading = document.getElementById('evalLoading');
-    if (loading) loading.style.display = 'none';
-    if (status) status.textContent = 'Synchronized reveal in progress...';
-    round4State.isEvaluating = false;
-    round4State.rendered = true;
+  Promise.allSettled([
+    preloadCinematicAssets(),
+    prepareRevealSequenceProfiles()
+  ]).finally(() => {
+    setLoadingBotContext(null, null, '');
+    setLoadingReadyState(true);
   });
 }
 
@@ -1026,9 +1501,10 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       const title = document.getElementById('evalLoadingTitle');
       const subtitle = document.getElementById('evalLoadingSubtitle');
       if (loading) loading.style.display = 'flex';
-      if (title) title.textContent = 'Rendering cinematic reveal...';
-      if (subtitle) subtitle.textContent = 'Building team boards and reveal order.';
-      setLoadingBotContext(data && data.scenario, data && data.twist, 'Evaluation complete. Constructing synchronized reveal sequence...');
+      if (title) title.textContent = 'Final reveal loading';
+      if (subtitle) subtitle.textContent = '';
+      setLoadingReadyState(false);
+      setLoadingBotContext(data && data.scenario, data && data.twist, '');
 
       window.setTimeout(renderCinematicSequence, 180);
     });
@@ -1038,6 +1514,7 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       alert(`Error evaluating teams: ${message}`);
       const loading = document.getElementById('evalLoading');
       if (loading) loading.style.display = 'none';
+      setLoadingReadyState(false);
     });
 
     window.socket.on('finalResultsWaiting', (data) => {
@@ -1065,6 +1542,7 @@ document.addEventListener('keydown', (event) => {
 window.initRound4Evaluation = initRound4Evaluation;
 window.toggleEvalScenario = toggleEvalScenario;
 window.requestFinalResults = requestFinalResults;
+window.startRound4Reveal = startRound4Reveal;
 window.openOVRBreakdown = openOVRBreakdown;
 window.closeOVRBreakdown = closeOVRBreakdown;
 window.switchEvalTab = switchEvalTab;

@@ -114,7 +114,10 @@ function buildFailedEvaluation(character) {
   };
 }
 
-async function evaluateRoundFromGame(game, roundIndex) {
+async function evaluateRoundFromGame(game, roundIndex, options = {}) {
+  const onCharacterEvaluated = options && typeof options.onCharacterEvaluated === 'function'
+    ? options.onCharacterEvaluated
+    : null;
   const scenario = game.currentScenario || (game.scenarios[roundIndex] && game.scenarios[roundIndex].scenario) || '';
   const twist = game.currentTwist || 'NO PLOT TWIST';
 
@@ -133,7 +136,7 @@ async function evaluateRoundFromGame(game, roundIndex) {
       );
 
       try {
-        return await scoreCharacter(character, scenario, twist, {
+        const evaluated = await scoreCharacter(character, scenario, twist, {
           originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
           originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
           evaluationMode: 'round',
@@ -145,8 +148,23 @@ async function evaluateRoundFromGame(game, roundIndex) {
             draftedRound: (roundIndex || 0) + 1
           }
         });
+        if (onCharacterEvaluated) {
+          onCharacterEvaluated({
+            playerName: player.name,
+            character,
+            success: true
+          });
+        }
+        return evaluated;
       } catch (error) {
         console.warn(`⚠️ Round ${roundIndex + 1} character evaluation fallback for "${character}": ${error && error.message ? error.message : 'unknown error'}`);
+        if (onCharacterEvaluated) {
+          onCharacterEvaluated({
+            playerName: player.name,
+            character,
+            success: false
+          });
+        }
         return buildFailedEvaluation(character);
       }
     });

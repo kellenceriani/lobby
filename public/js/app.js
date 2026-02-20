@@ -32,44 +32,366 @@ window.socket = socket; // Expose to window for round4Eval.js
 // ========================
 // SOUND SYSTEM
 // ========================
-const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+let audioContext = null;
+const AUDIO_PREFS_KEY = 'lobbywars_audio_prefs_v1';
+const audioState = {
+  unlocked: false,
+  masterGain: null,
+  sfxGain: null,
+  muted: false,
+  masterVolume: 0.9,
+  sfxVolume: 0.9,
+  hasPlayedLobbyEntry: false,
+  listenerCleanup: null,
+  controlsInitialized: false
+};
 
-function playSound(frequency = 800, duration = 100, type = 'sine', volume = 0.3) {
+const preRoundAudioState = {
+  lastMilestone: -1
+};
+
+const voteTallyLoadingState = {
+  active: false,
+  totalFetches: 0,
+  completedFetches: 0,
+  stallTarget: 78,
+  pulseTimer: null,
+  finalizeTimer: null
+};
+
+function clampAudioLevel(value, fallback = 1) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function loadAudioPreferences() {
   try {
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    osc.connect(gain);
-    gain.connect(audioContext.destination);
-    osc.frequency.value = frequency;
-    osc.type = type;
-    gain.gain.setValueAtTime(volume, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration / 1000);
-    osc.start(audioContext.currentTime);
-    osc.stop(audioContext.currentTime + duration / 1000);
-  } catch (e) {
-    console.log('Sound not available');
+    const raw = window.localStorage.getItem(AUDIO_PREFS_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+
+    audioState.muted = parsed.muted === true;
+    audioState.masterVolume = clampAudioLevel(parsed.masterVolume, 0.9);
+    audioState.sfxVolume = clampAudioLevel(parsed.sfxVolume, 0.9);
+  } catch (error) {
+    console.log('Audio preferences unavailable');
   }
 }
 
+function saveAudioPreferences() {
+  try {
+    window.localStorage.setItem(AUDIO_PREFS_KEY, JSON.stringify({
+      muted: audioState.muted,
+      masterVolume: audioState.masterVolume,
+      sfxVolume: audioState.sfxVolume
+    }));
+  } catch (error) {
+    console.log('Unable to save audio preferences');
+  }
+}
+
+function syncAudioControlUI() {
+  const muteBtn = document.getElementById('audioToggleMute');
+
+  if (muteBtn) {
+    muteBtn.textContent = audioState.muted ? 'Audio: Off' : 'Audio: On';
+    muteBtn.setAttribute('aria-pressed', audioState.muted ? 'true' : 'false');
+    muteBtn.setAttribute('aria-label', audioState.muted ? 'Unmute sound effects' : 'Mute sound effects');
+  }
+}
+
+function applyAudioLevels() {
+  if (audioState.masterGain) {
+    audioState.masterGain.gain.value = audioState.muted ? 0 : audioState.masterVolume;
+  }
+  if (audioState.sfxGain) {
+    audioState.sfxGain.gain.value = audioState.sfxVolume;
+  }
+
+  syncAudioControlUI();
+}
+
+function setupAudioControls() {
+  if (audioState.controlsInitialized) return;
+
+  const mute = document.getElementById('audioToggleMute');
+
+  if (!mute) return;
+
+  const ensureUnlockedByControlGesture = () => {
+    unlockAudioFromGesture();
+  };
+
+  mute.addEventListener('click', () => {
+    ensureUnlockedByControlGesture();
+    audioState.muted = !audioState.muted;
+    applyAudioLevels();
+    saveAudioPreferences();
+  });
+
+  audioState.controlsInitialized = true;
+  applyAudioLevels();
+}
+
+loadAudioPreferences();
+
+function getAudioContext() {
+  if (audioContext) return audioContext;
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtor) return null;
+  audioContext = new AudioCtor();
+  return audioContext;
+}
+
+function initializeAudioGraph() {
+  const ctx = getAudioContext();
+  if (!ctx || audioState.masterGain) return;
+
+  audioState.masterGain = ctx.createGain();
+  audioState.sfxGain = ctx.createGain();
+
+  audioState.masterGain.gain.value = audioState.muted ? 0 : audioState.masterVolume;
+  audioState.sfxGain.gain.value = audioState.sfxVolume;
+
+  audioState.sfxGain.connect(audioState.masterGain);
+  audioState.masterGain.connect(ctx.destination);
+}
+
+function ensureAudioRunning() {
+  const ctx = getAudioContext();
+  if (!ctx) return false;
+  initializeAudioGraph();
+  if (ctx.state === 'running') return true;
+  ctx.resume().catch(() => {});
+  return false;
+}
+
+function scheduleTone({
+  frequency = 440,
+  duration = 120,
+  type = 'sine',
+  volume = 0.2,
+  attack = 0.008,
+  release = 0.09,
+  when = null
+} = {}) {
+  if (!ensureAudioRunning()) return;
+
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(audioState.sfxGain);
+
+  const startAt = Math.max(ctx.currentTime + 0.002, Number(when) || ctx.currentTime);
+  const lengthSec = Math.max(0.03, duration / 1000);
+  const attackSec = Math.max(0.003, attack);
+  const releaseSec = Math.max(0.03, release);
+  const peak = Math.max(0.0001, volume);
+
+  osc.frequency.setValueAtTime(Math.max(20, Number(frequency) || 440), startAt);
+  osc.type = type;
+
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(peak, startAt + attackSec);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + lengthSec + releaseSec);
+
+  osc.start(startAt);
+  osc.stop(startAt + lengthSec + releaseSec + 0.01);
+}
+
+function playSound(frequency = 800, duration = 100, type = 'sine', volume = 0.3) {
+  scheduleTone({ frequency, duration, type, volume });
+}
+
+function runNoteSequence(sequence = [], stepMs = 70) {
+  if (!Array.isArray(sequence) || !sequence.length) return;
+  sequence.forEach((note, idx) => {
+    const at = idx * stepMs;
+    setTimeout(() => {
+      scheduleTone({
+        frequency: note.frequency,
+        duration: note.duration,
+        type: note.type,
+        volume: note.volume
+      });
+    }, at);
+  });
+}
+
 function playDraftSound() {
-  playSound(600, 150, 'sine', 0.2);
-  setTimeout(() => playSound(800, 100, 'sine', 0.2), 75);
+  runNoteSequence([
+    { frequency: 622, duration: 90, type: 'triangle', volume: 0.16 },
+    { frequency: 740, duration: 90, type: 'triangle', volume: 0.16 },
+    { frequency: 880, duration: 130, type: 'sine', volume: 0.17 }
+  ], 62);
 }
 
 function playVoteSound() {
-  playSound(440, 100, 'sine', 0.25);
-  setTimeout(() => playSound(880, 100, 'sine', 0.25), 100);
+  runNoteSequence([
+    { frequency: 330, duration: 65, type: 'square', volume: 0.14 },
+    { frequency: 392, duration: 70, type: 'square', volume: 0.14 },
+    { frequency: 494, duration: 95, type: 'triangle', volume: 0.15 }
+  ], 70);
 }
 
 function playWinSound() {
-  playSound(523, 200, 'sine', 0.3);
-  setTimeout(() => playSound(659, 200, 'sine', 0.3), 200);
-  setTimeout(() => playSound(784, 400, 'sine', 0.3), 400);
+  runNoteSequence([
+    { frequency: 523.3, duration: 160, type: 'triangle', volume: 0.18 },
+    { frequency: 659.3, duration: 170, type: 'triangle', volume: 0.18 },
+    { frequency: 784, duration: 210, type: 'triangle', volume: 0.18 },
+    { frequency: 1046.5, duration: 280, type: 'sine', volume: 0.16 }
+  ], 130);
 }
 
 function playErrorSound() {
-  playSound(300, 100, 'sine', 0.2);
-  setTimeout(() => playSound(250, 100, 'sine', 0.2), 100);
+  runNoteSequence([
+    { frequency: 280, duration: 100, type: 'sawtooth', volume: 0.16 },
+    { frequency: 220, duration: 120, type: 'sawtooth', volume: 0.16 }
+  ], 95);
+}
+
+function playJoinSound() {
+  runNoteSequence([
+    { frequency: 392, duration: 110, type: 'triangle', volume: 0.14 },
+    { frequency: 523.3, duration: 130, type: 'triangle', volume: 0.14 }
+  ], 90);
+}
+
+function playReadyToggleSound(isReady = true) {
+  if (isReady) {
+    runNoteSequence([
+      { frequency: 494, duration: 90, type: 'triangle', volume: 0.13 },
+      { frequency: 659.3, duration: 120, type: 'triangle', volume: 0.13 }
+    ], 90);
+  } else {
+    runNoteSequence([
+      { frequency: 392, duration: 80, type: 'triangle', volume: 0.12 },
+      { frequency: 349.2, duration: 100, type: 'triangle', volume: 0.12 }
+    ], 90);
+  }
+}
+
+function playPhaseShiftSound() {
+  runNoteSequence([
+    { frequency: 220, duration: 120, type: 'sawtooth', volume: 0.11 },
+    { frequency: 277.2, duration: 120, type: 'triangle', volume: 0.12 },
+    { frequency: 329.6, duration: 150, type: 'triangle', volume: 0.12 }
+  ], 110);
+}
+
+function playTwistSound() {
+  runNoteSequence([
+    { frequency: 220, duration: 80, type: 'square', volume: 0.13 },
+    { frequency: 293.7, duration: 70, type: 'square', volume: 0.13 },
+    { frequency: 196, duration: 120, type: 'sawtooth', volume: 0.13 },
+    { frequency: 370, duration: 140, type: 'triangle', volume: 0.12 }
+  ], 75);
+}
+
+function playCountdownTick(secondValue) {
+  const sec = Number(secondValue);
+  if (sec <= 1) {
+    scheduleTone({ frequency: 880, duration: 140, type: 'square', volume: 0.15 });
+    return;
+  }
+  scheduleTone({ frequency: 660, duration: 80, type: 'square', volume: 0.13 });
+}
+
+function playMessageSound() {
+  runNoteSequence([
+    { frequency: 659.3, duration: 55, type: 'sine', volume: 0.1 },
+    { frequency: 784, duration: 60, type: 'sine', volume: 0.1 }
+  ], 55);
+}
+
+function playSliceInteractionSound(tone = 'core', cleared = false) {
+  if (cleared) {
+    scheduleTone({ frequency: 340, duration: 55, type: 'triangle', volume: 0.1 });
+    return;
+  }
+
+  if (tone === 'vote') {
+    runNoteSequence([
+      { frequency: 470, duration: 50, type: 'square', volume: 0.11 },
+      { frequency: 560, duration: 65, type: 'triangle', volume: 0.11 }
+    ], 45);
+    return;
+  }
+  if (tone === 'intel') {
+    runNoteSequence([
+      { frequency: 620, duration: 55, type: 'triangle', volume: 0.11 },
+      { frequency: 740, duration: 70, type: 'sine', volume: 0.11 }
+    ], 45);
+    return;
+  }
+  runNoteSequence([
+    { frequency: 390, duration: 50, type: 'sawtooth', volume: 0.11 },
+    { frequency: 440, duration: 70, type: 'triangle', volume: 0.1 }
+  ], 45);
+}
+
+function playLoadingMilestoneSound(percent = 0) {
+  const safe = Math.max(0, Math.min(100, Number(percent) || 0));
+  const frequency = 300 + Math.round((safe / 100) * 360);
+  scheduleTone({ frequency, duration: 52, type: 'triangle', volume: 0.085 });
+}
+
+function playFetchCompleteSound(success = true) {
+  if (success === false) {
+    scheduleTone({ frequency: 250, duration: 60, type: 'sawtooth', volume: 0.095 });
+    return;
+  }
+  runNoteSequence([
+    { frequency: 700, duration: 50, type: 'sine', volume: 0.095 },
+    { frequency: 820, duration: 65, type: 'triangle', volume: 0.095 }
+  ], 40);
+}
+
+function unlockAudioFromGesture() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  initializeAudioGraph();
+  const onUnlock = () => {
+    audioState.unlocked = true;
+    applyAudioLevels();
+    scheduleTone({ frequency: 220, duration: 20, type: 'sine', volume: 0.0002 });
+    if (typeof audioState.listenerCleanup === 'function') {
+      audioState.listenerCleanup();
+      audioState.listenerCleanup = null;
+    }
+  };
+
+  if (ctx.state === 'running') {
+    onUnlock();
+    return;
+  }
+
+  ctx.resume().then(onUnlock).catch(() => {});
+}
+
+function installAudioUnlockHandlers() {
+  const handlers = [
+    ['pointerdown', unlockAudioFromGesture, { capture: true }],
+    ['touchstart', unlockAudioFromGesture, { passive: true, capture: true }],
+    ['click', unlockAudioFromGesture, { capture: true }],
+    ['keydown', unlockAudioFromGesture, { capture: true }]
+  ];
+
+  handlers.forEach(([eventName, handler, options]) => {
+    document.addEventListener(eventName, handler, options);
+  });
+
+  audioState.listenerCleanup = () => {
+    handlers.forEach(([eventName, handler, options]) => {
+      document.removeEventListener(eventName, handler, options);
+    });
+  };
 }
 
 function appendText(parent, text) {
@@ -87,6 +409,12 @@ function setPreRoundProgress(percent = 0, fetchLabel = 'Preparing next phase…'
   if (progressPct) progressPct.textContent = `${bounded}%`;
   if (fetchEl) fetchEl.textContent = fetchLabel;
   if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(bounded));
+
+  const milestone = Math.floor(bounded / 10) * 10;
+  if (milestone >= 10 && milestone !== preRoundAudioState.lastMilestone) {
+    preRoundAudioState.lastMilestone = milestone;
+    playLoadingMilestoneSound(milestone);
+  }
 }
 
 function hidePreRoundLoadingState() {
@@ -94,6 +422,7 @@ function hidePreRoundLoadingState() {
   const messageEl = document.getElementById('preRoundMessage');
   if (loading) loading.style.display = 'none';
   if (messageEl) messageEl.textContent = '⚡ Get Ready for Chaos ⚡';
+  preRoundAudioState.lastMilestone = -1;
   setPreRoundProgress(0, 'Preparing next phase…');
 }
 
@@ -119,25 +448,80 @@ function buildCharacterFetchLabels(teamMap, { maxPlayers = 4, maxCharsPerPlayer 
     .filter(Boolean);
 }
 
-function holdPreRoundProgressAt92({
-  baseStage = 'Finishing score calculations…',
-  characterLabels = []
-} = {}) {
-  let idx = 0;
-  let pulse = 0;
-  setPreRoundProgress(92, baseStage);
+function buildCharacterFetchItems(teamMap, { maxPlayers = 5, maxCharsPerPlayer = 2 } = {}) {
+  if (!teamMap || typeof teamMap !== 'object') return [];
+  return Object.entries(teamMap)
+    .slice(0, maxPlayers)
+    .flatMap(([playerName, picks]) => {
+      return (Array.isArray(picks) ? picks : [])
+        .map((entry) => {
+          if (entry && typeof entry === 'object') {
+            return entry.character || entry.name || entry.label || '';
+          }
+          return String(entry || '');
+        })
+        .map((name) => String(name).trim())
+        .filter(Boolean)
+        .slice(0, maxCharsPerPlayer)
+        .map((character) => ({
+          playerName,
+          character,
+          label: `${playerName}: ${character}`
+        }));
+    });
+}
 
-  const timer = setInterval(() => {
-    const fetchContext = characterLabels.length ? characterLabels[idx % characterLabels.length] : '';
-    const label = fetchContext ? `${baseStage} • Fetching: ${fetchContext}` : baseStage;
-    const pulsePct = 92 + Math.round(Math.sin(pulse) * 1);
-    const boundedPct = Math.max(91, Math.min(93, pulsePct));
-    setPreRoundProgress(boundedPct, label);
-    pulse += 0.7;
-    idx += 1;
-  }, 850);
+function resetVoteTallyLoadingState() {
+  voteTallyLoadingState.active = false;
+  voteTallyLoadingState.totalFetches = 0;
+  voteTallyLoadingState.completedFetches = 0;
+  if (voteTallyLoadingState.pulseTimer) {
+    clearInterval(voteTallyLoadingState.pulseTimer);
+    voteTallyLoadingState.pulseTimer = null;
+  }
+  if (voteTallyLoadingState.finalizeTimer) {
+    clearInterval(voteTallyLoadingState.finalizeTimer);
+    voteTallyLoadingState.finalizeTimer = null;
+  }
+}
 
-  addTimer(timer);
+function applyVoteTallyProgressUpdate(payload = {}) {
+  if (!voteTallyLoadingState.active) return;
+
+  const total = Math.max(1, Number(payload.total) || voteTallyLoadingState.totalFetches || 1);
+  const completed = Math.max(0, Math.min(total, Number(payload.completed) || 0));
+  voteTallyLoadingState.totalFetches = total;
+  voteTallyLoadingState.completedFetches = completed;
+
+  if (voteTallyLoadingState.pulseTimer) {
+    clearInterval(voteTallyLoadingState.pulseTimer);
+    voteTallyLoadingState.pulseTimer = null;
+  }
+
+  const ratio = total > 0 ? (completed / total) : 0;
+  const progress = Math.max(voteTallyLoadingState.stallTarget, Math.min(96, Math.round(78 + (ratio * 18))));
+  const playerName = payload.playerName ? String(payload.playerName) : '';
+  const character = payload.character ? String(payload.character) : '';
+  const success = payload.success !== false;
+  const statusPrefix = success ? 'Fetched' : 'Fallback';
+  const statusText = playerName && character
+    ? `${statusPrefix}: ${character} (${playerName})`
+    : `Fetched ${completed}/${total} roster entries…`;
+
+  setPreRoundProgress(progress, `Fetching matchup intel… • ${statusText}`);
+  playFetchCompleteSound(success);
+
+  if (completed >= total) {
+    if (!voteTallyLoadingState.finalizeTimer) {
+      let pulse = 0;
+      voteTallyLoadingState.finalizeTimer = setInterval(() => {
+        const boundedPct = 96 + Math.round(Math.sin(pulse) * 1);
+        setPreRoundProgress(Math.max(95, Math.min(98, boundedPct)), 'Applying scoring rules and final tie checks…');
+        pulse += 0.9;
+      }, 500);
+      addTimer(voteTallyLoadingState.finalizeTimer);
+    }
+  }
 }
 
 function showPreRoundLoadingState({
@@ -259,6 +643,7 @@ function joinRoom() {
 
 function leaveRoom() {
   if (confirm('Are you sure you want to leave? You\'ll disconnect from the room.')) {
+    audioState.hasPlayedLobbyEntry = false;
     socket.disconnect();
     socket.connect();
     showScreen('join');
@@ -362,6 +747,10 @@ socket.on('roomData', (data) => {
   if (!data.isGameActive) {
     console.log('✅ Showing lobby - game not active');
     showScreen('lobby');
+    if (!audioState.hasPlayedLobbyEntry) {
+      playJoinSound();
+      audioState.hasPlayedLobbyEntry = true;
+    }
 
     const startBtn = document.getElementById('startBtn');
     const readyBtn = document.getElementById('readyBtn');
@@ -438,6 +827,7 @@ socket.on('settingsUpdated', (settings) => {
 });
 
 function toggleReady() {
+  playReadyToggleSound(!player.ready);
   socket.emit('toggleReady');
 }
 
@@ -452,12 +842,14 @@ function sendMessage() {
   const input = document.getElementById('chatInput');
   const message = input.value.trim();
   if (!message) return;
+  playMessageSound();
   socket.emit('sendMessage', message);
   input.value = '';
   input.focus();
 }
 
 function sendReaction(emoji) {
+  playMessageSound();
   socket.emit('sendReaction', emoji);
 }
 
@@ -485,6 +877,10 @@ socket.on('newMessage', (msg) => {
   }
 
   chatContainer.scrollTop = chatContainer.scrollHeight;
+
+  if (msg.player !== player.name) {
+    playMessageSound();
+  }
 });
 
 function sendStartGame() {
@@ -501,6 +897,7 @@ socket.on('gameStarting', (data) => {
   gameState.voted = false;
   gameState.voteLocked = false;
   gameState.draftWarnings = {};
+  playPhaseShiftSound();
   showToast('🎉 Game starting! Get ready!', 'info');
   showScreen('preRound');
 });
@@ -515,6 +912,7 @@ socket.on('roundStart', (data) => {
   clearTimers();
 
   const isFinal = data.isFinalRound;
+  playPhaseShiftSound();
   
   // Skip preRound screen for Round 4 (goes straight to transition message)
   if (isFinal) {
@@ -534,7 +932,9 @@ socket.on('roundStart', (data) => {
     countdown--;
     if (countdown > 0) {
       document.getElementById('countdown').textContent = countdown;
+      playCountdownTick(countdown);
     } else {
+      playCountdownTick(0);
       clearInterval(timer);
     }
   }, 1000);
@@ -597,6 +997,7 @@ socket.on('scenarioRevealed', (data) => {
   }
 
   showScreen('scenarioScreen');
+  playDraftSound();
 
   let timeLeft = data.draftTimeRemaining;
   document.getElementById('draftTimer').textContent = timeLeft;
@@ -788,6 +1189,7 @@ socket.on('plotTwistRevealed', (data) => {
   gameState.currentTwist = data.twist;
   document.getElementById('twistText').textContent = `"${data.twist}"`;
   showScreen('twistScreen');
+  playTwistSound();
   showToast('🌀 Plot twist incoming!', 'warning');
 });
 
@@ -796,6 +1198,7 @@ socket.on('plotTwistRevealed', (data) => {
 // ========================
 socket.on('votingPhaseStart', (data) => {
   clearTimers();
+  playPhaseShiftSound();
   const charInput = document.getElementById('charInput');
   if (charInput) charInput.value = '';
   gameState.voted = false;
@@ -906,6 +1309,7 @@ socket.on('votingPhaseStart', (data) => {
 socket.on('round4Start', (data) => {
   console.log('🎮 Round 4 Start event received:', data);
   clearTimers();
+  playPhaseShiftSound();
   const finalTeamLabels = buildCharacterFetchLabels(data && data.finalTeams ? data.finalTeams : {}, {
     maxPlayers: 6,
     maxCharsPerPlayer: 3
@@ -1058,6 +1462,7 @@ function getRoundLeaders(roundPoints = {}) {
 }
 
 function showVoteTallyLoading(payload = {}) {
+  resetVoteTallyLoadingState();
   const trigger = payload && payload.trigger ? payload.trigger : 'timer';
   const triggerText = trigger === 'all_locked'
     ? 'All votes locked. Finalizing scores now…'
@@ -1066,6 +1471,15 @@ function showVoteTallyLoading(payload = {}) {
     maxPlayers: 5,
     maxCharsPerPlayer: 2
   });
+  const fetchItems = buildCharacterFetchItems(payload.fetchQueue || {}, {
+    maxPlayers: 5,
+    maxCharsPerPlayer: 2
+  });
+  const totalFetches = Math.max(1, fetchItems.length);
+  voteTallyLoadingState.active = true;
+  voteTallyLoadingState.totalFetches = totalFetches;
+  voteTallyLoadingState.completedFetches = 0;
+  voteTallyLoadingState.stallTarget = 78;
 
   showPreRoundLoadingState({
     title: '⏳ TALLYING ROUND RESULTS',
@@ -1075,29 +1489,45 @@ function showVoteTallyLoading(payload = {}) {
       'Fetching matchup intel for submitted teams…',
       'Applying scoring rules and tie checks…'
     ],
-    progress: 58,
+    progress: 52,
     showCountdown: false
   });
 
-  let progress = 58;
+  let progress = 52;
+  let queueIndex = 0;
   const ramp = setInterval(() => {
-    progress = Math.min(92, progress + 1);
-    const stageText = progress < 70
+    progress = Math.min(voteTallyLoadingState.stallTarget, progress + 1);
+    const stageText = progress < 64
       ? 'Verifying locked votes…'
-      : progress < 84
+      : progress < 74
         ? 'Fetching matchup intel for submitted teams…'
-        : 'Applying scoring rules and tie checks…';
+        : 'Waiting on roster intel fetches…';
 
-    const fetchContext = fetchQueue.length ? fetchQueue[Math.floor(progress / 3) % fetchQueue.length] : '';
+    const fetchContext = fetchQueue.length ? fetchQueue[queueIndex % fetchQueue.length] : '';
+    queueIndex += 1;
     const label = fetchContext ? `${stageText} • Fetching: ${fetchContext}` : stageText;
     setPreRoundProgress(progress, label);
 
-    if (progress >= 92) {
+    if (progress >= voteTallyLoadingState.stallTarget) {
       clearInterval(ramp);
-      holdPreRoundProgressAt92({
-        baseStage: 'Awaiting final score commit…',
-        characterLabels: fetchQueue
-      });
+      let pulse = 0;
+      voteTallyLoadingState.pulseTimer = setInterval(() => {
+        if (!voteTallyLoadingState.active || voteTallyLoadingState.completedFetches > 0) {
+          clearInterval(voteTallyLoadingState.pulseTimer);
+          voteTallyLoadingState.pulseTimer = null;
+          return;
+        }
+        const pulsePct = 77 + Math.round(Math.sin(pulse) * 1);
+        const boundedPct = Math.max(76, Math.min(79, pulsePct));
+        const rotatingContext = fetchQueue.length ? fetchQueue[queueIndex % fetchQueue.length] : '';
+        queueIndex += 1;
+        const pulseLabel = rotatingContext
+          ? `Queueing roster intel… • Fetching: ${rotatingContext}`
+          : 'Queueing roster intel…';
+        setPreRoundProgress(boundedPct, pulseLabel);
+        pulse += 0.65;
+      }, 600);
+      addTimer(voteTallyLoadingState.pulseTimer);
     }
   }, 160);
   addTimer(ramp);
@@ -1304,7 +1734,9 @@ function initializeRadialMaps(root) {
       segment.addEventListener('click', () => {
         const tone = segment.dataset.tone;
         const current = map.getAttribute('data-active-tone') || 'none';
-        activateTone(current === tone ? null : tone);
+        const nextTone = current === tone ? null : tone;
+        playSliceInteractionSound(tone, nextTone === null);
+        activateTone(nextTone);
       });
 
       segment.addEventListener('keydown', (event) => {
@@ -1312,13 +1744,16 @@ function initializeRadialMaps(root) {
         event.preventDefault();
         const tone = segment.dataset.tone;
         const current = map.getAttribute('data-active-tone') || 'none';
-        activateTone(current === tone ? null : tone);
+        const nextTone = current === tone ? null : tone;
+        playSliceInteractionSound(tone, nextTone === null);
+        activateTone(nextTone);
       });
     });
 
     if (keyToggle) {
       keyToggle.addEventListener('click', () => {
         const isOpen = map.getAttribute('data-key-open') === 'true';
+        scheduleTone({ frequency: isOpen ? 330 : 520, duration: 55, type: 'triangle', volume: 0.085 });
         setKeyOpen(!isOpen);
       });
     }
@@ -1374,6 +1809,7 @@ function buildRoundWinnerHTML(data, isFinalRound = false) {
 // RESULTS SCREEN
 // ========================
 socket.on('roundResults', (data) => {
+  resetVoteTallyLoadingState();
   clearTimers();
   playWinSound();
   document.getElementById('resultRound').textContent = data.round;
@@ -1509,6 +1945,10 @@ socket.on('roundResults', (data) => {
 socket.on('voteTallying', (data) => {
   clearTimers();
   showVoteTallyLoading(data || {});
+});
+
+socket.on('voteTallyProgress', (payload) => {
+  applyVoteTallyProgressUpdate(payload || {});
 });
 
 function readyForNextRound() {
@@ -1826,6 +2266,7 @@ function sendPlayAgain() {
 function goToLobby() {
   if (confirm('Are you sure? This will return to the lobby.')) {
     clearTimers();
+    audioState.hasPlayedLobbyEntry = false;
     resetAllState();
     socket.disconnect();
     socket.connect();
@@ -1840,6 +2281,15 @@ function goToLobby() {
 // ========================
 window.addEventListener('beforeunload', () => {
   socket.disconnect();
+});
+
+installAudioUnlockHandlers();
+setupAudioControls();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && audioState.unlocked) {
+    ensureAudioRunning();
+    applyAudioLevels();
+  }
 });
 
 // Expose UI actions used by inline handlers

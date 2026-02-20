@@ -1270,9 +1270,26 @@ async function tallyResults(io, roomCode) {
 
   const { points, bonuses, voteCount, pointBreakdown } = calculateRoundBonuses(game, game.currentRound);
 
+  const totalFetches = game.players.reduce((acc, player) => {
+    const roster = Array.isArray(player.team) ? player.team : [];
+    return acc + Math.min(2, roster.length);
+  }, 0);
+  let completedFetches = 0;
+
   let roundIntel = null;
   try {
-    roundIntel = await evaluateRoundFromGame(game, roundIndex);
+    roundIntel = await evaluateRoundFromGame(game, roundIndex, {
+      onCharacterEvaluated: ({ playerName, character, success }) => {
+        completedFetches += 1;
+        io.to(roomCode).emit('voteTallyProgress', {
+          completed: completedFetches,
+          total: Math.max(1, totalFetches),
+          playerName,
+          character,
+          success: success !== false
+        });
+      }
+    });
   } catch (error) {
     console.error(`❌ Round ${roundIndex + 1} intel evaluation failed:`, error);
   }

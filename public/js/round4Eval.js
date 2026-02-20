@@ -1382,10 +1382,10 @@ function renderFinalLeaderboard() {
                 </div>
               </div>
               <div class="eval-lb-stats">
-                <span><small>OVR CUM</small><b>${safeCumulativeOVR}</b></span>
-                <span><small>OVR AVG</small><b>${averageOVR}</b></span>
-                <span><small>FASTEST LOCK</small><b>${fastestLock}</b></span>
-                <span><small>R4 PTS</small><b>${roundPoints}</b></span>
+                <span><small>OVR CUM 💦</small><b>${safeCumulativeOVR}</b></span>
+                <span><small>OVR AVG 🧢</small><b>${averageOVR}</b></span>
+                <span><small>FASTEST LOCK 🔒</small><b>${fastestLock}</b></span>
+                <span><small>R4 PTS🫵</small><b>${roundPoints}</b></span>
               </div>
             </article>
           `;

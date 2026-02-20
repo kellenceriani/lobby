@@ -43,8 +43,7 @@ const installPromptState = {
   fallbackTimerId: null
 };
 
-const INSTALL_PROMPT_DISMISS_KEY = 'lobbywars_install_prompt_dismiss_until_v1';
-const INSTALL_PROMPT_DISMISS_MS = 1000 * 60 * 60 * 24 * 7;
+const INSTALL_PROMPT_DISMISS_KEY = 'lobbywars_install_prompt_dismissed_session_v1';
 const CONNECTION_DEBUG_KEY = 'lobbywars_connection_debug_v1';
 
 const connectionDebugState = {
@@ -222,8 +221,7 @@ function isIOS() {
 
 function canShowInstallPromptNow() {
   try {
-    const dismissedUntil = Number(window.localStorage.getItem(INSTALL_PROMPT_DISMISS_KEY) || '0');
-    return Date.now() > dismissedUntil;
+    return window.sessionStorage.getItem(INSTALL_PROMPT_DISMISS_KEY) !== '1';
   } catch (error) {
     return true;
   }
@@ -231,7 +229,7 @@ function canShowInstallPromptNow() {
 
 function rememberInstallPromptDismissal() {
   try {
-    window.localStorage.setItem(INSTALL_PROMPT_DISMISS_KEY, String(Date.now() + INSTALL_PROMPT_DISMISS_MS));
+    window.sessionStorage.setItem(INSTALL_PROMPT_DISMISS_KEY, '1');
   } catch (error) {
     // no-op
   }
@@ -240,6 +238,7 @@ function rememberInstallPromptDismissal() {
 function hideInstallPrompt() {
   const root = document.getElementById('installPrompt');
   if (!root) return;
+  root.style.display = 'none';
   root.hidden = true;
 }
 
@@ -266,12 +265,18 @@ function showInstallPrompt({ copy, actionLabel, onAction }) {
     rememberInstallPromptDismissal();
   };
 
+  root.style.removeProperty('display');
   root.hidden = false;
 }
 
 function installFullscreenPromptFlow() {
   if (installPromptState.initialized) return;
   installPromptState.initialized = true;
+
+  if (!isLikelyMobileDevice()) {
+    hideInstallPrompt();
+    return;
+  }
 
   if (isStandaloneDisplayMode()) {
     hideInstallPrompt();
@@ -306,20 +311,38 @@ function installFullscreenPromptFlow() {
       actionLabel: 'Install',
       onAction: async () => {
         const deferred = installPromptState.deferredPrompt;
-        if (!deferred) return;
+        if (!deferred) {
+          showToast('Install prompt is unavailable on this browser. Use browser menu → Install App/Add to Home Screen.', 'info', 7000);
+          installPromptState.sessionDismissed = true;
+          rememberInstallPromptDismissal();
+          hideInstallPrompt();
+          return;
+        }
 
-        deferred.prompt();
+        try {
+          deferred.prompt();
+        } catch (error) {
+          showToast('Install prompt could not open. Use browser menu → Install App/Add to Home Screen.', 'warning', 7000);
+          installPromptState.sessionDismissed = true;
+          rememberInstallPromptDismissal();
+          hideInstallPrompt();
+          return;
+        }
+
         try {
           const choice = await deferred.userChoice;
           if (choice && choice.outcome === 'accepted') {
             installPromptState.sessionDismissed = true;
+            rememberInstallPromptDismissal();
+            hideInstallPrompt();
+          } else {
+            showToast('Install canceled. You can still install later from your browser menu.', 'info', 5000);
           }
         } catch (error) {
-          // no-op
+          showToast('Install result unavailable. You can install from your browser menu anytime.', 'info', 6000);
         }
 
         installPromptState.deferredPrompt = null;
-        hideInstallPrompt();
       }
     });
   });
@@ -346,22 +369,35 @@ function installFullscreenPromptFlow() {
     return;
   }
 
-  installPromptState.fallbackTimerId = setTimeout(() => {
-    if (installPromptState.deferredPrompt) return;
-    if (installPromptState.sessionDismissed) return;
-    if (isStandaloneDisplayMode()) return;
-
-    showInstallPrompt({
-      copy: 'Install from your browser menu for true fullscreen mode and hidden browser bars.',
-      actionLabel: 'How',
-      onAction: () => {
-        showToast('Use your browser menu and choose Install App or Add to Home Screen.', 'info', 6500);
-        installPromptState.sessionDismissed = true;
-        rememberInstallPromptDismissal();
-        hideInstallPrompt();
+  showInstallPrompt({
+    copy: 'Install from your browser menu for true fullscreen mode and hidden browser bars.',
+    actionLabel: 'Install',
+    onAction: async () => {
+      const deferred = installPromptState.deferredPrompt;
+      if (deferred && typeof deferred.prompt === 'function') {
+        try {
+          deferred.prompt();
+          const choice = await deferred.userChoice;
+          if (choice && choice.outcome === 'accepted') {
+            installPromptState.sessionDismissed = true;
+            rememberInstallPromptDismissal();
+            hideInstallPrompt();
+          }
+        } catch (error) {
+          showToast('Install prompt could not open. Use browser menu → Install App/Add to Home Screen.', 'warning', 7000);
+          installPromptState.sessionDismissed = true;
+          rememberInstallPromptDismissal();
+          hideInstallPrompt();
+        }
+        return;
       }
-    });
-  }, 2200);
+
+      showToast('Use your browser menu and choose Install App or Add to Home Screen.', 'info', 6500);
+      installPromptState.sessionDismissed = true;
+      rememberInstallPromptDismissal();
+      hideInstallPrompt();
+    }
+  });
 }
 
 installFullscreenPromptFlow();

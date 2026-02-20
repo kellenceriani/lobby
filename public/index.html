@@ -215,21 +215,38 @@
       </div>
 
       <!-- Chat Tab -->
-      <div id="chatTab" class="tab-content">
-        <ul id="chatMessages" class="chat-messages-modern"></ul>
-        <div class="reactions-bar-modern">
-          <button class="reaction-btn-modern" onclick="sendReaction('😂')" aria-label="Laugh">😂</button>
-          <button class="reaction-btn-modern" onclick="sendReaction('🔥')" aria-label="Fire">🔥</button>
-          <button class="reaction-btn-modern" onclick="sendReaction('👏')" aria-label="Applause">👏</button>
-          <button class="reaction-btn-modern" onclick="sendReaction('🤔')" aria-label="Think">🤔</button>
-          <button class="reaction-btn-modern" onclick="sendReaction('💀')" aria-label="Dying">💀</button>
+      <div id="chatTab" class="tab-content chat-tab-modern">
+        <div class="chat-thread-modern" aria-label="Room chat thread">
+          <div class="chat-thread-header">Messages</div>
+          <p id="chatEraseNotice" class="chat-erase-notice" role="status" aria-live="polite">
+            Auto-erase active: only latest 10 messages are kept. Older messages are permanently deleted.
+          </p>
+          <ul id="chatMessages" class="chat-messages-modern" role="list" aria-live="polite" aria-relevant="additions removals"></ul>
         </div>
-        <div class="chat-input-modern">
-          <input id="chatInput" placeholder="Say something..." maxlength="50" aria-label="Chat message">
-          <button class="btn-icon" onclick="sendMessage()" aria-label="Send message">
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/></svg>
-          </button>
+        <div class="chat-composer-modern" role="group" aria-label="Chat composer">
+          <div class="reactions-bar-modern" role="toolbar" aria-label="Quick reactions">
+            <button class="reaction-btn-modern" onclick="sendReaction('😂')" aria-label="Laugh">😂</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('🤣')" aria-label="Laugh harder">🤣</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('😭')" aria-label="Crying">😭</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('💀')" aria-label="Dead">💀</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('🤡')" aria-label="Clown">🤡</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('🗿')" aria-label="Stone face">🗿</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('👀')" aria-label="Watching">👀</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('🍿')" aria-label="Popcorn">🍿</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('🔥')" aria-label="Fire">🔥</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('🍆')" aria-label="Eggplant">🍆</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('👏')" aria-label="Applause">👏</button>
+            <button class="reaction-btn-modern" onclick="sendReaction('🤔')" aria-label="Thinking">🤔</button>
+          </div>
+          <div class="chat-input-modern">
+            <input id="chatInput" placeholder="iMessage vibe: say something wild..." maxlength="50" aria-label="Chat message">
+            <button id="chatSendBtn" class="btn-icon" onclick="sendMessage()" aria-label="Send message" disabled>
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/></svg>
+            </button>
+          </div>
+          <p class="chat-composer-hint" role="status">Tap reactions for instant sends • Press Enter to send text</p>
         </div>
+        <p class="chat-retention-note" role="status">Scroll inside this message box to view the latest 10 only.</p>
       </div>
     </div>
 
@@ -290,32 +307,32 @@
     <!-- Collapsible Scenario Box -->
     <div id="scenarioBox" class="scenario-box-collapsible">
       <h2 id="scenarioText" class="scenario-text-compact">BUILD A TEAM TO...</h2>
+      <p id="wordApiIndicator" class="word-api-indicator" aria-live="polite"></p>
     </div>
 
     <!-- Draft Area -->
     <div class="draft-area-modern">
-      <!-- My Team Section -->
-      <div class="my-team-section">
-        <div class="section-header">
-          <span>✍️ My Team <span id="draftCounter" class="draft-counter-badge">(0/2)</span></span>
+      <div class="draft-columns">
+        <!-- My Team Section -->
+        <div class="my-team-section">
+          <div class="section-header">
+            <span>✍️ My Team <span id="draftCounter" class="draft-counter-badge">(0/2)</span></span>
+          </div>
+          <ul id="myTeam" class="my-team-modern"></ul>
+          <div id="draftWarning" class="draft-warning-modern"></div>
+          <button id="lockDraftBtn" class="btn btn-success btn-lock-draft" onclick="lockDraft()" style="display: none;">
+            🔒 LOCK TEAM
+          </button>
+          <div id="draftWaitVisual" class="draft-wait-visual" style="display: none;" aria-live="polite"></div>
         </div>
-        <ul id="myTeam" class="my-team-modern"></ul>
-        <div id="draftWarning" class="draft-warning-modern"></div>
-        <button id="lockDraftBtn" class="btn btn-success btn-lock-draft" onclick="lockDraft()" style="display: none;">
-          🔒 LOCK TEAM
-        </button>
-      </div>
 
-      <!-- Live Picks Toggle -->
-      <div class="live-picks-toggle">
-        <button class="btn-toggle-picks" onclick="toggleLivePicks()" aria-label="Toggle live picks">
-          <span id="livePicksIcon">▲</span> <span id="livePicksCount">0</span> Live Picks
-        </button>
-      </div>
-
-      <!-- Live Picks Drawer (Collapsible) -->
-      <div id="livePicksDrawer" class="live-picks-drawer">
-        <ul id="livePicksList" class="live-picks-modern"></ul>
+        <!-- Live Picks (Always Visible) -->
+        <div class="live-picks-section" aria-live="polite">
+          <div class="section-header">
+            <span>📡 Live Picks <span id="livePicksCount" class="live-picks-count-badge">0</span></span>
+          </div>
+          <ul id="livePicksList" class="live-picks-modern"></ul>
+        </div>
       </div>
     </div>
 
@@ -341,11 +358,7 @@
   <div id="votingScreen" class="screen">
     <!-- Sticky Header with Timer -->
     <div class="game-header-sticky voting-header">
-      <div class="header-left">
-        <button class="btn-collapse" onclick="toggleVotingContext()" aria-label="Toggle context">
-          <span id="votingContextIcon">▼</span> Context
-        </button>
-      </div>
+      <div class="header-left"></div>
       <div class="header-center">
         <span id="voteTimer" class="timer-big">30</span>s
       </div>
@@ -354,30 +367,21 @@
       </div>
     </div>
 
-    <!-- Collapsible Voting Context -->
+    <!-- Voting Context -->
     <div id="votingContext" class="voting-context-collapsible">
-      <div class="context-item scoring-mode-item">
-        <strong>🧠 Scoring Mode:</strong>
-        <span id="votingScoringMode">Community Votes + Contextual Intel Fit</span>
-      </div>
-      <div class="context-item">
+      <div class="context-item context-item-critical">
         <strong>📋 Scenario:</strong>
-        <span id="votingScenario"></span>
+        <span id="votingScenario" class="context-value-strong"></span>
       </div>
-      <div class="context-item">
+      <div class="context-item context-item-critical">
         <strong>🌀 Twist:</strong>
-        <span id="votingTwist"></span>
+        <span id="votingTwist" class="context-value-strong"></span>
       </div>
-    </div>
-
-    <!-- Vote Prompt -->
-    <div class="vote-prompt-modern">
-      ⚖️ WHOSE TEAM WINS?
     </div>
 
     <!-- Lock Notice -->
     <div id="voteLockNotice" class="vote-notice" style="display: none;">
-      👆 Select a team, then LOCK your vote below!
+      Pick a team, then lock your vote.
     </div>
 
     <!-- Voting Teams Grid -->

@@ -1,24 +1,240 @@
+const TARGET_WORD_COUNT = 200;
+const DEFAULT_MIN_SOURCE_WORDS = 36;
+const WORD_FETCH_TIMEOUT_MS = 6000;
+
 const FALLBACK_WORDS = [
   'Batman', 'Oprah', 'SpongeBob', 'Sherlock Holmes', 'Dwayne Johnson',
-  'Einstein', 'Shakespeare', 'Gandalf', 'Darth Vader', 'Hermione Granger'
+  'Einstein', 'Shakespeare', 'Gandalf', 'Darth Vader', 'Hermione Granger',
+  'Lion', 'Tiger', 'Elephant', 'Falcon', 'Wolf',
+  'Paris', 'Tokyo', 'Nairobi', 'Denver', 'Sydney',
+  'Laptop', 'Bridge', 'Compass', 'Lantern', 'Bicycle',
+  'Pizza', 'Sushi', 'Taco', 'Pasta', 'Sandwich'
 ];
 
 let wordCache = [];
+let activeWordSource = 'fallback';
+
+const WORD_SOURCE_LABELS = {
+  'common-names': 'Common Names API',
+  animals: 'Animals API',
+  athletes: 'Athletes API',
+  'cartoon-characters': 'Cartoon Characters API',
+  'food-items': 'Food Items API',
+  places: 'Places API',
+  'non-living-things': 'Non-living Things API',
+  fallback: 'Fallback Word Pool'
+};
+
+function getActiveWordSourceLabel() {
+  return WORD_SOURCE_LABELS[activeWordSource] || 'Fallback Word Pool';
+}
 
 const { getRoundWeight, scaleRoundPoints } = require('../services/scoreScaling');
 const { evaluateRoundFromGame } = require('../services/roundEvaluationService');
 const { loadRoomsSnapshot, queueRoomsSnapshot } = require('../storage/statePersistence');
 
+function normalizeWordCandidate(value) {
+  if (typeof value !== 'string') return null;
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (!compact) return null;
+  return compact;
+}
+
+function toWordCache(pool, targetCount = TARGET_WORD_COUNT) {
+  const uniqueByKey = new Map();
+  for (const raw of Array.isArray(pool) ? pool : []) {
+    const cleaned = normalizeWordCandidate(raw);
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (!uniqueByKey.has(key)) uniqueByKey.set(key, cleaned);
+  }
+
+  const uniqueWords = Array.from(uniqueByKey.values());
+  if (uniqueWords.length === 0) return [];
+
+  for (let i = uniqueWords.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [uniqueWords[i], uniqueWords[j]] = [uniqueWords[j], uniqueWords[i]];
+  }
+
+  return uniqueWords.slice(0, Math.max(1, targetCount));
+}
+
+function wikiCategoryUrl(category, limit = TARGET_WORD_COUNT) {
+  const safeLimit = Math.max(1, Math.min(500, Number(limit) || TARGET_WORD_COUNT));
+  return `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtype=page&cmlimit=${safeLimit}&format=json&cmtitle=Category:${encodeURIComponent(category)}`;
+}
+
+async function fetchWikipediaCategory(category, limit = TARGET_WORD_COUNT) {
+  const response = await fetch(wikiCategoryUrl(category, limit));
+  if (!response.ok) throw new Error(`Wikipedia API failed for ${category}`);
+  const data = await response.json();
+  return ((data && data.query && Array.isArray(data.query.categorymembers)) ? data.query.categorymembers : [])
+    .map((member) => (member && member.title ? member.title : null))
+    .filter(Boolean)
+    .map((title) => title.replace(/\s*\([^)]*\)\s*$/g, '').trim());
+}
+
+function normalizeLabel(value) {
+  if (typeof value !== 'string') return null;
+  return value.replace(/\s*\([^)]*\)\s*$/g, '').replace(/[_-]+/g, ' ').trim();
+}
+
+async function fetchJson(url, errorLabel) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WORD_FETCH_TIMEOUT_MS);
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'LobbyWordLoader/1.0 (word-source-refresh)'
+    },
+    signal: controller.signal
+  }).finally(() => clearTimeout(timeoutId));
+  if (!response.ok) throw new Error(`${errorLabel} failed`);
+  return response.json();
+}
+
+async function fetchWikidataLabels(sparql, errorLabel = 'Wikidata API') {
+  const url = `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`;
+  const data = await fetchJson(url, errorLabel);
+  return ((data && data.results && Array.isArray(data.results.bindings)) ? data.results.bindings : [])
+    .map((entry) => {
+      const key = Object.keys(entry || {}).find((candidate) => candidate.toLowerCase().endsWith('label'));
+      return key && entry[key] && entry[key].value ? normalizeLabel(entry[key].value) : null;
+    })
+    .filter(Boolean);
+}
+
+const WORD_SOURCE_FETCHERS = [
+  {
+    key: 'common-names',
+    label: 'Common Names',
+    maxWords: 200,
+    minWords: 120,
+    url: 'https://randomuser.me/api/?results=200&inc=name&noinfo',
+    fetchWords: async () => {
+      const response = await fetch('https://randomuser.me/api/?results=200&inc=name&noinfo');
+      if (!response.ok) throw new Error('RandomUser API failed');
+      const data = await response.json();
+      const results = Array.isArray(data && data.results) ? data.results : [];
+      return results
+        .map((entry) => {
+          const first = entry && entry.name && entry.name.first ? entry.name.first : '';
+          const last = entry && entry.name && entry.name.last ? entry.name.last : '';
+          return `${first} ${last}`.trim();
+        })
+        .filter(Boolean);
+    }
+  },
+  {
+    key: 'animals',
+    label: 'Animals',
+    maxWords: 140,
+    minWords: 80,
+    url: 'https://api.inaturalist.org/v1/taxa?iconic_taxa=Animalia&rank=species&order_by=observations_count&order=desc&per_page=140',
+    fetchWords: async () => {
+      const data = await fetchJson('https://api.inaturalist.org/v1/taxa?iconic_taxa=Animalia&rank=species&order_by=observations_count&order=desc&per_page=140', 'iNaturalist API');
+      return ((data && Array.isArray(data.results)) ? data.results : [])
+        .map((taxon) => {
+          const preferred = taxon && taxon.preferred_common_name ? taxon.preferred_common_name : '';
+          const scientific = taxon && taxon.name ? taxon.name : '';
+          return normalizeLabel(preferred || scientific);
+        })
+        .filter(Boolean);
+    }
+  },
+  {
+    key: 'athletes',
+    label: 'Athletes',
+    maxWords: 90,
+    minWords: 60,
+    url: 'https://query.wikidata.org/sparql (athletes query)',
+    fetchWords: async () => fetchWikidataLabels(`
+      SELECT DISTINCT ?athleteLabel WHERE {
+        ?athlete wdt:P31 wd:Q5;
+                 wdt:P106/wdt:P279* wd:Q2066131.
+        SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+      }
+      LIMIT 90
+    `, 'Wikidata Athletes API')
+  },
+  {
+    key: 'cartoon-characters',
+    label: 'Cartoon Characters',
+    maxWords: 120,
+    minWords: 50,
+    url: wikiCategoryUrl('Animated characters', 120),
+    fetchWords: async () => fetchWikipediaCategory('Animated characters', 120)
+  },
+  {
+    key: 'food-items',
+    label: 'Food Items',
+    maxWords: 120,
+    minWords: 80,
+    url: 'https://world.openfoodfacts.org/categories.json?page_size=140',
+    fetchWords: async () => {
+      const data = await fetchJson('https://world.openfoodfacts.org/categories.json?page_size=140', 'Open Food Facts API');
+      return ((data && Array.isArray(data.tags)) ? data.tags : [])
+        .map((tag) => normalizeLabel(tag && tag.name ? tag.name : null))
+        .filter(Boolean);
+    }
+  },
+  {
+    key: 'places',
+    label: 'Places',
+    maxWords: 200,
+    minWords: 80,
+    url: 'https://restcountries.com/v3.1/all?fields=name',
+    fetchWords: async () => {
+      const data = await fetchJson('https://restcountries.com/v3.1/all?fields=name', 'REST Countries API');
+      return (Array.isArray(data) ? data : [])
+        .map((entry) => {
+          const name = entry && entry.name && entry.name.common ? entry.name.common : '';
+          return normalizeLabel(name);
+        })
+        .filter(Boolean);
+    }
+  },
+  {
+    key: 'non-living-things',
+    label: 'Non-living Things',
+    maxWords: 120,
+    minWords: 60,
+    url: 'https://api.datamuse.com/words?ml=object&max=160',
+    fetchWords: async () => {
+      const data = await fetchJson('https://api.datamuse.com/words?ml=object&max=160', 'Datamuse API');
+      return (Array.isArray(data) ? data : [])
+        .filter((entry) => Array.isArray(entry && entry.tags) && entry.tags.includes('n'))
+        .map((entry) => normalizeLabel(entry && entry.word ? entry.word : null))
+        .filter(Boolean);
+    }
+  }
+];
+
 async function fetchRandomWords() {
+  const selectedSource = WORD_SOURCE_FETCHERS[Math.floor(Math.random() * WORD_SOURCE_FETCHERS.length)];
+  const minimumWords = Math.max(DEFAULT_MIN_SOURCE_WORDS, Number(selectedSource.minWords) || DEFAULT_MIN_SOURCE_WORDS);
+
   try {
-    const response = await fetch('https://random-word-api.herokuapp.com/all');
-    if (!response.ok) throw new Error('API failed');
-    const words = await response.json();
-    wordCache = words.slice(0, 200).map(w => w.charAt(0).toUpperCase() + w.slice(1));
-    console.log('✓ Loaded', wordCache.length, 'words from API');
+    const fetchedWords = await selectedSource.fetchWords();
+    const sourceCap = Math.max(1, Math.min(TARGET_WORD_COUNT, Number(selectedSource.maxWords) || TARGET_WORD_COUNT));
+    const normalized = toWordCache(fetchedWords, sourceCap);
+    if (!normalized.length) throw new Error(`No words returned from ${selectedSource.label}`);
+    if (normalized.length < minimumWords) {
+      throw new Error(`Only ${normalized.length} words returned from ${selectedSource.label} (minimum ${minimumWords})`);
+    }
+
+    wordCache = normalized;
+    activeWordSource = selectedSource.key;
+    console.log(`✓ Loaded ${wordCache.length}/${sourceCap} words from ${selectedSource.label} (${selectedSource.url})`);
   } catch (error) {
-    console.warn('⚠️ Word API failed, using fallback pool');
-    wordCache = FALLBACK_WORDS;
+    console.warn(`⚠️ Word source failed (${selectedSource.label}), using fallback pool`, error && error.message ? `- ${error.message}` : '');
+    wordCache = toWordCache(FALLBACK_WORDS, TARGET_WORD_COUNT);
+    if (!wordCache.length) {
+      wordCache = FALLBACK_WORDS.slice(0);
+    }
+    activeWordSource = 'fallback';
+    console.log(`✓ Loaded ${wordCache.length} words from fallback pool`);
   }
 }
 
@@ -29,7 +245,9 @@ function initWordCache() {
 
 function getRandomWord() {
   if (wordCache.length === 0) {
-    return FALLBACK_WORDS[Math.floor(Math.random() * FALLBACK_WORDS.length)];
+    const fallbackCache = toWordCache(FALLBACK_WORDS, TARGET_WORD_COUNT);
+    const safeCache = fallbackCache.length ? fallbackCache : FALLBACK_WORDS;
+    return safeCache[Math.floor(Math.random() * safeCache.length)];
   }
   return wordCache[Math.floor(Math.random() * wordCache.length)];
 }
@@ -1068,7 +1286,8 @@ function revealScenario(io, roomCode) {
     scenario: scenario.scenario,
     draftTimeRemaining: draftSeconds,
     maxCharactersPerPlayer: 2,
-    roundNumber: game.currentRound + 1
+    roundNumber: game.currentRound + 1,
+    wordApiSource: getActiveWordSourceLabel()
   });
 
   game.draftTimeout = setTimeout(() => revealPlotTwist(io, roomCode), draftSeconds * 1000);

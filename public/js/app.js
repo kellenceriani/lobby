@@ -21,8 +21,6 @@ import {
   switchLobbyTab,
   toggleAccordion,
   toggleScenario,
-  toggleVotingContext,
-  toggleLivePicks,
   toggleResultsDetails
 } from './ui.js';
 
@@ -57,6 +55,14 @@ const voteTallyLoadingState = {
   stallTarget: 78,
   pulseTimer: null,
   finalizeTimer: null
+};
+
+const draftLockVisualState = {
+  availableSince: 0,
+  urgencyTicker: null,
+  waitTicker: null,
+  waitEmojiIndex: 0,
+  waitDotIndex: 0
 };
 
 function clampAudioLevel(value, fallback = 1) {
@@ -175,12 +181,29 @@ function scheduleTone({
   volume = 0.2,
   attack = 0.008,
   release = 0.09,
-  when = null
+  when = null,
+  retryOnResume = true
 } = {}) {
-  if (!ensureAudioRunning()) return;
-
   const ctx = getAudioContext();
   if (!ctx) return;
+  initializeAudioGraph();
+
+  if (ctx.state !== 'running') {
+    if (!retryOnResume) return;
+    ctx.resume().then(() => {
+      scheduleTone({
+        frequency,
+        duration,
+        type,
+        volume,
+        attack,
+        release,
+        when,
+        retryOnResume: false
+      });
+    }).catch(() => {});
+    return;
+  }
 
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -378,7 +401,9 @@ function unlockAudioFromGesture() {
 function installAudioUnlockHandlers() {
   const handlers = [
     ['pointerdown', unlockAudioFromGesture, { capture: true }],
+    ['pointerup', unlockAudioFromGesture, { capture: true }],
     ['touchstart', unlockAudioFromGesture, { passive: true, capture: true }],
+    ['touchend', unlockAudioFromGesture, { passive: true, capture: true }],
     ['click', unlockAudioFromGesture, { capture: true }],
     ['keydown', unlockAudioFromGesture, { capture: true }]
   ];
@@ -396,6 +421,140 @@ function installAudioUnlockHandlers() {
 
 function appendText(parent, text) {
   parent.appendChild(document.createTextNode(text));
+}
+
+const CHAT_CLIENT_MAX_MESSAGES = 10;
+const CHAT_CLIENT_PRUNE_BATCH = 1;
+
+function getChatToneIndex(name = '') {
+  const normalized = String(name || '').trim().toLowerCase();
+  if (!normalized) return 0;
+
+  let hash = 0;
+  for (let idx = 0; idx < normalized.length; idx += 1) {
+    hash = ((hash << 5) - hash) + normalized.charCodeAt(idx);
+    hash |= 0;
+  }
+  return Math.abs(hash) % 6;
+}
+
+function normalizeChatMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((msg) => msg && typeof msg === 'object' && typeof msg.player === 'string' && typeof msg.text === 'string')
+    .map((msg) => ({
+      player: msg.player,
+      text: msg.text,
+      timestamp: Number(msg.timestamp) || Date.now(),
+      isReaction: msg.isReaction === true
+    }));
+}
+
+function pruneChatMessages(messages) {
+  if (!Array.isArray(messages)) return { messages: [], prunedCount: 0 };
+
+  const next = messages.slice();
+  let prunedCount = 0;
+  while (next.length > CHAT_CLIENT_MAX_MESSAGES) {
+    const removeCount = Math.min(CHAT_CLIENT_PRUNE_BATCH, next.length);
+    next.splice(0, removeCount);
+    prunedCount += removeCount;
+  }
+
+  return { messages: next, prunedCount };
+}
+
+function isChatNearBottom(container, threshold = 56) {
+  if (!container) return true;
+  return (container.scrollHeight - container.scrollTop - container.clientHeight) <= threshold;
+}
+
+function updateChatEraseNotice({ prunedCount = 0 } = {}) {
+  const notice = document.getElementById('chatEraseNotice');
+  if (!notice) return;
+
+  if (prunedCount > 0) {
+    const noun = prunedCount === 1 ? 'message was' : 'messages were';
+    notice.textContent = `${prunedCount} older ${noun} permanently erased. Only latest 10 remain.`;
+    notice.classList.add('recent');
+    if (notice._resetTimer) {
+      clearTimeout(notice._resetTimer);
+    }
+    notice._resetTimer = setTimeout(() => {
+      notice.textContent = 'Auto-erase active: only latest 10 messages are kept. Older messages are permanently deleted.';
+      notice.classList.remove('recent');
+    }, 4200);
+    return;
+  }
+
+  if (!notice.textContent.trim()) {
+    notice.textContent = 'Auto-erase active: only latest 10 messages are kept. Older messages are permanently deleted.';
+  }
+}
+
+function syncChatComposerState() {
+  const input = document.getElementById('chatInput');
+  const sendBtn = document.getElementById('chatSendBtn');
+  if (!input || !sendBtn) return;
+
+  const hasText = input.value.trim().length > 0;
+  sendBtn.disabled = !hasText;
+  sendBtn.setAttribute('aria-disabled', hasText ? 'false' : 'true');
+}
+
+function triggerTransientClass(element, className, duration = 220) {
+  if (!element || !className) return;
+  element.classList.remove(className);
+  void element.offsetWidth;
+  element.classList.add(className);
+  setTimeout(() => {
+    element.classList.remove(className);
+  }, Math.max(120, Number(duration) || 220));
+}
+
+function buildChatItem(msg) {
+  const li = document.createElement('li');
+  const isMine = msg.player === player.name;
+  const toneIndex = getChatToneIndex(msg.player);
+  li.className = `chat-row ${isMine ? 'mine' : 'theirs'}`;
+  li.setAttribute('role', 'listitem');
+
+  const bubble = document.createElement('article');
+  bubble.className = `chat-bubble${msg.isReaction ? ' reaction' : ''}`;
+  if (!isMine) {
+    bubble.classList.add(`chat-bubble-tone-${toneIndex}`);
+  }
+
+  if (!isMine) {
+    const sender = document.createElement('span');
+    sender.className = `chat-sender chat-sender-tone-${toneIndex}`;
+    sender.textContent = msg.player;
+    bubble.appendChild(sender);
+  }
+
+  const text = document.createElement('span');
+  text.className = 'chat-text';
+  text.textContent = msg.text;
+  bubble.appendChild(text);
+
+  li.appendChild(bubble);
+  return li;
+}
+
+function renderChatMessages({ forceBottom = false } = {}) {
+  const chatContainer = document.getElementById('chatMessages');
+  if (!chatContainer) return;
+
+  const shouldPinToBottom = forceBottom || isChatNearBottom(chatContainer);
+  chatContainer.innerHTML = '';
+
+  roomState.messages.forEach((msg) => {
+    chatContainer.appendChild(buildChatItem(msg));
+  });
+
+  if (shouldPinToBottom) {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
 }
 
 function setPreRoundProgress(percent = 0, fetchLabel = 'Preparing next phase…') {
@@ -670,6 +829,10 @@ socket.on('gameError', (msg) => {
 socket.on('roomData', (data) => {
   console.log('📍 Received roomData:', data);
   Object.assign(roomState, data);
+  roomState.messages = normalizeChatMessages(data.messages);
+  const prunedHistory = pruneChatMessages(roomState.messages);
+  roomState.messages = prunedHistory.messages;
+  updateChatEraseNotice({ prunedCount: prunedHistory.prunedCount });
   const isHost = data.host === player.name;
 
   document.getElementById('roomCode').textContent = player.room;
@@ -798,20 +961,7 @@ socket.on('roomData', (data) => {
     }
   }
 
-  const chatContainer = document.getElementById('chatMessages');
-  if (chatContainer) {
-    chatContainer.innerHTML = '';
-    data.messages.slice(-10).forEach(msg => {
-      const div = document.createElement('div');
-      div.className = 'chat-message';
-      const strong = document.createElement('strong');
-      strong.textContent = `${msg.player}:`;
-      div.appendChild(strong);
-      appendText(div, ` ${msg.text}`);
-      chatContainer.appendChild(div);
-    });
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-  }
+  renderChatMessages({ forceBottom: true });
 });
 
 socket.on('settingsUpdated', (settings) => {
@@ -840,11 +990,18 @@ function updateSetting(key, value) {
 
 function sendMessage() {
   const input = document.getElementById('chatInput');
+  if (!input) return;
+  const sendBtn = document.getElementById('chatSendBtn');
+  const composer = document.querySelector('.chat-input-modern');
   const message = input.value.trim();
   if (!message) return;
+
+  triggerTransientClass(sendBtn, 'send-burst', 260);
+  triggerTransientClass(composer, 'composer-sent', 260);
   playMessageSound();
   socket.emit('sendMessage', message);
   input.value = '';
+  syncChatComposerState();
   input.focus();
 }
 
@@ -854,29 +1011,19 @@ function sendReaction(emoji) {
 }
 
 socket.on('newMessage', (msg) => {
-  const chatContainer = document.getElementById('chatMessages');
-  if (!chatContainer) return;
+  const cleanMessage = normalizeChatMessages([msg])[0];
+  if (!cleanMessage) return;
 
-  const div = document.createElement('div');
-  div.className = msg.isReaction ? 'chat-reaction' : 'chat-message';
-  if (msg.isReaction) {
-    const em = document.createElement('em');
-    em.textContent = msg.player;
-    div.appendChild(em);
-    appendText(div, ` ${msg.text}`);
-  } else {
-    const strong = document.createElement('strong');
-    strong.textContent = `${msg.player}:`;
-    div.appendChild(strong);
-    appendText(div, ` ${msg.text}`);
+  const serverPrunedCount = Math.max(0, Number(msg.prunedCount) || 0);
+  if (serverPrunedCount > 0 && roomState.messages.length > 0) {
+    roomState.messages.splice(0, Math.min(serverPrunedCount, roomState.messages.length));
   }
-  chatContainer.appendChild(div);
+  updateChatEraseNotice({ prunedCount: serverPrunedCount });
 
-  while (chatContainer.children.length > 10) {
-    chatContainer.firstChild.remove();
-  }
-
-  chatContainer.scrollTop = chatContainer.scrollHeight;
+  roomState.messages.push(cleanMessage);
+  const localPruned = pruneChatMessages(roomState.messages);
+  roomState.messages = localPruned.messages;
+  renderChatMessages();
 
   if (msg.player !== player.name) {
     playMessageSound();
@@ -893,6 +1040,8 @@ function sendStartGame() {
 socket.on('gameStarting', (data) => {
   gameState.totalRounds = data.totalRounds;
   gameState.myTeam = [];
+  gameState.draftEntryCount = 0;
+  gameState.draftLocked = false;
   gameState.myFinalTeam = [];
   gameState.voted = false;
   gameState.voteLocked = false;
@@ -905,6 +1054,8 @@ socket.on('gameStarting', (data) => {
 socket.on('roundStart', (data) => {
   gameState.currentRound = data.roundNumber;
   gameState.myTeam = [];
+  gameState.draftEntryCount = 0;
+  gameState.draftLocked = false;
   gameState.allDrafts = {};
   gameState.voted = false;
   gameState.draftWarnings = {};
@@ -948,11 +1099,21 @@ socket.on('scenarioRevealed', (data) => {
   clearTimers();
   gameState.currentScenario = data.scenario;
   gameState.myTeam = [];
+  gameState.draftEntryCount = 0;
+  gameState.draftLocked = false;
   gameState.voteLocked = false;
   gameState.currentVoteChoice = null;
+  syncDraftEntryComposerVisibility();
 
   document.getElementById('currentRound').textContent = gameState.currentRound;
   document.getElementById('scenarioText').textContent = `BUILD A TEAM TO: ${data.scenario}`;
+  const wordApiIndicator = document.getElementById('wordApiIndicator');
+  if (wordApiIndicator) {
+    const sourceLabel = typeof data.wordApiSource === 'string' && data.wordApiSource.trim()
+      ? data.wordApiSource.trim()
+      : 'Fallback Word Pool';
+    wordApiIndicator.textContent = `Auto-fill source: ${sourceLabel}`;
+  }
 
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) myTeamList.innerHTML = '';
@@ -983,13 +1144,7 @@ socket.on('scenarioRevealed', (data) => {
     charInput.parentElement.insertBefore(warningEl, charInput.nextSibling);
   }
 
-  const lockBtn = document.getElementById('lockDraftBtn');
-  if (lockBtn) {
-    lockBtn.style.display = 'inline-block';
-    lockBtn.disabled = true;
-    lockBtn.textContent = '🔓 LOCK IN MY TEAM (need 2)';
-    lockBtn.className = 'btn btn-success';
-  }
+  syncDraftActionControls();
 
   if (document.getElementById('draftCounter')) {
     document.getElementById('draftCounter').textContent = '(0/2)';
@@ -1030,6 +1185,29 @@ document.addEventListener('DOMContentLoaded', () => {
     charInput.addEventListener('keypress', handleDraftInput);
     charInput.addEventListener('input', handleDraftChange);
   }
+
+  const chatInput = document.getElementById('chatInput');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      sendMessage();
+    });
+
+    chatInput.addEventListener('input', () => {
+      syncChatComposerState();
+    });
+
+    syncChatComposerState();
+  }
+
+  document.querySelectorAll('.reaction-btn-modern').forEach((button) => {
+    button.addEventListener('click', () => {
+      triggerTransientClass(button, 'reaction-pop', 240);
+      const composer = document.querySelector('.chat-composer-modern');
+      triggerTransientClass(composer, 'composer-react', 240);
+    });
+  });
 });
 
 function handleDraftChange(e) {
@@ -1058,8 +1236,150 @@ function handleDraftInput(e) {
   }
 }
 
+function syncDraftEntryComposerVisibility() {
+  const draftInputSticky = document.querySelector('.draft-input-sticky');
+  const scenarioScreen = document.getElementById('scenarioScreen');
+  if (!draftInputSticky || !scenarioScreen) return;
+
+  const shouldHideComposer = gameState.draftEntryCount >= 2;
+  draftInputSticky.classList.toggle('is-hidden', shouldHideComposer);
+  scenarioScreen.classList.toggle('draft-input-hidden', shouldHideComposer);
+  draftInputSticky.setAttribute('aria-hidden', shouldHideComposer ? 'true' : 'false');
+}
+
+function stopDraftWaitTicker() {
+  if (!draftLockVisualState.waitTicker) return;
+  clearInterval(draftLockVisualState.waitTicker);
+  draftLockVisualState.waitTicker = null;
+}
+
+function stopDraftUrgencyTicker() {
+  if (!draftLockVisualState.urgencyTicker) return;
+  clearInterval(draftLockVisualState.urgencyTicker);
+  draftLockVisualState.urgencyTicker = null;
+}
+
+function ensureDraftUrgencyTicker() {
+  if (draftLockVisualState.urgencyTicker) return;
+  draftLockVisualState.urgencyTicker = setInterval(() => {
+    if (gameState.draftLocked || gameState.draftEntryCount < 2) {
+      stopDraftUrgencyTicker();
+      return;
+    }
+    syncDraftActionControls();
+  }, 1000);
+  addTimer(draftLockVisualState.urgencyTicker);
+}
+
+function setDraftWaitVisual(isLocked) {
+  const waitVisual = document.getElementById('draftWaitVisual');
+  const livePicksSection = document.querySelector('.live-picks-section');
+  const myTeamList = document.getElementById('myTeam');
+  if (!waitVisual) return;
+
+  if (!isLocked) {
+    waitVisual.style.display = 'none';
+    waitVisual.classList.remove('waiting-active');
+    waitVisual.textContent = '';
+    if (livePicksSection) livePicksSection.classList.remove('draft-live-erased');
+    if (myTeamList) myTeamList.classList.remove('draft-team-locked');
+    stopDraftWaitTicker();
+    draftLockVisualState.waitDotIndex = 0;
+    return;
+  }
+
+  if (livePicksSection) livePicksSection.classList.add('draft-live-erased');
+  if (myTeamList) myTeamList.classList.add('draft-team-locked');
+  waitVisual.style.display = 'block';
+  waitVisual.classList.add('waiting-active');
+
+  const emojiCycle = ['⏳', '⚡', '🌀', '🔥'];
+  const renderWaitingText = () => {
+    const dotCount = (draftLockVisualState.waitDotIndex % 3) + 1;
+    const dots = '.'.repeat(dotCount);
+    const emoji = emojiCycle[draftLockVisualState.waitEmojiIndex % emojiCycle.length];
+    waitVisual.textContent = `${emoji} WAITING FOR SLOWER PLAYERS${dots}`;
+    draftLockVisualState.waitDotIndex += 1;
+    draftLockVisualState.waitEmojiIndex += 1;
+  };
+
+  renderWaitingText();
+  if (draftLockVisualState.waitTicker) return;
+
+  draftLockVisualState.waitTicker = setInterval(renderWaitingText, 760);
+  addTimer(draftLockVisualState.waitTicker);
+}
+
+function syncDraftActionControls() {
+  const lockBtn = document.getElementById('lockDraftBtn');
+  const charInput = document.getElementById('charInput');
+  const submitBtn = document.querySelector('.btn-submit-draft');
+  const isLocked = gameState.draftLocked === true;
+  const isReadyToLock = !isLocked && gameState.draftEntryCount >= 2;
+
+  if (lockBtn) {
+    lockBtn.classList.remove('pulsing-glow', 'draft-lock-ready', 'draft-lock-shake');
+
+    if (isLocked) {
+      lockBtn.disabled = true;
+      lockBtn.textContent = '✅ TEAM LOCKED!';
+      lockBtn.style.display = 'block';
+      lockBtn.className = 'btn btn-success btn-lock-draft';
+      lockBtn.setAttribute('aria-pressed', 'true');
+    } else if (gameState.draftEntryCount >= 2) {
+      lockBtn.disabled = false;
+      lockBtn.textContent = '🔒 LOCK TEAM';
+      lockBtn.style.display = 'block';
+      lockBtn.className = 'btn btn-success btn-lock-draft';
+      lockBtn.setAttribute('aria-pressed', 'false');
+    } else {
+      lockBtn.disabled = true;
+      lockBtn.textContent = `🔓 LOCK TEAM (${gameState.draftEntryCount}/2)`;
+      lockBtn.style.display = gameState.draftEntryCount > 0 ? 'block' : 'none';
+      lockBtn.className = 'btn btn-success btn-lock-draft';
+      lockBtn.setAttribute('aria-pressed', 'false');
+    }
+
+    if (isReadyToLock) {
+      if (!draftLockVisualState.availableSince) {
+        draftLockVisualState.availableSince = Date.now();
+      }
+
+      ensureDraftUrgencyTicker();
+
+      const readyDurationMs = Date.now() - draftLockVisualState.availableSince;
+      lockBtn.classList.add('pulsing-glow', 'draft-lock-ready');
+      if (readyDurationMs >= 9000) {
+        lockBtn.classList.add('draft-lock-shake');
+      }
+    } else {
+      draftLockVisualState.availableSince = 0;
+      stopDraftUrgencyTicker();
+    }
+  }
+
+  if (charInput) {
+    charInput.disabled = isLocked;
+    if (isLocked) {
+      charInput.blur();
+    }
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = isLocked;
+    submitBtn.setAttribute('aria-pressed', isLocked ? 'true' : 'false');
+  }
+
+  setDraftWaitVisual(isLocked);
+}
+
 function submitDraft(char) {
-  if (gameState.myTeam.length >= 2) {
+  if (gameState.draftLocked) {
+    showToast('🔒 Your team is already locked in!', 'info');
+    return;
+  }
+
+  if (gameState.draftEntryCount >= 2) {
     showToast('⚠️ You can draft max 2 characters!', 'warning');
     return;
   }
@@ -1097,19 +1417,18 @@ function submitDraft(char) {
 }
 
 function lockDraft() {
-  if (gameState.myTeam.length < 2) {
+  if (gameState.draftLocked) return;
+
+  if (gameState.draftEntryCount < 2) {
     playErrorSound();
     showToast('⚠️ You must have 2 characters to lock in!', 'warning');
     return;
   }
   playDraftSound();
   socket.emit('lockDraft');
-  const lockBtn = document.getElementById('lockDraftBtn');
-  if (lockBtn) {
-    lockBtn.disabled = true;
-    lockBtn.textContent = '✅ TEAM LOCKED!';
-    showToast('🔒 Your team is locked in!', 'info');
-  }
+  gameState.draftLocked = true;
+  syncDraftActionControls();
+  showToast('🔒 Your team is locked in!', 'info');
 }
 
 socket.on('draftError', (message) => {
@@ -1123,7 +1442,7 @@ socket.on('draftUpdate', (data) => {
   if (!picksList) return;
   picksList.innerHTML = '';
 
-  data.allDrafts.forEach((pick, idx) => {
+  [...data.allDrafts].reverse().forEach((pick, idx) => {
     const li = document.createElement('li');
     const autoFillBadge = pick.autoFilled ? ' 🔄 (auto-filled)' : '';
     li.textContent = `${pick.name} → ${pick.character}${autoFillBadge}`;
@@ -1133,7 +1452,7 @@ socket.on('draftUpdate', (data) => {
     picksList.appendChild(li);
   });
 
-  picksList.scrollTop = picksList.scrollHeight;
+  picksList.scrollTop = 0;
 
   updateLivePicksCount(data.allDrafts.length);
 
@@ -1143,6 +1462,12 @@ socket.on('draftUpdate', (data) => {
   gameState.myTeam = data.allDrafts
     .filter(p => p.name === player.name)
     .map(p => p.character);
+
+  const reportedEntryCount = Number(data.playerEntryCounts && data.playerEntryCounts[player.name]);
+  gameState.draftEntryCount = Number.isFinite(reportedEntryCount)
+    ? reportedEntryCount
+    : gameState.myTeam.length;
+  syncDraftEntryComposerVisibility();
 
   data.allDrafts
     .filter(p => p.name === player.name)
@@ -1156,19 +1481,7 @@ socket.on('draftUpdate', (data) => {
     });
 
   updateDraftCounter();
-
-  const lockBtn = document.getElementById('lockDraftBtn');
-  if (lockBtn) {
-    if (gameState.myTeam.length >= 2) {
-      lockBtn.disabled = false;
-      lockBtn.textContent = '🔒 LOCK TEAM';
-      lockBtn.style.display = 'block';
-    } else {
-      lockBtn.disabled = true;
-      lockBtn.textContent = `🔓 LOCK TEAM (${gameState.myTeam.length}/2)`;
-      lockBtn.style.display = gameState.myTeam.length > 0 ? 'block' : 'none';
-    }
-  }
+  syncDraftActionControls();
 });
 
 socket.on('draftSuccess', (data) => {
@@ -1177,6 +1490,10 @@ socket.on('draftSuccess', (data) => {
 
 socket.on('playerLocked', (data) => {
   if (data.phase === 'DRAFT') {
+    if (data.playerName === player.name) {
+      gameState.draftLocked = true;
+      syncDraftActionControls();
+    }
     showToast(`🔒 ${data.playerName} locked in!`, 'info', 2000);
   }
 });
@@ -1207,10 +1524,10 @@ socket.on('votingPhaseStart', (data) => {
 
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
-  const scoringModeDisplay = document.getElementById('votingScoringMode');
-  if (scenarioDisplay) scenarioDisplay.textContent = data.scenario;
-  if (twistDisplay) twistDisplay.textContent = data.twist || 'No twist this round';
-  if (scoringModeDisplay) scoringModeDisplay.textContent = 'Community Votes + Contextual Intel Fit';
+  const safeScenario = data.scenario || 'No scenario available';
+  const safeTwist = data.twist || 'No twist this round';
+  if (scenarioDisplay) scenarioDisplay.textContent = safeScenario;
+  if (twistDisplay) twistDisplay.textContent = safeTwist;
 
   const grid = document.getElementById('votingTeams');
   if (grid) grid.innerHTML = '';
@@ -2300,8 +2617,6 @@ window.closeHelp = closeHelp;
 window.switchLobbyTab = switchLobbyTab;
 window.toggleAccordion = toggleAccordion;
 window.toggleScenario = toggleScenario;
-window.toggleVotingContext = toggleVotingContext;
-window.toggleLivePicks = toggleLivePicks;
 window.toggleResultsDetails = toggleResultsDetails;
 window.toggleReady = toggleReady;
 window.updateSetting = updateSetting;

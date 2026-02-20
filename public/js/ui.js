@@ -1,8 +1,6 @@
 import { gameState } from './state.js';
 
 let scenarioCollapsed = false;
-let votingContextCollapsed = false;
-let livePicksOpen = false;
 let resultsDetailsOpen = false;
 
 export function showScreen(screenId) {
@@ -124,7 +122,7 @@ export function updateAutoFillWarning() {
 export function updateDraftCounter() {
   const counter = document.getElementById('draftCounter');
   if (counter) {
-    const count = gameState.myTeam.length;
+    const count = Number(gameState.draftEntryCount) || 0;
     counter.textContent = `(${count}/2)`;
     if (count >= 2) {
       counter.classList.add('full');
@@ -177,40 +175,6 @@ export function toggleScenario() {
   } else {
     scenarioBox.classList.remove('collapsed');
     icon.textContent = '▼';
-  }
-}
-
-export function toggleVotingContext() {
-  const context = document.getElementById('votingContext');
-  const icon = document.getElementById('votingContextIcon');
-
-  if (!context || !icon) return;
-
-  votingContextCollapsed = !votingContextCollapsed;
-
-  if (votingContextCollapsed) {
-    context.classList.add('collapsed');
-    icon.textContent = '▲';
-  } else {
-    context.classList.remove('collapsed');
-    icon.textContent = '▼';
-  }
-}
-
-export function toggleLivePicks() {
-  const drawer = document.getElementById('livePicksDrawer');
-  const icon = document.getElementById('livePicksIcon');
-
-  if (!drawer || !icon) return;
-
-  livePicksOpen = !livePicksOpen;
-
-  if (livePicksOpen) {
-    drawer.classList.add('open');
-    icon.textContent = '▼';
-  } else {
-    drawer.classList.remove('open');
-    icon.textContent = '▲';
   }
 }
 

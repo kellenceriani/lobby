@@ -404,6 +404,7 @@ kbd {
 
 .audio-settings-row {
   margin-top: var(--spacing-md);
+  margin-bottom: calc(var(--bottom-action-height) + var(--spacing-xl) + env(safe-area-inset-bottom));
   display: flex;
   justify-content: center;
 }

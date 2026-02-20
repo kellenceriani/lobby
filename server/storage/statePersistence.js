@@ -56,7 +56,7 @@ function serializeRooms(rooms) {
       isGameActive: !!room.isGameActive,
       host: room.host || null,
       settings: room.settings || {},
-      messages: Array.isArray(room.messages) ? room.messages.slice(-50) : [],
+      messages: Array.isArray(room.messages) ? room.messages.slice(-10) : [],
       gameState: sanitizeForSnapshot(room.gameState)
     };
   });
@@ -79,7 +79,7 @@ function hydrateRooms(serialized) {
         maxPlayers: 6,
         customScenario: ''
       },
-      messages: Array.isArray(room.messages) ? room.messages.slice(-50) : [],
+      messages: Array.isArray(room.messages) ? room.messages.slice(-10) : [],
       reactions: {}
     };
   });

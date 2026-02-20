@@ -23,6 +23,23 @@ const {
 } = require('./inputValidation');
 
 const allowRequest = createRateLimiter();
+const CHAT_MAX_MESSAGES = 10;
+const CHAT_PRUNE_BATCH = 1;
+
+function appendChatMessage(roomData, message) {
+  if (!roomData || !Array.isArray(roomData.messages)) {
+    return { prunedCount: 0 };
+  }
+
+  roomData.messages.push(message);
+  if (roomData.messages.length <= CHAT_MAX_MESSAGES) {
+    return { prunedCount: 0 };
+  }
+
+  const removeCount = Math.min(CHAT_PRUNE_BATCH, roomData.messages.length);
+  roomData.messages.splice(0, removeCount);
+  return { prunedCount: removeCount };
+}
 
 function getRoomData(roomCode) {
   if (!roomCode) return null;
@@ -48,6 +65,25 @@ function getJoinedRoom(socket) {
   if (!roomData) return null;
 
   return { room, name, roomData };
+}
+
+function shouldDropBurstChat(socket, type, value) {
+  const now = Date.now();
+  const key = type === 'reaction' ? 'reaction' : 'message';
+  const metaKey = `chatMeta_${key}`;
+  const meta = socket.data[metaKey] || { lastText: '', lastAt: 0 };
+
+  const text = String(value || '');
+  const delta = now - (Number(meta.lastAt) || 0);
+  const isRapidBurst = delta < 220;
+  const isDuplicateFlood = meta.lastText === text && delta < 1400;
+
+  socket.data[metaKey] = {
+    lastText: text,
+    lastAt: now
+  };
+
+  return isRapidBurst || isDuplicateFlood;
 }
 
 function getEligibleFinalPlayers(roomData, game) {
@@ -236,12 +272,12 @@ function registerSocketHandlers(io) {
       const { room, name, roomData } = joined;
       const message = sanitizeMessage(rawMessage, 240);
       if (!message) return;
+      if (shouldDropBurstChat(socket, 'message', message)) return;
 
       const msg = { player: name, text: message, timestamp: Date.now() };
-      roomData.messages.push(msg);
-      if (roomData.messages.length > 50) roomData.messages.shift();
+      const { prunedCount } = appendChatMessage(roomData, msg);
 
-      io.to(room).emit('newMessage', msg);
+      io.to(room).emit('newMessage', { ...msg, prunedCount });
       markRoomsDirty();
     });
 
@@ -256,12 +292,12 @@ function registerSocketHandlers(io) {
       const { room, name, roomData } = joined;
       const reaction = sanitizeReaction(rawReaction);
       if (!reaction) return;
+      if (shouldDropBurstChat(socket, 'reaction', reaction)) return;
 
       const msg = { player: name, text: reaction, timestamp: Date.now(), isReaction: true };
-      roomData.messages.push(msg);
-      if (roomData.messages.length > 50) roomData.messages.shift();
+      const { prunedCount } = appendChatMessage(roomData, msg);
 
-      io.to(room).emit('newMessage', msg);
+      io.to(room).emit('newMessage', { ...msg, prunedCount });
       markRoomsDirty();
     });
 
@@ -312,6 +348,12 @@ function registerSocketHandlers(io) {
         return;
       }
 
+      const existingEntries = Array.isArray(game.draftEntries[name]) ? game.draftEntries[name] : [];
+      if (existingEntries.length >= 2) {
+        socket.emit('draftError', 'You can draft max 2 characters!');
+        return;
+      }
+
       const character = sanitizeDraftCharacter(rawCharacter);
       if (!character) return;
 
@@ -357,6 +399,8 @@ function registerSocketHandlers(io) {
         autoFilled
       });
 
+      const playerEntryCount = game.draftEntries[name].length;
+
       const allDraftsList = [];
       game.players.forEach(p => {
         p.team.forEach((char, idx) => {
@@ -370,7 +414,7 @@ function registerSocketHandlers(io) {
 
       socket.emit('draftSuccess', {
         character: finalCharacter,
-        teamSize: player.team.length,
+        teamSize: playerEntryCount,
         autoFilled
       });
 
@@ -378,6 +422,10 @@ function registerSocketHandlers(io) {
         player: name,
         character: finalCharacter,
         allDrafts: allDraftsList,
+        playerEntryCounts: game.players.reduce((acc, p) => {
+          acc[p.name] = Array.isArray(game.draftEntries[p.name]) ? game.draftEntries[p.name].length : 0;
+          return acc;
+        }, {}),
         playerTeamSizes: game.players.reduce((acc, p) => {
           acc[p.name] = p.team.length;
           return acc;
@@ -398,7 +446,9 @@ function registerSocketHandlers(io) {
       const player = game.players.find(p => p.name === name);
       if (!player) return;
 
-      if (player.team.length < 2) {
+      const playerEntryCount = Array.isArray(game.draftEntries[name]) ? game.draftEntries[name].length : 0;
+
+      if (playerEntryCount < 2) {
         socket.emit('draftError', 'You must have 2 characters to lock in!');
         return;
       }

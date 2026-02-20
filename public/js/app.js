@@ -24,7 +24,10 @@ import {
   toggleResultsDetails
 } from './ui.js';
 
-const socket = io();
+const socket = io(window.location.origin, {
+  path: '/socket.io',
+  transports: ['websocket', 'polling']
+});
 window.socket = socket; // Expose to window for round4Eval.js
 
 const mobileChromeState = {
@@ -35,11 +38,70 @@ const mobileChromeState = {
 
 const installPromptState = {
   deferredPrompt: null,
-  initialized: false
+  initialized: false,
+  sessionDismissed: false,
+  fallbackTimerId: null
 };
 
 const INSTALL_PROMPT_DISMISS_KEY = 'lobbywars_install_prompt_dismiss_until_v1';
 const INSTALL_PROMPT_DISMISS_MS = 1000 * 60 * 60 * 24 * 7;
+const CONNECTION_DEBUG_KEY = 'lobbywars_connection_debug_v1';
+
+const connectionDebugState = {
+  enabled: false,
+  lastSignature: '',
+  lastShownAt: 0
+};
+
+function resolveConnectionDebugEnabled() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    if (params.get('debugConnection') === '1') {
+      window.localStorage.setItem(CONNECTION_DEBUG_KEY, '1');
+      return true;
+    }
+    if (params.get('debugConnection') === '0') {
+      window.localStorage.removeItem(CONNECTION_DEBUG_KEY);
+      return false;
+    }
+    return window.localStorage.getItem(CONNECTION_DEBUG_KEY) === '1';
+  } catch (error) {
+    return false;
+  }
+}
+
+function getSocketTransportName() {
+  return socket && socket.io && socket.io.engine && socket.io.engine.transport
+    ? socket.io.engine.transport.name
+    : 'n/a';
+}
+
+function showConnectionDebugToast(status, detail = '') {
+  if (!connectionDebugState.enabled) return;
+
+  const now = Date.now();
+  const origin = window.location.origin;
+  const transport = getSocketTransportName();
+  const socketId = socket && socket.id ? socket.id.slice(0, 8) : 'none';
+  const signature = `${status}|${detail}|${transport}|${socketId}`;
+
+  if (connectionDebugState.lastSignature === signature && (now - connectionDebugState.lastShownAt) < 2000) {
+    return;
+  }
+
+  connectionDebugState.lastSignature = signature;
+  connectionDebugState.lastShownAt = now;
+
+  const roomTag = player && player.room ? ` room=${player.room}` : '';
+  const suffix = detail ? ` • ${detail}` : '';
+  const message = `ConnDebug: ${status}${suffix} • origin=${origin} • transport=${transport} • id=${socketId}${roomTag}`;
+  showToast(message, status === 'error' ? 'warning' : 'info', 7000);
+}
+
+connectionDebugState.enabled = resolveConnectionDebugEnabled();
+if (connectionDebugState.enabled) {
+  showConnectionDebugToast('init', 'debugConnection=1 active');
+}
 
 function isLikelyMobileDevice() {
   const ua = navigator.userAgent || '';
@@ -152,7 +214,10 @@ function isStandaloneDisplayMode() {
 }
 
 function isIOS() {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+  const ua = navigator.userAgent || '';
+  const classicIOS = /iphone|ipad|ipod/i.test(ua);
+  const iPadDesktopMode = /macintosh/i.test(ua) && navigator.maxTouchPoints > 1;
+  return classicIOS || iPadDesktopMode;
 }
 
 function canShowInstallPromptNow() {
@@ -179,6 +244,12 @@ function hideInstallPrompt() {
 }
 
 function showInstallPrompt({ copy, actionLabel, onAction }) {
+  if (installPromptState.sessionDismissed) return;
+  if (isStandaloneDisplayMode()) {
+    hideInstallPrompt();
+    return;
+  }
+
   const root = document.getElementById('installPrompt');
   const copyEl = document.getElementById('installPromptCopy');
   const actionBtn = document.getElementById('installPromptAction');
@@ -190,6 +261,7 @@ function showInstallPrompt({ copy, actionLabel, onAction }) {
   actionBtn.textContent = actionLabel;
   actionBtn.onclick = onAction;
   dismissBtn.onclick = () => {
+    installPromptState.sessionDismissed = true;
     hideInstallPrompt();
     rememberInstallPromptDismissal();
   };
@@ -207,12 +279,26 @@ function installFullscreenPromptFlow() {
   }
 
   if (!canShowInstallPromptNow()) {
+    installPromptState.sessionDismissed = true;
     hideInstallPrompt();
     return;
   }
 
+  const standaloneModeQuery = window.matchMedia ? window.matchMedia('(display-mode: standalone)') : null;
+  if (standaloneModeQuery && typeof standaloneModeQuery.addEventListener === 'function') {
+    standaloneModeQuery.addEventListener('change', (event) => {
+      if (event.matches) {
+        hideInstallPrompt();
+      }
+    });
+  }
+
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
+    if (installPromptState.fallbackTimerId) {
+      clearTimeout(installPromptState.fallbackTimerId);
+      installPromptState.fallbackTimerId = null;
+    }
     installPromptState.deferredPrompt = event;
 
     showInstallPrompt({
@@ -224,7 +310,10 @@ function installFullscreenPromptFlow() {
 
         deferred.prompt();
         try {
-          await deferred.userChoice;
+          const choice = await deferred.userChoice;
+          if (choice && choice.outcome === 'accepted') {
+            installPromptState.sessionDismissed = true;
+          }
         } catch (error) {
           // no-op
         }
@@ -237,6 +326,8 @@ function installFullscreenPromptFlow() {
 
   window.addEventListener('appinstalled', () => {
     installPromptState.deferredPrompt = null;
+    installPromptState.sessionDismissed = true;
+    rememberInstallPromptDismissal();
     hideInstallPrompt();
     showToast('Installed! Open LobbyWARS from your home screen for true fullscreen mode.', 'info', 5000);
   });
@@ -247,9 +338,30 @@ function installFullscreenPromptFlow() {
       actionLabel: 'How',
       onAction: () => {
         showToast('iOS: Tap Share, then Add to Home Screen. Launch from the home-screen icon.', 'info', 6500);
+        installPromptState.sessionDismissed = true;
+        rememberInstallPromptDismissal();
+        hideInstallPrompt();
       }
     });
+    return;
   }
+
+  installPromptState.fallbackTimerId = setTimeout(() => {
+    if (installPromptState.deferredPrompt) return;
+    if (installPromptState.sessionDismissed) return;
+    if (isStandaloneDisplayMode()) return;
+
+    showInstallPrompt({
+      copy: 'Install from your browser menu for true fullscreen mode and hidden browser bars.',
+      actionLabel: 'How',
+      onAction: () => {
+        showToast('Use your browser menu and choose Install App or Add to Home Screen.', 'info', 6500);
+        installPromptState.sessionDismissed = true;
+        rememberInstallPromptDismissal();
+        hideInstallPrompt();
+      }
+    });
+  }, 2200);
 }
 
 installFullscreenPromptFlow();
@@ -1043,6 +1155,16 @@ function leaveRoom() {
 
 socket.on('connect', () => {
   console.log('✓ Socket connected:', socket.id);
+  showConnectionDebugToast('connected');
+});
+
+socket.on('disconnect', (reason) => {
+  showConnectionDebugToast('disconnected', String(reason || 'unknown'));
+});
+
+socket.on('connect_error', (error) => {
+  const detail = error && error.message ? error.message : 'connect_error';
+  showConnectionDebugToast('error', detail);
 });
 
 socket.on('joinError', (msg) => {

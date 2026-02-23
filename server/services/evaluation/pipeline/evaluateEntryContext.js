@@ -2208,8 +2208,12 @@ function buildContextPublicResult({
       status: engineTrace.status,
       engine: 'rules-context-v1',
       confidence: confidence.overall,
+      confidenceBreakdown: confidence,
       matchedTraits: engineTrace.matchedTraits,
-      riskFlags: engineTrace.riskFlags
+      matchedIntents: engineTrace.matchedIntents,
+      domainMatches: engineTrace.domainMatches,
+      riskFlags: engineTrace.riskFlags,
+      parsedContext
     }),
     contextHeuristic: subscores && subscores._contextHeuristic ? { ...subscores._contextHeuristic } : null,
     contextOriginalHeuristic: subscores && subscores._originalContextHeuristic ? { ...subscores._originalContextHeuristic } : null,

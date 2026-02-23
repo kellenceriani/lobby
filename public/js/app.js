@@ -1611,7 +1611,10 @@ socket.on('scenarioRevealed', (data) => {
     const sourceLabel = typeof data.wordApiSource === 'string' && data.wordApiSource.trim()
       ? data.wordApiSource.trim()
       : 'Fallback Word Pool';
-    wordApiIndicator.textContent = `Auto-fill source: ${sourceLabel}`;
+    const sourceIndex = Number.isFinite(Number(data.wordApiSourceIndex)) ? Number(data.wordApiSourceIndex) : null;
+    const sourceTotal = Number.isFinite(Number(data.wordApiSourceTotal)) ? Number(data.wordApiSourceTotal) : null;
+    const sourceSuffix = sourceIndex && sourceTotal ? ` (API ${sourceIndex}/${sourceTotal})` : '';
+    wordApiIndicator.textContent = `Auto-fill source: ${sourceLabel}${sourceSuffix}`;
   }
 
   const myTeamList = document.getElementById('myTeam');
@@ -2483,35 +2486,56 @@ function buildRoundIntelDiagnosticsMarkup(roundIntelDiagnostics = {}, roundIntel
     const evaluationCount = Number(safeDiag.evaluationCount) || 0;
     const engineModes = Array.isArray(safeDiag.engineModes) ? safeDiag.engineModes : [];
     const contextStatuses = Array.isArray(safeDiag.contextStatuses) ? safeDiag.contextStatuses : [];
+    const contextStatusLabels = Array.isArray(safeDiag.contextStatusLabels) ? safeDiag.contextStatusLabels : [];
     const shadowStatuses = Array.isArray(safeDiag.shadowStatuses) ? safeDiag.shadowStatuses : [];
-    const statusText = contextStatuses[0] || shadowStatuses[0] || 'n/a';
+    const statusText = contextStatusLabels[0] || contextStatuses[0] || shadowStatuses[0] || 'n/a';
     const modeBadge = getEvalModeBadgeLabel(engineModes[0]);
+    const avgResolver = Number.isFinite(Number(safeDiag.avgResolverConfidence)) ? Math.round(Number(safeDiag.avgResolverConfidence) * 100) : null;
+    const avgContext = Number.isFinite(Number(safeDiag.avgContextConfidence)) ? Math.round(Number(safeDiag.avgContextConfidence) * 100) : null;
+    const topRiskFlags = Array.isArray(safeDiag.topRiskFlags) ? safeDiag.topRiskFlags : [];
+    const topRiskText = topRiskFlags.length
+      ? topRiskFlags.slice(0, 2).map((row) => `${row.flag}x${row.count}`).join(', ')
+      : 'none';
 
     return `
-      <div class="results-intel-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(0,0,0,0.16);margin-top:8px;">
-        <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
-          <strong style="font-size:0.95rem;">${escapeHtml(playerName)}</strong>
-          <small style="opacity:0.82;">Engine ${escapeHtml(modeBadge)} · status ${escapeHtml(statusText)} · trusted ${trustedCount}/${evaluationCount}</small>
+      <details class="results-intel-row">
+        <summary class="results-intel-row-summary" aria-label="Toggle evaluator summary for ${escapeHtml(playerName)}">
+          <div class="results-intel-row-left">
+            <strong>${escapeHtml(playerName)}</strong>
+            <small>Engine ${escapeHtml(modeBadge)} | ${escapeHtml(statusText)}</small>
+          </div>
+          <div class="results-intel-row-right">
+            <span class="results-intel-badge">${escapeHtml(modeBadge)}</span>
+            <span class="results-intel-confidence">${avgConfidence}%</span>
+          </div>
+        </summary>
+        <div class="results-intel-row-body">
+          <div class="results-intel-mini-grid" aria-label="Evaluator trace details">
+            <span><b>Trusted</b> ${trustedCount}/${evaluationCount}</span>
+            <span><b>Resolve</b> ${avgResolver == null ? 'n/a' : `${avgResolver}%`}</span>
+            <span><b>Context</b> ${avgContext == null ? 'n/a' : `${avgContext}%`}</span>
+            <span><b>Risks</b> ${escapeHtml(topRiskText)}</span>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-          <span style="font-size:0.72rem;padding:4px 8px;border-radius:999px;background:rgba(0,188,212,0.18);border:1px solid rgba(0,188,212,0.35);letter-spacing:0.04em;">${escapeHtml(modeBadge)}</span>
-          <span style="font-weight:700;">${avgConfidence}%</span>
-        </div>
-      </div>
+      </details>
     `;
   }).join('');
 
   return `
-    <div class="results-intel-panel" style="margin-top:12px;padding:12px;border-radius:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <strong style="font-size:0.95rem;">Evaluator Trace</strong>
-        <small style="opacity:0.8;">Per-player engine + trust summary</small>
+    <details class="results-intel-panel">
+      <summary class="results-intel-panel-summary" aria-label="Toggle evaluator trace panel">
+        <div class="results-intel-panel-title-wrap">
+          <strong>Evaluator Trace</strong>
+          <small>Per-player engine + trust summary</small>
+        </div>
+        <span class="results-intel-panel-count">${rows.length}</span>
+      </summary>
+      <div class="results-intel-panel-body">
+        ${markup}
       </div>
-      ${markup}
-    </div>
+    </details>
   `;
 }
-
 function polarToCartesian(cx, cy, radius, angleDeg) {
   const angleRad = (angleDeg - 90) * (Math.PI / 180);
   return {
@@ -2824,27 +2848,46 @@ socket.on('gameEnded', (data) => {
   clearTimers();
   playWinSound();
   setTimeout(() => createConfetti(), 300);
+  const finalStandings = Array.isArray(data && data.finalLeaderboard) ? data.finalLeaderboard : [];
 
   const placeholderImage = buildMissingWinnerImage();
   const winnerGallery = document.getElementById('finalWinnerCharacters');
+  const finalContainerRoot = document.querySelector('.final-container-modern');
+  if (winnerGallery && finalContainerRoot) {
+    const dockedFinalList = winnerGallery.querySelector('#finalLeaderboard');
+    const dockedFinalActions = winnerGallery.querySelector('.final-actions-modern');
+    if (dockedFinalList) finalContainerRoot.appendChild(dockedFinalList);
+    if (dockedFinalActions) finalContainerRoot.appendChild(dockedFinalActions);
+  }
   if (winnerGallery) {
-    const winnerCharacters = Array.isArray(data.winnerCharacters) ? data.winnerCharacters : [];
-    if (winnerCharacters.length) {
+    const legacyWinnerCharacters = Array.isArray(data.winnerCharacters) ? data.winnerCharacters : [];
+    const championCharacters = Array.isArray(data.winnerTeamCharacters) && data.winnerTeamCharacters.length
+      ? data.winnerTeamCharacters
+      : legacyWinnerCharacters;
+    const eliteShowcaseCharacters = Array.isArray(data.eliteFinalSix) && data.eliteFinalSix.length
+      ? data.eliteFinalSix
+      : championCharacters;
+    const eliteMeta = data && data.eliteFinalSixMeta && typeof data.eliteFinalSixMeta === 'object'
+      ? data.eliteFinalSixMeta
+      : {};
+    const usingGlobalEliteShowcase = Array.isArray(data.eliteFinalSix) && data.eliteFinalSix.length > 0;
+    if (eliteShowcaseCharacters.length || championCharacters.length) {
       const stats = data && data.winnerTeamStats ? data.winnerTeamStats : {};
       const safeMVP = escapeHtml(stats.mvp || 'N/A');
+      const safeChampionName = escapeHtml((data && data.winner && data.winner.name) || 'Champion');
       const teamOVR = Number(stats.teamOVR) || 0;
       const round4Points = Number(stats.round4Points) || 0;
       const chemistryBonus = Number(stats.chemistryBonus) || 0;
       const chemistryLabel = chemistryBonus >= 0 ? `+${chemistryBonus}` : String(chemistryBonus);
       const rarityScore = Number(stats.rarityScore) || 0;
-      const pickCountForRarity = Number(stats.picks) || winnerCharacters.length || 6;
+      const pickCountForRarity = Number(stats.picks) || championCharacters.length || 6;
       const rarityMax = Math.max(1, pickCountForRarity * 7);
       const rarityPercent = Math.max(0, Math.min(100, Math.round((rarityScore / rarityMax) * 100)));
       const rarityGems = '◆'.repeat(Math.max(1, Math.min(5, Math.round(rarityPercent / 20))));
-      const avgDraftValue = winnerCharacters.length
+      const avgDraftValue = championCharacters.length
         ? Math.round(
-          winnerCharacters.reduce((acc, entry) => acc + (Number(entry && entry.valueVsDraftExpected) || 0), 0)
-          / winnerCharacters.length
+          championCharacters.reduce((acc, entry) => acc + (Number(entry && entry.valueVsDraftExpected) || 0), 0)
+          / championCharacters.length
         )
         : 0;
       const avgDraftValueLabel = avgDraftValue >= 0 ? `+${avgDraftValue}` : `${avgDraftValue}`;
@@ -2854,13 +2897,47 @@ socket.on('gameEnded', (data) => {
       );
       const powerTier = powerIndex >= 140 ? 'S+' : powerIndex >= 120 ? 'S' : powerIndex >= 98 ? 'A' : powerIndex >= 82 ? 'B' : 'C';
       const teamOvrClass = teamOVR >= 92 ? 'ovr-elite' : teamOVR >= 86 ? 'ovr-high' : teamOVR >= 78 ? 'ovr-mid' : 'ovr-low';
+      const showcaseAverageOVR = Number(eliteMeta.averageOVR) || (eliteShowcaseCharacters.length
+        ? Math.round(eliteShowcaseCharacters.reduce((sum, entry) => sum + (Number(entry && entry.ovr) || 0), 0) / eliteShowcaseCharacters.length)
+        : 0);
+      const showcaseTeamsRepresented = Number(eliteMeta.teamsRepresented) || new Set(
+        eliteShowcaseCharacters.map((entry) => entry && entry.ownerName).filter(Boolean)
+      ).size;
+      const championEliteCount = Number(eliteMeta.championMembers) || eliteShowcaseCharacters.filter((entry) => entry && entry.isChampionMember).length;
+      const winnerScore = Number(finalStandings[0] && finalStandings[0].score) || 0;
+      const runnerScore = Number(finalStandings[1] && finalStandings[1].score);
+      const finalMargin = Number.isFinite(runnerScore) ? (winnerScore - runnerScore) : null;
+      const finalMarginLabel = finalMargin == null
+        ? 'No runner-up data'
+        : (finalMargin === 0 ? 'Photo-finish tie' : `Final margin ${finalMargin > 0 ? '+' : ''}${finalMargin}`);
+      const bridgeNarrative = usingGlobalEliteShowcase
+        ? 'Round 4 reveals where everyone lands. Final Results now splits the score champion from the league-wide elite OVR showcase so both payoffs stay readable.'
+        : 'Round 4 locks placement. Final Results closes the ceremony with standings and the champion squad breakdown.';
+      const podiumPreviewMarkup = finalStandings.slice(0, 3).map((entry, idx) => {
+        const safeName = escapeHtml(entry && entry.name ? entry.name : `Player ${idx + 1}`);
+        const score = Number(entry && entry.score) || 0;
+        const rankLabel = idx === 0 ? 'Champion' : idx === 1 ? 'Runner-up' : '3rd';
+        return `
+          <li class="final-podium-preview-row">
+            <span class="final-podium-preview-rank">${rankLabel}</span>
+            <span class="final-podium-preview-name">${safeName}</span>
+            <strong class="final-podium-preview-score">${score} pts</strong>
+          </li>
+        `;
+      }).join('');
 
-      const compactSlots = winnerCharacters.map((entry, index) => {
+      const compactSlots = eliteShowcaseCharacters.map((entry, index) => {
         const safeName = escapeHtml(entry && entry.character ? entry.character : 'Unknown');
         const rawImage = entry && entry.imageUrl ? String(entry.imageUrl).trim() : '';
         const imageUrl = rawImage.startsWith('//') ? `https:${rawImage}` : (rawImage || placeholderImage);
+        const ownerName = entry && entry.ownerName ? String(entry.ownerName) : '';
+        const ownerAbbr = ownerName
+          ? ownerName.split(/\s+/).filter(Boolean).map((part) => part[0]).join('').slice(0, 3).toUpperCase()
+          : '';
+        const isChampionMember = entry && entry.isChampionMember === true;
+        const eliteRank = Number(entry && entry.eliteRank) || (index + 1);
         return `
-          <div class="winner-compact-slot ${rawImage ? '' : 'missing'}" data-slot="${index + 1}" title="${safeName}">
+          <div class="winner-compact-slot ${rawImage ? '' : 'missing'} ${isChampionMember ? 'champion-member' : 'non-champion'}" data-slot="${index + 1}" title="${safeName}${ownerName ? ` • ${escapeHtml(ownerName)}` : ''}">
             <img
               src="${escapeHtml(imageUrl)}"
               alt="${safeName}"
@@ -2868,12 +2945,13 @@ socket.on('gameEnded', (data) => {
               decoding="async"
               onerror="this.onerror=null;this.src='${placeholderImage}';this.closest('.winner-compact-slot')?.classList.add('missing');"
             >
-            <span class="winner-compact-index">${index + 1}</span>
+            <span class="winner-compact-index">${eliteRank}</span>
+            ${ownerAbbr ? `<span class="winner-compact-owner ${isChampionMember ? 'champion' : ''}" aria-label="Owned by ${escapeHtml(ownerName)}">${escapeHtml(ownerAbbr)}</span>` : ''}
           </div>
         `;
       }).join('');
 
-      const expandedSlots = winnerCharacters.map((entry, index) => {
+      const expandedSlots = eliteShowcaseCharacters.map((entry, index) => {
         const safeName = escapeHtml(entry && entry.character ? entry.character : 'Unknown');
         const rawImage = entry && entry.imageUrl ? String(entry.imageUrl).trim() : '';
         const imageUrl = rawImage.startsWith('//') ? `https:${rawImage}` : (rawImage || placeholderImage);
@@ -2911,11 +2989,18 @@ socket.on('gameEnded', (data) => {
         const insightB = escapeHtml(entry && Array.isArray(entry.notes) && entry.notes[1] ? entry.notes[1] : 'Draft value remained resilient into endgame.');
         const originalScenario = escapeHtml(entry && entry.originalScenario ? entry.originalScenario : 'N/A');
         const originalTwist = escapeHtml(entry && entry.originalTwist ? entry.originalTwist : 'N/A');
+        const ownerName = escapeHtml(entry && entry.ownerName ? entry.ownerName : 'Unknown Team');
+        const ownerFinalRank = Number(entry && entry.ownerFinalRank) || 0;
+        const eliteRank = Number(entry && entry.eliteRank) || (index + 1);
+        const isChampionMember = entry && entry.isChampionMember === true;
+        const evalTrustPct = Math.max(0, Math.min(100, Number(entry && entry.evalTrustPct) || 0));
+        const evalStatusLabel = escapeHtml(entry && entry.evalStatusLabel ? entry.evalStatusLabel : (entry && entry.evalStatus ? entry.evalStatus : 'n/a'));
+        const evalEngineMode = escapeHtml(entry && entry.evalEngineMode ? entry.evalEngineMode : 'legacy');
         return `
-          <article class="winner-char-card winner-flip-card ${rarityClass} tier-${ovrToneClass} ${rawImage ? '' : 'missing'}" data-slot="${index + 1}" role="button" tabindex="0" aria-label="Flip ${safeName} card">
+          <article class="winner-char-card winner-flip-card ${rarityClass} tier-${ovrToneClass} ${rawImage ? '' : 'missing'} ${isChampionMember ? 'champion-member' : ''}" data-slot="${index + 1}" role="button" tabindex="0" aria-label="Flip ${safeName} card">
             <div class="winner-flip-inner">
               <div class="winner-flip-face winner-flip-front">
-                <span class="winner-slot">${index + 1}</span>
+                <span class="winner-slot">${eliteRank}</span>
                 <div class="winner-char-frame">
                   <img
                     src="${escapeHtml(imageUrl)}"
@@ -2933,16 +3018,27 @@ socket.on('gameEnded', (data) => {
                 <div class="winner-char-submeta">
                   <span class="winner-char-source ${sourceClass}">${source}</span>
                   <span class="winner-char-type">${characterType}</span>
+                  <span class="winner-char-owner ${isChampionMember ? 'champion' : ''}">${ownerName}</span>
+                  <span class="winner-char-trace">${evalEngineMode.toUpperCase()} ${evalTrustPct}%</span>
+                </div>
+                <div class="winner-char-elite-badges">
+                  <span class="winner-char-badge elite-rank">Elite #${eliteRank}</span>
+                  ${ownerFinalRank ? `<span class="winner-char-badge team-rank">Team #${ownerFinalRank}</span>` : ''}
+                  ${isChampionMember ? '<span class="winner-char-badge champion">Champion</span>' : ''}
                 </div>
                 <div class="winner-flip-hint">Tap to flip</div>
               </div>
               <div class="winner-flip-face winner-flip-back">
                 <div class="winner-back-title">${safeName}</div>
                 <div class="winner-back-grid">
+                  <div><span>Elite Rank</span><strong>#${eliteRank}</strong></div>
+                  <div><span>Owner</span><strong>${ownerName}</strong></div>
                   <div><span>Tier</span><strong>${ovrTier}</strong></div>
                   <div><span>Type</span><strong>${characterType}</strong></div>
                   <div><span>Source</span><strong>${source}</strong></div>
                   <div><span>Draft</span><strong>R${draftRound} · Pick ${draftPick}</strong></div>
+                  <div><span>Trace</span><strong>${evalEngineMode.toUpperCase()} ${evalTrustPct}%</strong></div>
+                  <div><span>Status</span><strong>${evalStatusLabel}</strong></div>
                   <div><span>Global Slot</span><strong>${draftOrderLabel}</strong></div>
                   <div><span>Locked At</span><strong>${draftedAtLabel}</strong></div>
                   <div><span>EV @ Draft</span><strong>${expectedAtDraft}</strong></div>
@@ -2963,23 +3059,27 @@ socket.on('gameEnded', (data) => {
       }).join('');
 
       winnerGallery.innerHTML = `
-        <section class="winner-squad-stage" aria-label="Champion squad stage">
-          <button class="winner-squad-compact" type="button" aria-expanded="false" aria-controls="winnerSquadExpanded" aria-label="Expand Champion Squad">
-            <div class="winner-compact-title">🏆 ELITE FINAL SIX</div>
+        <section class="winner-squad-stage" aria-label="${usingGlobalEliteShowcase ? 'Global elite six showcase' : 'Champion squad stage'}">
+          <button class="winner-squad-compact" type="button" aria-expanded="false" aria-controls="winnerSquadExpanded" aria-label="${usingGlobalEliteShowcase ? 'Expand Global Elite Six Showcase' : 'Expand Champion Squad'}">
+            <div class="winner-compact-title">${usingGlobalEliteShowcase ? '🏆 GLOBAL ELITE FINAL SIX' : '🏆 ELITE FINAL SIX'}</div>
             <div class="winner-compact-lineup">${compactSlots}</div>
-            <div class="winner-compact-stats" aria-label="Champion stats">
+            <div class="winner-compact-stats" aria-label="${usingGlobalEliteShowcase ? 'Champion and elite showcase stats' : 'Champion stats'}">
+              <span class="winner-stat-chip champion">Champion: ${safeChampionName}</span>
               <span class="winner-stat-chip mvp">MVP: ${safeMVP}</span>
               <span class="winner-stat-chip ovr ${teamOvrClass}">Team OVR: ${teamOVR}</span>
               <span class="winner-stat-chip">Chemistry: ${chemistryLabel}</span>
               <span class="winner-stat-chip">Rarity Score: ${rarityScore}</span>
               <span class="winner-stat-chip">Power Index: ${powerIndex}</span>
               <span class="winner-stat-chip">Avg Draft Value: ${avgDraftValueLabel}</span>
+              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Elite Avg OVR: ${showcaseAverageOVR}</span>` : ''}
+              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Teams in Elite: ${showcaseTeamsRepresented}</span>` : ''}
+              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Champion Picks in Elite: ${championEliteCount}/6</span>` : ''}
             </div>
-            <div class="winner-compact-hint">Tap to morph into full squad intel • Tap cards to flip</div>
+            <div class="winner-compact-hint">${usingGlobalEliteShowcase ? 'Tap to open global elite showcase • Tap cards to flip' : 'Tap to morph into full squad intel • Tap cards to flip'}</div>
           </button>
-          <div id="winnerSquadExpanded" class="winner-squad-shell winner-squad-shell-expanded" role="region" aria-label="Champion team expanded" aria-hidden="true">
-          <button class="winner-squad-close" type="button" aria-label="Close Champion Squad">✕</button>
-          <div class="winner-squad-banner">🏆 ELITE FINAL SIX • CHAMPION BREAKDOWN</div>
+          <div id="winnerSquadExpanded" class="winner-squad-shell winner-squad-shell-expanded" role="region" aria-label="${usingGlobalEliteShowcase ? 'Global elite showcase expanded' : 'Champion team expanded'}" aria-hidden="true">
+          <button class="winner-squad-close" type="button" aria-label="${usingGlobalEliteShowcase ? 'Close Global Elite Showcase' : 'Close Champion Squad'}">✕</button>
+          <div class="winner-squad-banner">${usingGlobalEliteShowcase ? '🏆 GLOBAL ELITE FINAL SIX • LEAGUE SHOWCASE' : '🏆 ELITE FINAL SIX • CHAMPION BREAKDOWN'}</div>
           <div class="winner-squad-tools">
             <button class="winner-flip-all" type="button" aria-pressed="false">🃏 FLIP ALL</button>
           </div>
@@ -2987,17 +3087,86 @@ socket.on('gameEnded', (data) => {
             <div class="winner-expanded-stat mvp wide"><span>MVP</span><strong>${safeMVP} (${Number(stats.mvpOVR) || 0} OVR)</strong></div>
             <div class="winner-expanded-stat team-ovr"><span>Team OVR</span><strong class="${teamOvrClass}">${teamOVR}</strong></div>
             <div class="winner-expanded-stat power"><span>Power Index</span><strong>${powerIndex}</strong><em>Tier ${powerTier}</em></div>
-            <div class="winner-expanded-stat rarity wide"><span>Rarity Score</span><div class="rarity-topline"><strong>${rarityScore}</strong><strong class="rarity-rareplus">Rare+: ${Number(stats.rarePlusCount) || 0}/${Number(stats.picks) || winnerCharacters.length}</strong></div><div class="rarity-meter" aria-hidden="true"><span style="width:${rarityPercent}%"></span></div><div class="rarity-gems" aria-label="Rarity intensity">${rarityGems}</div></div>
+            <div class="winner-expanded-stat rarity wide"><span>Rarity Score</span><div class="rarity-topline"><strong>${rarityScore}</strong><strong class="rarity-rareplus">Rare+: ${Number(stats.rarePlusCount) || 0}/${Number(stats.picks) || championCharacters.length}</strong></div><div class="rarity-meter" aria-hidden="true"><span style="width:${rarityPercent}%"></span></div><div class="rarity-gems" aria-label="Rarity intensity">${rarityGems}</div></div>
             <div class="winner-expanded-stat"><span>Chemistry</span><strong>${chemistryLabel}</strong></div>
             <div class="winner-expanded-stat"><span>Avg Draft Value</span><strong class="${avgDraftValue >= 0 ? 'plus' : 'minus'}">${avgDraftValueLabel}</strong></div>
+            ${usingGlobalEliteShowcase ? `<div class="winner-expanded-stat elite wide"><span>Global Elite Snapshot</span><strong>Avg OVR ${showcaseAverageOVR} • Teams ${showcaseTeamsRepresented}</strong><em>Champion entries in elite: ${championEliteCount}/6</em></div>` : ''}
           </div>
           <div class="winner-char-gallery">
             ${expandedSlots}
           </div>
-          <div class="winner-squad-footer">Elite Final Six.</div>
+          <div class="winner-squad-footer">${usingGlobalEliteShowcase ? 'Global Elite Six by final OVR. Champion result remains score-based.' : 'Elite Final Six.'}</div>
           </div>
         </section>
       `;
+
+      const initialSquadStage = winnerGallery.querySelector('.winner-squad-stage');
+      if (initialSquadStage) {
+        const ceremonyShell = document.createElement('section');
+        ceremonyShell.className = 'final-ceremony-shell';
+        ceremonyShell.innerHTML = `
+          <header class="final-ceremony-hero" aria-label="Round 4 to final bridge summary">
+            <div class="final-ceremony-eyebrow">Round 4 -> Final Ceremony</div>
+            <h2 class="final-ceremony-headline">${safeChampionName} closes the match</h2>
+            <p class="final-ceremony-subtitle">${bridgeNarrative}</p>
+            <div class="final-ceremony-kpis" aria-label="Champion quick summary">
+              <span class="final-ceremony-kpi champion">Champion ${safeChampionName}</span>
+              <span class="final-ceremony-kpi">Round 4 ${round4Points} pts</span>
+              <span class="final-ceremony-kpi ${teamOvrClass}">Team OVR ${teamOVR}</span>
+              <span class="final-ceremony-kpi">Power ${powerIndex}</span>
+              <span class="final-ceremony-kpi">${finalMarginLabel}</span>
+              ${usingGlobalEliteShowcase ? `<span class="final-ceremony-kpi">Elite Split ${championEliteCount}/6</span>` : ''}
+            </div>
+          </header>
+          <div class="final-ceremony-tabs" role="tablist" aria-label="Final result views">
+            <button type="button" class="final-ceremony-tab is-active" data-final-view="story" role="tab" aria-selected="true" aria-controls="finalCeremonyPanelStory">Bridge</button>
+            <button type="button" class="final-ceremony-tab" data-final-view="elite" role="tab" aria-selected="false" aria-controls="finalCeremonyPanelElite">Elite Six</button>
+            <button type="button" class="final-ceremony-tab" data-final-view="standings" role="tab" aria-selected="false" aria-controls="finalCeremonyPanelStandings">Standings</button>
+          </div>
+          <section id="finalCeremonyPanelStory" class="final-ceremony-panel is-active" data-final-panel="story" role="tabpanel" aria-label="Bridge summary">
+            <div class="final-bridge-grid">
+              <article class="final-bridge-card">
+                <h3>Ceremony Handoff</h3>
+                <p>Round 4 handles the placement drama. Final Results now gives three clean views so mobile players can focus one layer at a time.</p>
+                <ul class="final-bridge-list">
+                  <li>MVP: ${safeMVP}</li>
+                  <li>Chemistry: ${chemistryLabel} | Rarity Score: ${rarityScore}</li>
+                  <li>Avg Draft Value: ${avgDraftValueLabel} | Power Tier: ${powerTier}</li>
+                  ${usingGlobalEliteShowcase ? `<li>Elite Avg OVR: ${showcaseAverageOVR} | Teams: ${showcaseTeamsRepresented}</li>` : ''}
+                </ul>
+              </article>
+              <article class="final-bridge-card podium">
+                <h3>Podium Preview</h3>
+                <ol class="final-podium-preview" aria-label="Top finish preview">
+                  ${podiumPreviewMarkup || '<li class="final-podium-preview-empty">Standings unavailable.</li>'}
+                </ol>
+                <div class="final-bridge-actions">
+                  <button type="button" class="final-bridge-jump" data-final-jump="elite">Open Elite Six</button>
+                  <button type="button" class="final-bridge-jump alt" data-final-jump="standings">Open Standings</button>
+                </div>
+              </article>
+            </div>
+          </section>
+          <section id="finalCeremonyPanelElite" class="final-ceremony-panel" data-final-panel="elite" role="tabpanel" aria-label="Elite six showcase" hidden></section>
+          <section id="finalCeremonyPanelStandings" class="final-ceremony-panel" data-final-panel="standings" role="tabpanel" aria-label="Final standings" hidden>
+            <div class="final-standings-intro">
+              <div>
+                <strong>Scoreboard Verdict</strong>
+                <p>Full match totals with per-round breakdowns.</p>
+              </div>
+              <button type="button" class="final-bridge-jump alt" data-final-jump="elite">Back to Elite Six</button>
+            </div>
+            <div id="finalStandingsMount"></div>
+          </section>
+          <div class="final-ceremony-actions-tray" aria-label="Final actions">
+            <div id="finalActionsMount"></div>
+          </div>
+        `;
+        const elitePanel = ceremonyShell.querySelector('[data-final-panel=\"elite\"]');
+        if (elitePanel) elitePanel.appendChild(initialSquadStage);
+        winnerGallery.innerHTML = '';
+        winnerGallery.appendChild(ceremonyShell);
+      }
 
       const compactButton = winnerGallery.querySelector('.winner-squad-compact');
       const expandedShell = winnerGallery.querySelector('.winner-squad-shell-expanded');
@@ -3074,15 +3243,53 @@ socket.on('gameEnded', (data) => {
           });
         });
       }
+
+      const ceremonyTabs = Array.from(winnerGallery.querySelectorAll('.final-ceremony-tab'));
+      const ceremonyPanels = Array.from(winnerGallery.querySelectorAll('.final-ceremony-panel'));
+      const ceremonyJumpButtons = Array.from(winnerGallery.querySelectorAll('[data-final-jump]'));
+      const setCeremonyView = (requestedView) => {
+        const view = ['story', 'elite', 'standings'].includes(String(requestedView)) ? String(requestedView) : 'story';
+        if (view !== 'elite') closeExpanded();
+        ceremonyTabs.forEach((tabButton) => {
+          const active = (tabButton.getAttribute('data-final-view') || '') === view;
+          tabButton.classList.toggle('is-active', active);
+          tabButton.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        ceremonyPanels.forEach((panel) => {
+          const active = (panel.getAttribute('data-final-panel') || '') === view;
+          panel.classList.toggle('is-active', active);
+          panel.hidden = !active;
+        });
+        if (finalContainer) finalContainer.setAttribute('data-final-view', view);
+      };
+
+      ceremonyTabs.forEach((tabButton) => {
+        tabButton.addEventListener('click', () => {
+          setCeremonyView(tabButton.getAttribute('data-final-view') || 'story');
+        });
+      });
+
+      ceremonyJumpButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          setCeremonyView(button.getAttribute('data-final-jump') || 'story');
+        });
+      });
+
+      setCeremonyView('story');
     } else {
       winnerGallery.innerHTML = '';
     }
   }
 
   const final = document.getElementById('finalLeaderboard');
+  if (!final) {
+    showScreen('finalScreen');
+    showToast('ðŸŽ‰ Game Over! Check the results!', 'info');
+    return;
+  }
   final.innerHTML = '';
 
-  data.finalLeaderboard.forEach((entry, idx) => {
+  finalStandings.forEach((entry, idx) => {
     const li = document.createElement('li');
     li.className = 'leaderboard-entry final-entry';
     const medals = ['🥇', '🥈', '🥉'];
@@ -3103,13 +3310,39 @@ socket.on('gameEnded', (data) => {
     final.appendChild(li);
   });
 
+  if (winnerGallery) {
+    const standingsMount = winnerGallery.querySelector('#finalStandingsMount');
+    const actionsMount = winnerGallery.querySelector('#finalActionsMount');
+    const finalActions = document.querySelector('.final-actions-modern');
+    if (standingsMount) standingsMount.appendChild(final);
+    if (actionsMount && finalActions) actionsMount.appendChild(finalActions);
+  }
+
+  let renderedInRound4Ceremony = false;
+  try {
+    if (typeof window.renderRound4FinaleCeremony === 'function') {
+      renderedInRound4Ceremony = window.renderRound4FinaleCeremony(data) === true;
+    }
+  } catch (round4FinaleError) {
+    console.warn('[final results] round4 finale render failed:', round4FinaleError);
+  }
+
+  if (renderedInRound4Ceremony) {
+    showToast('Final verdict revealed inside Round 4. Full archive is available.', 'info');
+    return;
+  }
+
   showScreen('finalScreen');
-  showToast('🎉 Game Over! Check the results!', 'info');
+  showToast('Game Over! Check the results!', 'info');
 });
 
 function sendPlayAgain() {
   socket.emit('playAgain');
   showToast('Starting new game with same players...', 'info');
+}
+
+function openFinalResultsArchive() {
+  showScreen('finalScreen');
 }
 
 function goToLobby() {
@@ -3160,6 +3393,7 @@ window.lockDraft = lockDraft;
 window.lockVote = lockVote;
 window.readyForNextRound = readyForNextRound;
 window.sendPlayAgain = sendPlayAgain;
+window.openFinalResultsArchive = openFinalResultsArchive;
 window.goToLobby = goToLobby;
 
 if (shouldAutoOpenRound4Loading()) {

@@ -838,6 +838,30 @@ function buildCinematicData() {
       const engineMode = scoreMeta && scoreMeta.evaluationEngineMode ? String(scoreMeta.evaluationEngineMode) : 'legacy';
       const engineLabel = scoreMeta && scoreMeta.evaluationEngine ? String(scoreMeta.evaluationEngine) : 'legacy-rules-v1';
       const trustPct = Math.round(Math.max(0, Math.min(100, (Number(scoreMeta && scoreMeta.infoConfidence) || 0) * 100)));
+      const explainStatusLabel = contextExplain && contextExplain.statusLabel
+        ? String(contextExplain.statusLabel)
+        : null;
+      const explainTrustLabel = contextExplain && contextExplain.trustLabel
+        ? String(contextExplain.trustLabel)
+        : null;
+      const explainTraceLine = contextExplain && contextExplain.traceLine
+        ? String(contextExplain.traceLine)
+        : null;
+      const explainTone = contextExplain && contextExplain.statusTone
+        ? String(contextExplain.statusTone)
+        : 'neutral';
+      const explainRiskSeverity = contextExplain && contextExplain.riskSeverity
+        ? String(contextExplain.riskSeverity)
+        : 'low';
+      const explainRiskSummary = contextExplain && contextExplain.riskSummary
+        ? String(contextExplain.riskSummary)
+        : '';
+      const resolvePct = Number.isFinite(Number(contextExplain && contextExplain.resolverPct))
+        ? Math.max(0, Math.min(100, Number(contextExplain.resolverPct)))
+        : Math.round(Math.max(0, Math.min(100, (Number(scoreMeta && scoreMeta.resolverConfidence) || 0) * 100)));
+      const contextPct = Number.isFinite(Number(contextExplain && contextExplain.contextPct))
+        ? Math.max(0, Math.min(100, Number(contextExplain.contextPct)))
+        : Math.round(Math.max(0, Math.min(100, (Number(scoreMeta && scoreMeta.contextFitConfidence) || 0) * 100)));
       const traceStatus = contextExplain && contextExplain.status
         ? String(contextExplain.status)
         : shadowInfo && shadowInfo.status
@@ -855,6 +879,14 @@ function buildCinematicData() {
         evalEngineLabel: engineLabel,
         evalTrustPct: trustPct,
         evalTraceStatus: traceStatus,
+        evalTraceStatusLabel: explainStatusLabel || traceStatus,
+        evalTraceLine: explainTraceLine || '',
+        evalTrustLabel: explainTrustLabel || '',
+        evalTraceTone: explainTone,
+        evalRiskSeverity: explainRiskSeverity,
+        evalRiskSummary: explainRiskSummary,
+        evalResolvePct: resolvePct,
+        evalContextPct: contextPct,
         evalTraceBadge: engineMode === 'context'
           ? `CE ${trustPct}%`
           : engineMode === 'context_shadow'
@@ -993,7 +1025,7 @@ function renderActivePlaque() {
         <div>
           <h3 class="${tierClass}">${escapeHtml(evalData.character || 'Unknown')}</h3>
           <p>${escapeHtml(evalData.roleType || 'Balanced')} • ${escapeHtml(evalData.rarity || 'Common')}</p>
-          <p>${escapeHtml(evalData.evalEngineMode || 'legacy')} • ${escapeHtml(evalData.evalTraceStatus || 'n/a')} • Trust ${Number(evalData.evalTrustPct) || 0}%</p>
+          <p>${escapeHtml(evalData.evalEngineMode || 'legacy')} • ${escapeHtml(evalData.evalTraceStatusLabel || evalData.evalTraceStatus || 'n/a')} • ${escapeHtml(evalData.evalTrustLabel || `Trust ${Number(evalData.evalTrustPct) || 0}%`)}</p>
           <p>${escapeHtml(evalData.shortReason || 'No reason provided.')}</p>
         </div>
       </div>
@@ -1006,9 +1038,12 @@ function renderActivePlaque() {
         <div class="eval-active-chip"><span>Score</span><strong>${Number(evalData.score) || 0}</strong></div>
         <div class="eval-active-chip ${fitClass}"><span>Fit Delta</span><strong>${signed(fitDelta)}</strong></div>
         <div class="eval-active-chip"><span>Trust</span><strong>${Number(evalData.evalTrustPct) || 0}%</strong></div>
+        <div class="eval-active-chip"><span>Trace (R/C)</span><strong>${Number(evalData.evalResolvePct) || 0}/${Number(evalData.evalContextPct) || 0}</strong></div>
+        <div class="eval-active-chip trace-${escapeHtml(String(evalData.evalRiskSeverity || 'low'))}"><span>Risk</span><strong>${escapeHtml(String(evalData.evalRiskSeverity || 'low').toUpperCase())}</strong></div>
       </div>
       <details class="eval-active-details">
         <summary>Details + Notes</summary>
+        ${evalData.evalRiskSummary || evalData.evalTraceLine ? `<p class="eval-active-trace-summary">${escapeHtml(evalData.evalTraceLine || '')}${evalData.evalRiskSummary ? ` • ${escapeHtml(evalData.evalRiskSummary)}` : ''}</p>` : ''}
         <ul>${notes.length ? notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('') : '<li>No additional evaluator notes.</li>'}</ul>
         <p class="eval-active-phrase">"${escapeHtml(evalData.phrase || 'No phrase available.')}"</p>
       </details>
@@ -1477,6 +1512,151 @@ function renderFinalLeaderboard() {
       </div>
     </section>
   `;
+}
+
+function isRound4EvalScreenActive() {
+  const screen = document.getElementById('round4EvalScreen');
+  return Boolean(screen && screen.classList.contains('active'));
+}
+
+function renderRound4FinaleCeremony(gameEndedData = {}) {
+  if (!isRound4EvalScreenActive()) return false;
+
+  const container = document.getElementById('evalLeaderboardContainer');
+  if (!container) return false;
+
+  const finalLeaderboard = Array.isArray(gameEndedData && gameEndedData.finalLeaderboard)
+    ? gameEndedData.finalLeaderboard
+    : [];
+  const winnerInfo = gameEndedData && gameEndedData.winner && typeof gameEndedData.winner === 'object'
+    ? gameEndedData.winner
+    : {};
+  const winnerTeamStats = gameEndedData && gameEndedData.winnerTeamStats && typeof gameEndedData.winnerTeamStats === 'object'
+    ? gameEndedData.winnerTeamStats
+    : {};
+  const eliteFinalSix = Array.isArray(gameEndedData && gameEndedData.eliteFinalSix) && gameEndedData.eliteFinalSix.length
+    ? gameEndedData.eliteFinalSix
+    : (Array.isArray(gameEndedData && gameEndedData.winnerTeamCharacters) ? gameEndedData.winnerTeamCharacters : []);
+
+  const winnerName = String(winnerInfo && winnerInfo.name ? winnerInfo.name : (finalLeaderboard[0] && finalLeaderboard[0].name ? finalLeaderboard[0].name : 'Champion'));
+  const winnerScore = Number(finalLeaderboard[0] && finalLeaderboard[0].score) || 0;
+  const secondScore = Number(finalLeaderboard[1] && finalLeaderboard[1].score);
+  const margin = Number.isFinite(secondScore) ? (winnerScore - secondScore) : null;
+  const marginLabel = margin == null
+    ? 'No runner-up data'
+    : (margin === 0 ? 'Photo-finish tie' : `Margin ${margin > 0 ? '+' : ''}${margin}`);
+
+  const teamOVR = Number(winnerTeamStats.teamOVR) || 0;
+  const round4Points = Number(winnerTeamStats.round4Points) || 0;
+  const chemistryBonus = Number(winnerTeamStats.chemistryBonus) || 0;
+  const rarityScore = Number(winnerTeamStats.rarityScore) || 0;
+  const mvp = String(winnerTeamStats.mvp || 'N/A');
+
+  const podiumRows = finalLeaderboard.slice(0, Math.max(3, Math.min(6, finalLeaderboard.length || 0))).map((entry, index) => {
+    const score = Number(entry && entry.score) || 0;
+    const name = escapeHtml(entry && entry.name ? entry.name : `Player ${index + 1}`);
+    const rankLabel = index === 0 ? 'Champion' : index === 1 ? 'Runner-up' : index === 2 ? '3rd' : `#${index + 1}`;
+    const breakdown = Array.isArray(entry && entry.breakdown)
+      ? entry.breakdown.map((pts, round) => `R${round + 1}:${pts}`).join(' | ')
+      : '';
+    return `
+      <li class="eval-finale-podium-row ${index === 0 ? 'is-champion' : ''}">
+        <div class="eval-finale-podium-main">
+          <span class="eval-finale-podium-rank">${escapeHtml(rankLabel)}</span>
+          <strong class="eval-finale-podium-name">${name}</strong>
+        </div>
+        <div class="eval-finale-podium-score">${score} pts</div>
+        ${breakdown ? `<div class="eval-finale-podium-breakdown">${escapeHtml(breakdown)}</div>` : ''}
+      </li>
+    `;
+  }).join('');
+
+  const eliteSlots = eliteFinalSix.slice(0, 6).map((entry, index) => {
+    const rawImage = entry && entry.imageUrl ? String(entry.imageUrl).trim() : '';
+    const imageUrl = rawImage ? resolveCharacterImage(rawImage, entry && entry.character ? entry.character : 'No Portrait') : buildMissingCharacterImage('No Portrait');
+    const safeName = escapeHtml(entry && entry.character ? entry.character : `Elite ${index + 1}`);
+    const eliteRank = Number(entry && entry.eliteRank) || (index + 1);
+    const ownerName = entry && entry.ownerName ? String(entry.ownerName) : '';
+    const ownerAbbr = ownerName
+      ? ownerName.split(/\s+/).filter(Boolean).map((part) => part[0]).join('').slice(0, 3).toUpperCase()
+      : '';
+    const isChampionMember = entry && entry.isChampionMember === true;
+    return `
+      <div class="eval-finale-elite-slot ${isChampionMember ? 'is-champion-member' : ''}" title="${safeName}${ownerName ? ` | ${escapeHtml(ownerName)}` : ''}">
+        <img src="${escapeHtml(imageUrl)}" alt="${safeName}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
+        <span class="eval-finale-elite-rank">#${eliteRank}</span>
+        ${ownerAbbr ? `<span class="eval-finale-elite-owner">${escapeHtml(ownerAbbr)}</span>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  const existing = container.querySelector('.eval-finale-ceremony');
+  if (existing) existing.remove();
+
+  container.insertAdjacentHTML('beforeend', `
+    <section class="eval-finale-ceremony" aria-live="polite" aria-label="Final game results in round 4 ceremony">
+      <header class="eval-finale-hero">
+        <div class="eval-finale-eyebrow">Final Verdict | Round 4 Ceremony</div>
+        <h3>${escapeHtml(winnerName)} wins the match</h3>
+        <p>The finale now lands directly inside the Round 4 phase so the reveal and payoff stay connected.</p>
+        <div class="eval-finale-kpis">
+          <span>Score <b>${winnerScore}</b></span>
+          <span>${escapeHtml(marginLabel)}</span>
+          <span>R4 <b>${round4Points}</b></span>
+          <span>Team OVR <b>${teamOVR}</b></span>
+          <span>Chem ${chemistryBonus >= 0 ? '+' : ''}${chemistryBonus}</span>
+          <span>MVP <b>${escapeHtml(mvp)}</b></span>
+          <span>Rarity <b>${rarityScore}</b></span>
+        </div>
+      </header>
+
+      ${eliteSlots ? `
+        <section class="eval-finale-elite-strip" aria-label="Elite Final Six preview">
+          <div class="eval-finale-section-head">
+            <strong>Elite Final Six</strong>
+            <small>OVR showcase (score champion remains separate)</small>
+          </div>
+          <div class="eval-finale-elite-grid">${eliteSlots}</div>
+        </section>
+      ` : ''}
+
+      <section class="eval-finale-standings" aria-label="Final standings">
+        <div class="eval-finale-section-head">
+          <strong>Final Standings</strong>
+          <small>Full totals with round breakdowns</small>
+        </div>
+        <ol class="eval-finale-podium">
+          ${podiumRows || '<li class="eval-finale-podium-empty">No standings available.</li>'}
+        </ol>
+      </section>
+
+      <div class="eval-finale-actions">
+        <button class="btn btn-secondary" type="button" onclick="openFinalResultsArchive()">OPEN FULL ARCHIVE</button>
+        <button class="btn btn-success" type="button" onclick="sendPlayAgain()">PLAY AGAIN</button>
+        <button class="btn btn-secondary" type="button" onclick="goToLobby()">NEW GAME</button>
+      </div>
+    </section>
+  `);
+
+  const status = document.getElementById('evalFinalStatus');
+  if (status) status.textContent = 'Final verdict revealed here in Round 4.';
+
+  const continueBtn = document.getElementById('evalContinueBtn');
+  if (continueBtn) {
+    continueBtn.disabled = true;
+    continueBtn.hidden = true;
+  }
+
+  const panel = container.querySelector('.eval-finale-ceremony');
+  if (panel) {
+    try {
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      panel.scrollIntoView(reduceMotion ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
+    } catch (error) {
+    }
+  }
+
+  return true;
 }
 
 function renderCinematicSequence() {
@@ -2023,3 +2203,4 @@ window.startRound4Reveal = startRound4Reveal;
 window.openOVRBreakdown = openOVRBreakdown;
 window.closeOVRBreakdown = closeOVRBreakdown;
 window.switchEvalTab = switchEvalTab;
+window.renderRound4FinaleCeremony = renderRound4FinaleCeremony;

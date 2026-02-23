@@ -81,6 +81,166 @@
   margin-bottom: var(--spacing-md);
 }
 
+.results-intel-panel {
+  margin-top: 12px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(61, 181, 255, 0.08), transparent 40%),
+    rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(45, 83, 127, 0.12);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.results-intel-panel > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.results-intel-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.results-intel-panel-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  min-height: 48px;
+}
+
+.results-intel-panel-title-wrap {
+  display: grid;
+  gap: 2px;
+}
+
+.results-intel-panel-title-wrap strong {
+  font-size: 0.95rem;
+  color: #173259;
+}
+
+.results-intel-panel-title-wrap small {
+  font-size: 0.78rem;
+  color: #506784;
+}
+
+.results-intel-panel-count {
+  min-width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #173259;
+  background: #eef5ff;
+  border: 1px solid #cfe0f9;
+}
+
+.results-intel-panel-body {
+  padding: 0 10px 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.results-intel-row {
+  border-radius: 10px;
+  border: 1px solid rgba(38, 72, 110, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+  overflow: hidden;
+}
+
+.results-intel-row > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.results-intel-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.results-intel-row-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+}
+
+.results-intel-row-left {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.results-intel-row-left strong {
+  font-size: 0.9rem;
+  color: #173259;
+}
+
+.results-intel-row-left small {
+  font-size: 0.73rem;
+  color: #5d7392;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.results-intel-row-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.results-intel-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #0b5266;
+  background: rgba(0, 188, 212, 0.14);
+  border: 1px solid rgba(0, 188, 212, 0.26);
+}
+
+.results-intel-confidence {
+  font-weight: 800;
+  color: #1f385c;
+  font-size: 0.9rem;
+}
+
+.results-intel-row-body {
+  padding: 0 10px 10px;
+}
+
+.results-intel-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.results-intel-mini-grid span {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f7fbff;
+  border: 1px solid #deebfb;
+  color: #425976;
+  font-size: 0.76rem;
+  line-height: 1.2;
+}
+
+.results-intel-mini-grid b {
+  color: #16345f;
+}
+
+.results-intel-row[open] .results-intel-row-summary,
+.results-intel-panel[open] .results-intel-panel-summary {
+  background: rgba(255, 255, 255, 0.45);
+}
+
 .intel-summary-card {
   background: var(--white);
   border: 1px solid #dbe8ff;
@@ -177,10 +337,10 @@
 
 .player-breakdown {
   background: var(--white);
-  border: 1px solid color-mix(in srgb, var(--secondary) 45%, var(--white));
+  border: 1px solid color-mix(in srgb, var(--secondary) 24%, var(--white));
   border-radius: var(--radius-md);
   padding: 0;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 6px 18px rgba(26, 49, 83, 0.06);
   opacity: 0;
   animation: resultRowIn 0.35s ease-out forwards;
   animation-delay: calc(var(--result-index, 0) * 80ms);
@@ -201,6 +361,8 @@
 
 .player-breakdown-dropdown {
   display: block;
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 .player-breakdown-dropdown > summary {
@@ -216,33 +378,43 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: 11px var(--spacing-md);
   cursor: pointer;
   user-select: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(247,251,255,0.92));
+  min-height: 52px;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .breakdown-toggle-arrow {
-  width: 0;
-  height: 0;
-  border-top: 6px solid transparent;
-  border-bottom: 6px solid transparent;
-  border-left: 9px solid #98a1b3;
-  transform-origin: 42% 50%;
-  transition: transform 0.24s ease, border-left-color 0.2s ease;
+  width: 11px;
+  height: 11px;
+  border-right: 2px solid #6b7c95;
+  border-bottom: 2px solid #6b7c95;
+  border-top: 0;
+  border-left: 0;
+  transform: rotate(-45deg);
+  transform-origin: center;
+  transition: transform 0.22s ease, border-color 0.18s ease;
+  margin-left: 4px;
+}
+
+.player-breakdown-dropdown:hover .breakdown-summary-row {
+  background: linear-gradient(180deg, #ffffff, #f2f8ff);
 }
 
 .player-breakdown-dropdown:hover .breakdown-toggle-arrow {
-  border-left-color: #7e8798;
+  border-color: #4b6486;
 }
 
 .player-breakdown-dropdown[open] .breakdown-toggle-arrow {
-  transform: rotate(90deg);
-  border-left-color: #6a7387;
+  transform: rotate(45deg);
+  border-color: #35557f;
 }
 
 .player-breakdown-dropdown[open] .breakdown-summary-row {
-  border-bottom: 1px solid color-mix(in srgb, var(--secondary) 24%, var(--white));
-  background: color-mix(in srgb, var(--secondary) 8%, var(--white));
+  background: linear-gradient(180deg, #ffffff, #eef6ff);
+  box-shadow: inset 0 -1px 0 rgba(72, 104, 148, 0.12);
 }
 
 .breakdown-points {
@@ -261,9 +433,10 @@
   font-size: 0.88rem;
   color: #2f3d56;
   text-align: left;
-  padding: 10px var(--spacing-md) var(--spacing-md);
+  padding: 10px var(--spacing-md) 12px;
   display: grid;
   gap: 10px;
+  background: linear-gradient(180deg, rgba(250,253,255,0.9), rgba(246,250,255,0.95));
 }
 
 .breakdown-context-line {
@@ -1303,6 +1476,295 @@
   position: relative;
 }
 
+.final-ceremony-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.final-ceremony-hero {
+  position: relative;
+  z-index: 1;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, white);
+  background:
+    radial-gradient(circle at 90% 15%, color-mix(in srgb, var(--warning) 26%, transparent), transparent 46%),
+    radial-gradient(circle at 10% 100%, color-mix(in srgb, var(--secondary) 18%, transparent), transparent 48%),
+    linear-gradient(160deg, color-mix(in srgb, var(--white) 90%, var(--secondary) 10%), color-mix(in srgb, var(--white) 94%, var(--warning) 6%));
+  padding: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.final-ceremony-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--secondary) 14%, white);
+  border: 1px solid color-mix(in srgb, var(--secondary) 25%, white);
+  color: #0f596d;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.final-ceremony-headline {
+  margin: 8px 0 4px;
+  font-size: 1.25rem;
+  line-height: 1.1;
+  color: color-mix(in srgb, var(--dark) 88%, var(--primary-dark) 12%);
+}
+
+.final-ceremony-subtitle {
+  margin: 0;
+  color: #435a79;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.final-ceremony-kpis {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.final-ceremony-kpi {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-width: 0;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.67rem;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--dark) 78%, var(--primary-dark) 22%);
+  background: color-mix(in srgb, var(--white) 88%, var(--primary) 12%);
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.final-ceremony-kpi.champion {
+  grid-column: span 2;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 28%, white), color-mix(in srgb, var(--primary) 12%, white));
+}
+
+.final-ceremony-kpi.ovr-elite {
+  background: linear-gradient(135deg, #f9d423, #ff4e50);
+  color: #20131f;
+}
+
+.final-ceremony-kpi.ovr-high {
+  background: linear-gradient(135deg, #ffd700, #ff9f43);
+  color: #2f1a02;
+}
+
+.final-ceremony-kpi.ovr-mid {
+  background: linear-gradient(135deg, #8ad7ff, #66b3ff);
+  color: #13273d;
+}
+
+.final-ceremony-kpi.ovr-low {
+  background: linear-gradient(135deg, #d5d8dc, #bcc4cc);
+  color: #2d353d;
+}
+
+.final-ceremony-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.final-ceremony-tab {
+  min-height: 42px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, white);
+  background: color-mix(in srgb, var(--white) 92%, var(--secondary) 8%);
+  color: #365272;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.final-ceremony-tab:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.final-ceremony-tab.is-active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 20%, white), color-mix(in srgb, var(--secondary) 16%, white));
+  border-color: color-mix(in srgb, var(--primary) 36%, white);
+  color: color-mix(in srgb, var(--dark) 85%, var(--primary-dark) 15%);
+}
+
+.final-ceremony-panel {
+  position: relative;
+}
+
+.final-ceremony-panel.is-active {
+  animation: resultRowIn 0.2s ease-out both;
+}
+
+.final-bridge-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 10px;
+}
+
+.final-bridge-card {
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 16%, white);
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(246,250,255,0.95));
+  box-shadow: var(--shadow-sm);
+  padding: 12px;
+}
+
+.final-bridge-card h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  color: #1b375d;
+}
+
+.final-bridge-card p {
+  margin: 0;
+  color: #48607f;
+  font-size: 0.83rem;
+  line-height: 1.35;
+}
+
+.final-bridge-list {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 4px;
+  color: #3d5473;
+  font-size: 0.8rem;
+}
+
+.final-podium-preview {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.final-podium-preview-row,
+.final-podium-preview-empty {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--secondary) 16%, white);
+  background: color-mix(in srgb, var(--white) 86%, var(--secondary) 14%);
+  padding: 7px 8px;
+}
+
+.final-podium-preview-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.final-podium-preview-rank {
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #0d596a;
+  text-transform: uppercase;
+}
+
+.final-podium-preview-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1f3c64;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.final-podium-preview-score {
+  font-size: 0.8rem;
+  color: #0f7f45;
+}
+
+.final-podium-preview-empty {
+  font-size: 0.8rem;
+  color: #607791;
+}
+
+.final-bridge-actions {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.final-bridge-jump {
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, white);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 14%, white), color-mix(in srgb, var(--secondary) 10%, white));
+  color: #254a72;
+  font-weight: 800;
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.final-bridge-jump.alt {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--white) 90%, var(--warning) 10%), color-mix(in srgb, var(--white) 94%, var(--secondary) 6%));
+}
+
+.final-bridge-jump:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.final-standings-intro {
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--secondary) 18%, white);
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(246,250,255,0.95));
+  box-shadow: var(--shadow-sm);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.final-standings-intro strong {
+  display: block;
+  color: #19365d;
+  font-size: 0.92rem;
+}
+
+.final-standings-intro p {
+  margin: 2px 0 0;
+  color: #4e6684;
+  font-size: 0.78rem;
+}
+
+.final-ceremony-panel .leaderboard-modern {
+  margin: 8px 0 0;
+}
+
+.final-ceremony-actions-tray {
+  margin-top: 2px;
+}
+
+.final-ceremony-actions-tray .final-actions-modern {
+  margin-top: 8px;
+}
+
 .winner-squad-stage {
   width: 100%;
   display: grid;
@@ -1387,6 +1849,14 @@
   isolation: isolate;
 }
 
+.winner-compact-slot.champion-member {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 38%, transparent), var(--shadow-sm);
+}
+
+.winner-compact-slot.non-champion {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 44%, white), color-mix(in srgb, var(--primary) 20%, white));
+}
+
 .winner-compact-slot::after {
   content: '';
   position: absolute;
@@ -1431,6 +1901,31 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.winner-compact-owner {
+  position: absolute;
+  left: -1px;
+  bottom: -1px;
+  min-width: 18px;
+  height: 16px;
+  border-radius: 999px;
+  padding: 0 4px;
+  background: color-mix(in srgb, var(--white) 85%, var(--secondary) 15%);
+  color: color-mix(in srgb, var(--dark) 84%, var(--primary-dark) 16%);
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, white);
+  font-size: 0.5rem;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.03em;
+  z-index: 3;
+}
+
+.winner-compact-owner.champion {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 34%, white), color-mix(in srgb, var(--primary) 12%, white));
+  border-color: color-mix(in srgb, var(--warning) 32%, white);
 }
 
 .winner-compact-hint {
@@ -1489,6 +1984,16 @@
 
 .winner-stat-chip.mvp {
   background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 35%, white), color-mix(in srgb, var(--primary) 14%, white));
+}
+
+.winner-stat-chip.champion {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 24%, white), color-mix(in srgb, var(--secondary) 18%, white));
+  border-color: color-mix(in srgb, var(--primary) 36%, white);
+}
+
+.winner-stat-chip.elite-meta {
+  background: color-mix(in srgb, var(--white) 90%, var(--secondary) 10%);
+  border-style: dashed;
 }
 
 .winner-squad-shell-expanded {
@@ -1640,6 +2145,13 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--primary-dark) 72%, var(--warning) 28%);
+}
+
+.winner-expanded-stat.elite em {
+  font-style: normal;
+  font-size: 0.62rem;
+  color: color-mix(in srgb, var(--dark) 70%, var(--secondary-dark) 30%);
+  letter-spacing: 0.02em;
 }
 
 .winner-expanded-stat.rarity strong {
@@ -2049,6 +2561,53 @@
   color: color-mix(in srgb, var(--dark) 75%, var(--primary-dark) 25%);
 }
 
+.winner-char-owner {
+  background: color-mix(in srgb, var(--warning) 16%, white);
+}
+
+.winner-char-owner.champion {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 30%, white), color-mix(in srgb, var(--primary) 12%, white));
+  border-color: color-mix(in srgb, var(--warning) 28%, white);
+}
+
+.winner-char-trace {
+  background: color-mix(in srgb, var(--secondary) 16%, white);
+}
+
+.winner-char-elite-badges {
+  margin-top: 5px;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.winner-char-badge {
+  font-size: 0.52rem;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, white);
+  background: color-mix(in srgb, var(--white) 90%, var(--primary) 10%);
+  color: color-mix(in srgb, var(--dark) 82%, var(--primary-dark) 18%);
+}
+
+.winner-char-badge.elite-rank {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 30%, white), color-mix(in srgb, var(--white) 75%, var(--primary) 25%));
+}
+
+.winner-char-badge.team-rank {
+  background: color-mix(in srgb, var(--secondary) 12%, white);
+}
+
+.winner-char-badge.champion {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 34%, white), color-mix(in srgb, var(--primary) 14%, white));
+  border-color: color-mix(in srgb, var(--warning) 30%, white);
+}
+
 .winner-char-source.source-web {
   background: color-mix(in srgb, #4da3ff 22%, white);
 }
@@ -2201,6 +2760,10 @@
 .final-actions-modern .btn { flex: 1; }
 
 @media (max-width: 700px) {
+  .results-intel-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
   #finalScreen {
     padding: var(--spacing-md);
   }
@@ -2215,6 +2778,27 @@
     margin-bottom: var(--spacing-lg);
   }
 
+  .final-ceremony-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .final-ceremony-kpi.champion {
+    grid-column: auto;
+  }
+
+  .final-bridge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .final-bridge-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .final-standings-intro {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .winner-squad-shell .winner-char-gallery {
     gap: var(--spacing-sm);
   }
@@ -2225,6 +2809,10 @@
 
   .winner-compact-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .winner-compact-stats .winner-stat-chip:nth-child(n + 5) {
+    display: none;
   }
 
   .winner-stat-chip {
@@ -2255,18 +2843,36 @@
     font-size: 0.7rem;
   }
 
+  .winner-char-submeta .winner-char-source,
+  .winner-char-submeta .winner-char-type {
+    display: none;
+  }
+
+  .winner-char-elite-badges .winner-char-badge.team-rank {
+    display: none;
+  }
+
   .final-actions-modern {
     flex-direction: column;
   }
 }
 
 @media (max-width: 360px) {
+  .final-ceremony-tabs,
+  .final-ceremony-kpis {
+    grid-template-columns: 1fr;
+  }
+
   .winner-squad-shell {
     padding: var(--spacing-md);
   }
 
   .winner-compact-lineup {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .winner-compact-stats .winner-stat-chip:nth-child(n + 3) {
+    display: none;
   }
 
   .winner-expanded-stats {

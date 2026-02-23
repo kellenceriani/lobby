@@ -29,6 +29,20 @@ function getActiveWordSourceLabel() {
   return WORD_SOURCE_LABELS[activeWordSource] || 'Fallback Word Pool';
 }
 
+function getActiveWordSourceMeta() {
+  const curatedKeys = Array.isArray(WORD_SOURCE_FETCHERS)
+    ? WORD_SOURCE_FETCHERS.map((source) => String(source && source.key || '').trim()).filter(Boolean)
+    : [];
+  const total = curatedKeys.length;
+  const index = curatedKeys.indexOf(activeWordSource);
+  return {
+    key: activeWordSource,
+    label: getActiveWordSourceLabel(),
+    index: index >= 0 ? index + 1 : null,
+    total
+  };
+}
+
 const { getRoundWeight, scaleRoundPoints } = require('../services/scoreScaling');
 const { evaluateRoundFromGame } = require('../services/roundEvaluationService');
 const { evaluateRound4FromGame } = require('../services/round4Service');
@@ -1722,12 +1736,16 @@ function revealScenario(io, roomCode) {
 
   const draftSeconds = getDraftSeconds(game.settings);
 
+  const wordSourceMeta = getActiveWordSourceMeta();
   io.to(roomCode).emit('scenarioRevealed', {
     scenario: scenario.scenario,
     draftTimeRemaining: draftSeconds,
     maxCharactersPerPlayer: 2,
     roundNumber: game.currentRound + 1,
-    wordApiSource: getActiveWordSourceLabel()
+    wordApiSource: wordSourceMeta.label,
+    wordApiSourceKey: wordSourceMeta.key,
+    wordApiSourceIndex: wordSourceMeta.index,
+    wordApiSourceTotal: wordSourceMeta.total
   });
 
   game.draftTimeout = setTimeout(() => revealPlotTwist(io, roomCode), draftSeconds * 1000);
@@ -2054,9 +2072,21 @@ async function tallyResults(io, roomCode) {
         const avgConfidence = evaluations.length
           ? Number((evaluations.reduce((sum, entry) => sum + (Number(entry && entry.scoreMeta && entry.scoreMeta.infoConfidence) || 0), 0) / evaluations.length).toFixed(3))
           : 0;
+        const avgResolverConfidence = evaluations.length
+          ? Number((evaluations.reduce((sum, entry) => sum + (Number(entry && entry.scoreMeta && entry.scoreMeta.resolverConfidence) || 0), 0) / evaluations.length).toFixed(3))
+          : 0;
+        const avgContextConfidence = evaluations.length
+          ? Number((evaluations.reduce((sum, entry) => sum + (Number(entry && entry.scoreMeta && entry.scoreMeta.contextFitConfidence) || 0), 0) / evaluations.length).toFixed(3))
+          : 0;
         const contextStatuses = Array.from(new Set(
           evaluations
             .map((entry) => entry && entry.scoreMeta && entry.scoreMeta.contextExplainability && entry.scoreMeta.contextExplainability.status)
+            .filter(Boolean)
+            .map((value) => String(value))
+        ));
+        const contextStatusLabels = Array.from(new Set(
+          evaluations
+            .map((entry) => entry && entry.scoreMeta && entry.scoreMeta.contextExplainability && entry.scoreMeta.contextExplainability.statusLabel)
             .filter(Boolean)
             .map((value) => String(value))
         ));
@@ -2066,14 +2096,32 @@ async function tallyResults(io, roomCode) {
             .filter(Boolean)
             .map((value) => String(value))
         ));
+        const riskCounts = evaluations.reduce((bucket, entry) => {
+          const flags = Array.isArray(entry && entry.scoreMeta && entry.scoreMeta.contextSignals && entry.scoreMeta.contextSignals.riskFlags)
+            ? entry.scoreMeta.contextSignals.riskFlags
+            : [];
+          flags.forEach((flag) => {
+            const key = String(flag || 'unknown');
+            bucket[key] = (bucket[key] || 0) + 1;
+          });
+          return bucket;
+        }, {});
+        const topRiskFlags = Object.entries(riskCounts)
+          .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
+          .slice(0, 4)
+          .map(([flag, count]) => ({ flag, count }));
         acc[name] = {
           evaluationCount: evaluations.length,
           engineModes,
           engineNames,
           trustedCount,
           avgConfidence,
+          avgResolverConfidence,
+          avgContextConfidence,
           contextStatuses,
-          shadowStatuses
+          contextStatusLabels,
+          shadowStatuses,
+          topRiskFlags
         };
         return acc;
       }, {})
@@ -2110,12 +2158,16 @@ function endGame(io, roomCode) {
     }));
 
   const winner = finalLeaderboard[0] || null;
-  const winnerTeamData = winner
-    && game.round4Results
+  const finalRankByPlayer = new Map(finalLeaderboard.map((row, idx) => [row && row.name ? row.name : '', idx + 1]));
+  const allTeamEvaluations = game.round4Results
     && game.round4Results.payload
     && game.round4Results.payload.allTeamEvaluations
-    && game.round4Results.payload.allTeamEvaluations[winner.name]
-    ? game.round4Results.payload.allTeamEvaluations[winner.name]
+    && typeof game.round4Results.payload.allTeamEvaluations === 'object'
+    ? game.round4Results.payload.allTeamEvaluations
+    : {};
+  const winnerTeamData = winner
+    && allTeamEvaluations[winner.name]
+    ? allTeamEvaluations[winner.name]
     : null;
 
   const winnerEvaluations = winner
@@ -2179,34 +2231,70 @@ function endGame(io, roomCode) {
     picks: winnerEvaluations.length
   };
 
-  const winnerCharacters = winnerEvaluations.map((entry, index) => {
-    const draftMeta = winnerDraftMeta.find((meta) =>
-      meta
-      && meta.character
-      && entry.character
-      && String(meta.character).toLowerCase() === String(entry.character).toLowerCase()
-    ) || null;
+  function buildMetaMatcher(draftMetaList = []) {
+    const safeList = Array.isArray(draftMetaList) ? draftMetaList : [];
+    const used = new Set();
+    return {
+      takeFor(entry, fallbackIndex = 0) {
+        const target = entry && entry.character ? String(entry.character).toLowerCase() : '';
+        let matchedIndex = -1;
+        for (let i = 0; i < safeList.length; i += 1) {
+          const candidate = safeList[i];
+          if (used.has(i)) continue;
+          if (!candidate || !candidate.character) continue;
+          if (String(candidate.character).toLowerCase() === target) {
+            matchedIndex = i;
+            break;
+          }
+        }
+        if (matchedIndex >= 0) {
+          used.add(matchedIndex);
+          return safeList[matchedIndex];
+        }
+        if (safeList[fallbackIndex] && !used.has(fallbackIndex)) {
+          used.add(fallbackIndex);
+          return safeList[fallbackIndex];
+        }
+        return null;
+      }
+    };
+  }
 
+  function mapShowcaseEntry({
+    entry,
+    index,
+    draftMeta,
+    ownerName,
+    ownerFinalRank,
+    championName,
+    eliteRank
+  }) {
     const draftedRound = draftMeta && Number.isFinite(Number(draftMeta.draftedRound))
       ? Number(draftMeta.draftedRound)
       : Math.min(3, Math.floor(index / 2) + 1);
     const pickNumberInRound = draftMeta && Number.isFinite(Number(draftMeta.pickNumberInRound))
       ? Number(draftMeta.pickNumberInRound)
       : ((index % 2) + 1);
-
     const expectedAtDraft = Math.round(66 + ((4 - draftedRound) * 6) + ((3 - pickNumberInRound) * 3));
     const expectedNearEnd = Math.max(56, expectedAtDraft - 8);
-    const currentOVR = Number(entry.ovr) || 0;
+    const currentOVR = Number(entry && entry.ovr) || 0;
+    const scoreMeta = entry && entry.scoreMeta && typeof entry.scoreMeta === 'object' ? entry.scoreMeta : {};
+    const explain = scoreMeta.contextExplainability && typeof scoreMeta.contextExplainability === 'object'
+      ? scoreMeta.contextExplainability
+      : null;
+    const contextSignals = scoreMeta.contextSignals && typeof scoreMeta.contextSignals === 'object'
+      ? scoreMeta.contextSignals
+      : {};
 
     return {
-      character: entry.character,
-      imageUrl: entry.imageUrl || null,
-      infoSource: entry.infoSource || null,
+      character: entry && entry.character ? entry.character : 'Unknown',
+      imageUrl: entry && entry.imageUrl ? entry.imageUrl : null,
+      infoSource: entry && entry.infoSource ? entry.infoSource : null,
       ovr: currentOVR,
-      score: Number(entry.score) || 0,
-      rarity: entry.rarity || 'Bronze',
+      score: Number(entry && entry.score) || 0,
+      rarity: entry && entry.rarity ? entry.rarity : 'Bronze',
       ovrTierLabel: entry && entry.ovrTier && entry.ovrTier.label ? entry.ovrTier.label : null,
-      characterType: entry.characterType || null,
+      characterType: entry && entry.characterType ? entry.characterType : null,
       draftRound: draftedRound,
       pickNumberInRound,
       globalDraftOrder: draftMeta && Number.isFinite(Number(draftMeta.globalDraftOrder)) ? Number(draftMeta.globalDraftOrder) : null,
@@ -2217,15 +2305,90 @@ function endGame(io, roomCode) {
       expectedNearEnd,
       valueVsDraftExpected: currentOVR - expectedAtDraft,
       valueVsLateExpected: currentOVR - expectedNearEnd,
-      notes: Array.isArray(entry.notes) ? entry.notes.slice(0, 2) : []
+      notes: Array.isArray(entry && entry.notes) ? entry.notes.slice(0, 2) : [],
+      ownerName: ownerName || null,
+      ownerFinalRank: Number.isFinite(Number(ownerFinalRank)) ? Number(ownerFinalRank) : null,
+      isChampionMember: Boolean(championName && ownerName && String(ownerName) === String(championName)),
+      eliteRank: Number.isFinite(Number(eliteRank)) ? Number(eliteRank) : null,
+      evalTrustPct: Math.round(Math.max(0, Math.min(100, (Number(scoreMeta.infoConfidence) || 0) * 100))),
+      evalEngineMode: scoreMeta.evaluationEngineMode ? String(scoreMeta.evaluationEngineMode) : null,
+      evalStatus: explain && explain.status ? String(explain.status) : null,
+      evalStatusLabel: explain && explain.statusLabel ? String(explain.statusLabel) : null,
+      evalRiskSeverity: explain && explain.riskSeverity ? String(explain.riskSeverity) : null,
+      evalRiskFlags: Array.isArray(contextSignals.riskFlags) ? contextSignals.riskFlags.slice(0, 4) : [],
+      evalMatchedTraits: Array.isArray(contextSignals.matchedTraits) ? contextSignals.matchedTraits.slice(0, 4) : []
     };
+  }
+
+  function buildShowcaseEntriesForPlayer(playerName, evaluations, draftMetaList, championName) {
+    const matcher = buildMetaMatcher(draftMetaList);
+    const ownerFinalRank = finalRankByPlayer.get(String(playerName || '')) || null;
+    return (Array.isArray(evaluations) ? evaluations : []).map((entry, index) => (
+      mapShowcaseEntry({
+        entry,
+        index,
+        draftMeta: matcher.takeFor(entry, index),
+        ownerName: playerName,
+        ownerFinalRank,
+        championName
+      })
+    ));
+  }
+
+  const winnerTeamCharacters = buildShowcaseEntriesForPlayer(
+    winner && winner.name ? winner.name : null,
+    winnerEvaluations,
+    winnerDraftMeta,
+    winner && winner.name ? winner.name : null
+  );
+
+  const allEliteCandidates = Object.entries(allTeamEvaluations).flatMap(([playerName, teamData]) => {
+    const evaluations = Array.isArray(teamData && teamData.evaluations) ? teamData.evaluations : [];
+    const sourcePlayer = game.players.find((player) => player && player.name === playerName);
+    const playerDraftMeta = sourcePlayer && Array.isArray(sourcePlayer.finalTeamDraftMeta) ? sourcePlayer.finalTeamDraftMeta : [];
+    const rows = buildShowcaseEntriesForPlayer(playerName, evaluations, playerDraftMeta, winner && winner.name ? winner.name : null);
+    return rows;
   });
+
+  const eliteFinalSix = allEliteCandidates
+    .slice()
+    .sort((a, b) => {
+      if ((Number(b.ovr) || 0) !== (Number(a.ovr) || 0)) return (Number(b.ovr) || 0) - (Number(a.ovr) || 0);
+      if ((Number(b.score) || 0) !== (Number(a.score) || 0)) return (Number(b.score) || 0) - (Number(a.score) || 0);
+      if ((Number(b.evalTrustPct) || 0) !== (Number(a.evalTrustPct) || 0)) return (Number(b.evalTrustPct) || 0) - (Number(a.evalTrustPct) || 0);
+      if ((Number(a.ownerFinalRank) || 999) !== (Number(b.ownerFinalRank) || 999)) return (Number(a.ownerFinalRank) || 999) - (Number(b.ownerFinalRank) || 999);
+      return String(a.character || '').localeCompare(String(b.character || ''));
+    })
+    .slice(0, 6)
+    .map((entry, index) => ({
+      ...entry,
+      eliteRank: index + 1
+    }));
+
+  const eliteTeamsRepresented = new Set(eliteFinalSix.map((entry) => entry && entry.ownerName).filter(Boolean)).size;
+  const eliteChampionMembers = eliteFinalSix.filter((entry) => entry && entry.isChampionMember).length;
+  const eliteFinalSixMeta = {
+    scope: 'global_top_ovr',
+    candidateCount: allEliteCandidates.length,
+    teamsRepresented: eliteTeamsRepresented,
+    championMembers: eliteChampionMembers,
+    averageOVR: eliteFinalSix.length
+      ? Math.round(eliteFinalSix.reduce((sum, entry) => sum + (Number(entry && entry.ovr) || 0), 0) / eliteFinalSix.length)
+      : 0,
+    topOVR: eliteFinalSix.length ? Math.max(...eliteFinalSix.map((entry) => Number(entry && entry.ovr) || 0)) : 0,
+    floorOVR: eliteFinalSix.length ? Math.min(...eliteFinalSix.map((entry) => Number(entry && entry.ovr) || 0)) : 0
+  };
+
+  const winnerCharacters = winnerTeamCharacters;
 
   io.to(roomCode).emit('gameEnded', {
     finalLeaderboard,
     totalRounds: game.totalRounds,
     winner,
     winnerCharacters,
+    winnerTeamCharacters,
+    eliteFinalSix,
+    eliteFinalSixMeta,
     winnerTeamStats
   });
 

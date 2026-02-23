@@ -496,6 +496,186 @@
   text-align: left;
 }
 
+.advanced-settings-lab-shell {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-radius: calc(var(--radius-md) + 2px);
+  border: 1px solid #dbe7f6;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(255, 193, 7, 0.14), transparent 40%),
+    radial-gradient(circle at 8% 95%, rgba(3, 169, 244, 0.12), transparent 42%),
+    linear-gradient(180deg, #fbfdff, #f4f8fd);
+  box-shadow: var(--shadow-sm);
+  display: grid;
+  gap: 10px;
+}
+
+.advanced-settings-lab-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.advanced-settings-lab-head h3 {
+  margin: 0;
+  color: #1a3b63;
+  font-size: 1rem;
+}
+
+.advanced-settings-lab-head p {
+  margin: 3px 0 0;
+  color: #5a7393;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.advanced-settings-stage {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #c7ddf9;
+  background: #eef5ff;
+  color: #1f4b78;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.advanced-settings-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.advanced-mode-card {
+  border: 1px solid #d8e5f6;
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 12px;
+  padding: 10px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  cursor: default;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4);
+}
+
+.advanced-mode-card strong {
+  color: #1a3d66;
+  font-size: 0.86rem;
+}
+
+.advanced-mode-card span {
+  color: #547090;
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.advanced-mode-card small {
+  color: #6d83a0;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.advanced-mode-card.is-featured {
+  border-color: #b8d5ff;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(3, 169, 244, 0.12), transparent 48%),
+    linear-gradient(160deg, rgba(255,255,255,0.92), rgba(237,247,255,0.92));
+  box-shadow: 0 6px 18px rgba(25, 72, 118, 0.08);
+}
+
+.advanced-settings-panel {
+  border: 1px solid #dbe7f6;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  overflow: hidden;
+}
+
+.advanced-settings-panel > summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: #1a3b63;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.advanced-settings-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-settings-panel[open] > summary {
+  background: rgba(238, 245, 255, 0.75);
+  box-shadow: inset 0 -1px 0 #dbe7f6;
+}
+
+.advanced-settings-panel-body {
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.adv-skeleton-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #f8fbff;
+  border: 1px solid #e1ecfa;
+}
+
+.adv-skeleton-row > span {
+  color: #2b4d75;
+  font-size: 0.79rem;
+  font-weight: 700;
+}
+
+.adv-skeleton-row em {
+  font-style: normal;
+  color: #7289a7;
+  font-size: 0.7rem;
+}
+
+.adv-skeleton-row input[type="range"],
+.adv-skeleton-row select {
+  width: 100%;
+  opacity: 0.85;
+}
+
+.adv-skeleton-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #f8fbff;
+  border: 1px solid #e1ecfa;
+  color: #38587f;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.adv-skeleton-toggle input[type="checkbox"] {
+  accent-color: var(--primary);
+}
+
+.adv-skeleton-note {
+  padding: 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 14%, white);
+  border: 1px dashed color-mix(in srgb, var(--warning) 34%, white);
+  color: #654f00;
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
 .chat-tab-modern.tab-content.active {
   display: flex;
   flex-direction: column;
@@ -1036,6 +1216,15 @@
 
 @media (max-width: 600px) {
   .settings-compact-row {
+    grid-template-columns: 1fr;
+  }
+
+  .advanced-settings-lab-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .advanced-settings-mode-grid {
     grid-template-columns: 1fr;
   }
 

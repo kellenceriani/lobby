@@ -228,6 +228,77 @@
           <div class="host-badge">
             <strong>You are the HOST</strong>
           </div>
+
+          <section class="advanced-settings-lab-shell" aria-label="Advanced settings preview">
+            <div class="advanced-settings-lab-head">
+              <div>
+                <h3>Advanced Settings Lab</h3>
+                <p>UI/UX prototype only. Structure first, behavior later.</p>
+              </div>
+              <span class="advanced-settings-stage">Design Skeleton</span>
+            </div>
+
+            <div class="advanced-settings-mode-grid" role="list" aria-label="Preset modes preview">
+              <button type="button" class="advanced-mode-card is-featured" role="listitem">
+                <strong>Ceremony Focus</strong>
+                <span>Cleaner reveals, slower pacing, less info per moment</span>
+                <small>Recommended for mobile-first play</small>
+              </button>
+              <button type="button" class="advanced-mode-card" role="listitem">
+                <strong>Comp Stream</strong>
+                <span>More data shown, faster transitions, spectator energy</span>
+                <small>Future mode concept</small>
+              </button>
+              <button type="button" class="advanced-mode-card" role="listitem">
+                <strong>Chaos Night</strong>
+                <span>Twists up, pacing up, readability rails preserved</span>
+                <small>Future mode concept</small>
+              </button>
+            </div>
+
+            <details class="advanced-settings-panel" open>
+              <summary>Reveal Ceremony & Results Flow</summary>
+              <div class="advanced-settings-panel-body">
+                <label class="adv-skeleton-row">
+                  <span>Round 4 auto-advance speed</span>
+                  <input type="range" min="1" max="5" value="3" disabled aria-label="Round 4 auto-advance speed (preview only)">
+                  <em>Preview only</em>
+                </label>
+                <label class="adv-skeleton-row">
+                  <span>Final Results default tab</span>
+                  <select disabled aria-label="Final Results default tab (preview only)">
+                    <option selected>Bridge</option>
+                    <option>Elite Six</option>
+                    <option>Standings</option>
+                  </select>
+                  <em>Preview only</em>
+                </label>
+                <label class="adv-skeleton-toggle">
+                  <input type="checkbox" checked disabled>
+                  <span>Compact evaluator trace panels by default</span>
+                </label>
+                <label class="adv-skeleton-toggle">
+                  <input type="checkbox" checked disabled>
+                  <span>Mobile card fronts hide secondary metadata</span>
+                </label>
+              </div>
+            </details>
+
+            <details class="advanced-settings-panel">
+              <summary>Scoring Presentation</summary>
+              <div class="advanced-settings-panel-body">
+                <label class="adv-skeleton-toggle">
+                  <input type="checkbox" checked disabled>
+                  <span>Use collapsible round breakdown cards</span>
+                </label>
+                <label class="adv-skeleton-toggle">
+                  <input type="checkbox" disabled>
+                  <span>Show expanded evaluator trace automatically for top scorer</span>
+                </label>
+                <div class="adv-skeleton-note">Placeholder sections for future scoring, evaluator, and accessibility presets.</div>
+              </div>
+            </details>
+          </section>
         </div>
         <div id="hostNote" class="host-note-modern" style="display: none;">
           <p><strong>Host:</strong> <span id="hostNameDisplay">Loading...</span></p>

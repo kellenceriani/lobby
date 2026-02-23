@@ -31,6 +31,8 @@ function getActiveWordSourceLabel() {
 
 const { getRoundWeight, scaleRoundPoints } = require('../services/scoreScaling');
 const { evaluateRoundFromGame } = require('../services/roundEvaluationService');
+const { evaluateRound4FromGame } = require('../services/round4Service');
+const { warmCharacterEvaluationCaches, getEvaluationEngineMode } = require('../services/entryEvaluationService');
 const { loadRoomsSnapshot, queueRoomsSnapshot } = require('../storage/statePersistence');
 
 function normalizeWordCandidate(value) {
@@ -1174,6 +1176,282 @@ function markRoomsDirty() {
   queueRoomsSnapshot(rooms);
 }
 
+function shouldUseEvalPrecompute() {
+  const flag = String(process.env.EVAL_PRECOMPUTE || '').trim().toLowerCase();
+  if (['0', 'false', 'off', 'no'].includes(flag)) return false;
+  if (['1', 'true', 'on', 'yes'].includes(flag)) return true;
+  const mode = getEvaluationEngineMode();
+  return mode === 'context' || mode === 'context_shadow';
+}
+
+function ensureEvalPrecomputeStore(game) {
+  if (!game || typeof game !== 'object') return null;
+  if (!game.evalPrecompute || typeof game.evalPrecompute !== 'object') {
+    game.evalPrecompute = { rounds: {}, round4: null };
+  }
+  if (!game.evalPrecompute.rounds || typeof game.evalPrecompute.rounds !== 'object') {
+    game.evalPrecompute.rounds = {};
+  }
+  return game.evalPrecompute;
+}
+
+function buildRoundIntelSnapshot(game, roundIndex) {
+  return {
+    currentScenario: game.currentScenario,
+    currentTwist: game.currentTwist,
+    scenarios: Array.isArray(game.scenarios)
+      ? game.scenarios.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : entry))
+      : [],
+    players: Array.isArray(game.players)
+      ? game.players.map((player) => ({
+        name: player.name,
+        team: Array.isArray(player.team) ? [...player.team] : []
+      }))
+      : [],
+    draftEntries: (game.draftEntries && typeof game.draftEntries === 'object')
+      ? Object.fromEntries(Object.entries(game.draftEntries).map(([name, entries]) => [
+        name,
+        Array.isArray(entries)
+          ? entries.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : entry))
+          : []
+      ]))
+      : {},
+    __snapshotMeta: {
+      type: 'round_intel',
+      roundIndex,
+      gameId: game.id,
+      createdAtMs: Date.now()
+    }
+  };
+}
+
+function buildRound4Snapshot(game) {
+  const pendingFinal = game && game.pendingFinalRound && typeof game.pendingFinalRound === 'object'
+    ? game.pendingFinalRound
+    : null;
+  return {
+    currentScenario: pendingFinal && pendingFinal.scenario ? pendingFinal.scenario : game.currentScenario,
+    currentTwist: pendingFinal && pendingFinal.twist ? pendingFinal.twist : game.currentTwist,
+    players: Array.isArray(game.players)
+      ? game.players.map((player) => ({
+        name: player.name,
+        finalTeam: Array.isArray(player.finalTeam) ? [...player.finalTeam] : [],
+        finalTeamDraftMeta: Array.isArray(player.finalTeamDraftMeta)
+          ? player.finalTeamDraftMeta.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : entry))
+          : []
+      }))
+      : [],
+    results: Array.isArray(game && game.results)
+      ? game.results.map((round) => ({
+        teamEvaluation: round && round.teamEvaluation && typeof round.teamEvaluation === 'object'
+          ? JSON.parse(JSON.stringify(round.teamEvaluation))
+          : {}
+      }))
+      : [],
+    __snapshotMeta: {
+      type: 'round4_eval',
+      gameId: game.id,
+      createdAtMs: Date.now()
+    }
+  };
+}
+
+function startRoundIntelPrecompute(roomCode, game) {
+  if (!shouldUseEvalPrecompute()) return;
+  if (!game || !Array.isArray(game.players)) return;
+  const roundIndex = Number(game.currentRound) || 0;
+  const store = ensureEvalPrecomputeStore(game);
+  if (!store) return;
+  const existing = store.rounds[roundIndex];
+  if (existing && (existing.promise || existing.result)) return;
+
+  const snapshot = buildRoundIntelSnapshot(game, roundIndex);
+  const startedAt = Date.now();
+  const task = evaluateRoundFromGame(snapshot, roundIndex)
+    .then((result) => {
+      const current = ensureEvalPrecomputeStore(game);
+      if (!current) return result;
+      current.rounds[roundIndex] = {
+        status: 'ready',
+        startedAt,
+        finishedAt: Date.now(),
+        result
+      };
+      console.log(`[Eval precompute] Round ${roundIndex + 1} intel ready for room ${roomCode} in ${Date.now() - startedAt}ms`);
+      return result;
+    })
+    .catch((error) => {
+      const current = ensureEvalPrecomputeStore(game);
+      if (current) {
+        current.rounds[roundIndex] = {
+          status: 'failed',
+          startedAt,
+          finishedAt: Date.now(),
+          error: error && error.message ? error.message : 'unknown error'
+        };
+      }
+      console.warn(`[Eval precompute] Round ${roundIndex + 1} intel failed for room ${roomCode}: ${error && error.message ? error.message : 'unknown error'}`);
+      throw error;
+    });
+
+  store.rounds[roundIndex] = {
+    status: 'running',
+    startedAt,
+    promise: task
+  };
+  console.log(`[Eval precompute] Started round ${roundIndex + 1} intel for room ${roomCode}`);
+}
+
+function preseedRoundContextCache(roomCode, game) {
+  if (!game || !Array.isArray(game.players)) return Promise.resolve({ scheduled: 0, completed: 0 });
+  const mode = getEvaluationEngineMode();
+  if (mode !== 'context' && mode !== 'context_shadow') return Promise.resolve({ scheduled: 0, completed: 0 });
+
+  const scenario = String(game.currentScenario || '').trim();
+  const twist = String(game.currentTwist || 'NO PLOT TWIST').trim();
+  if (!scenario) return Promise.resolve({ scheduled: 0, completed: 0 });
+  const roundIndex = Number(game.currentRound) || 0;
+  const roundPool = game.players.flatMap((player) => (
+    Array.isArray(player && player.team) ? player.team.slice(0, 2).filter(Boolean) : []
+  ));
+  const concurrency = Math.max(1, Math.min(6, Number(process.env.EVAL_PRESEED_CONCURRENCY) || 2));
+  const jobs = [];
+
+  for (const player of game.players) {
+    const roster = Array.isArray(player && player.team) ? player.team.slice(0, 2).filter(Boolean) : [];
+    const draftMeta = Array.isArray(game.draftEntries && game.draftEntries[player.name]) ? game.draftEntries[player.name] : [];
+    for (const character of roster) {
+      const draftedMeta = draftMeta.find((entry) => (
+        entry && entry.character && String(entry.character).toLowerCase() === String(character).toLowerCase()
+      )) || null;
+      jobs.push(async () => {
+        try {
+          const result = await warmCharacterEvaluationCaches(character, scenario, twist, {
+            precomputeContext: true,
+            evaluationMode: 'round',
+            originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
+            originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
+            roundPool,
+            teamPool: roster,
+            fetchContext: {
+              scenario,
+              twist,
+              originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
+              originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
+              draftedRound: roundIndex + 1
+            }
+          });
+          if (process.env.EVAL_WARMUP_VERBOSE === '1' && result && result.contextPreseeded) {
+            console.log(`[Eval warmup] ${character} context-preseeded`);
+          }
+          return result;
+        } catch (error) {
+          return null;
+        }
+      });
+    }
+  }
+
+  if (!jobs.length) return Promise.resolve({ scheduled: 0, completed: 0 });
+
+  return (async () => {
+    let cursor = 0;
+    const settled = [];
+    async function worker() {
+      while (cursor < jobs.length) {
+        const idx = cursor;
+        cursor += 1;
+        settled[idx] = await jobs[idx]();
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, () => worker()));
+    const completed = settled.reduce((count, item) => count + (item && item.contextPreseeded ? 1 : 0), 0);
+    return { scheduled: jobs.length, completed };
+  })();
+}
+
+function startRound4Precompute(roomCode, game) {
+  if (!shouldUseEvalPrecompute()) return;
+  if (!game || !Array.isArray(game.players)) return;
+  const store = ensureEvalPrecomputeStore(game);
+  if (!store) return;
+  if (store.round4 && (store.round4.promise || store.round4.result)) return;
+
+  const snapshot = buildRound4Snapshot(game);
+  const startedAt = Date.now();
+  const task = evaluateRound4FromGame(snapshot)
+    .then((result) => {
+      const current = ensureEvalPrecomputeStore(game);
+      if (!current) return result;
+      current.round4 = {
+        status: 'ready',
+        startedAt,
+        finishedAt: Date.now(),
+        result
+      };
+      console.log(`[Eval precompute] Round 4 eval ready for room ${roomCode} in ${Date.now() - startedAt}ms`);
+      return result;
+    })
+    .catch((error) => {
+      const current = ensureEvalPrecomputeStore(game);
+      if (current) {
+        current.round4 = {
+          status: 'failed',
+          startedAt,
+          finishedAt: Date.now(),
+          error: error && error.message ? error.message : 'unknown error'
+        };
+      }
+      console.warn(`[Eval precompute] Round 4 eval failed for room ${roomCode}: ${error && error.message ? error.message : 'unknown error'}`);
+      throw error;
+    });
+
+  store.round4 = {
+    status: 'running',
+    startedAt,
+    promise: task
+  };
+  console.log(`[Eval precompute] Started round 4 eval for room ${roomCode}`);
+}
+
+function prepareFinalRoundState(game, roomCode) {
+  if (!game || !Array.isArray(game.players)) return null;
+
+  const hasPreparedTeams = game.players.every((player) =>
+    Array.isArray(player.finalTeam) && player.finalTeam.length > 0 && Array.isArray(player.finalTeamDraftMeta)
+  );
+
+  if (!hasPreparedTeams) {
+    game.players.forEach((p) => {
+      p.finalTeam = [];
+      p.finalTeamDraftMeta = [];
+      for (let i = 0; i < 3; i += 1) {
+        if (game.results[i] && game.results[i].playerTeams && game.results[i].playerTeams[p.name]) {
+          p.finalTeam.push(...game.results[i].playerTeams[p.name]);
+        }
+        if (game.results[i] && game.results[i].playerTeamDraftMeta && game.results[i].playerTeamDraftMeta[p.name]) {
+          p.finalTeamDraftMeta.push(...game.results[i].playerTeamDraftMeta[p.name]);
+        }
+      }
+    });
+  }
+
+  if (!game.pendingFinalRound || !game.pendingFinalRound.scenario || !game.pendingFinalRound.twist) {
+    const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
+    const finalConditions = generateFinalScenarioAndTwist(difficulty);
+    game.pendingFinalRound = {
+      scenario: finalConditions.scenario,
+      twist: finalConditions.twist,
+      createdAtMs: Date.now()
+    };
+    if (roomCode) {
+      console.log(`[Final prep] Seeded hidden round 4 scenario/twist for room ${roomCode}`);
+    }
+  }
+
+  return game.pendingFinalRound;
+}
+
 function createRoom(roomCode) {
   const room = {
     roomCode,
@@ -1243,7 +1521,12 @@ function createGameInstance(roomCode, players, settings) {
     settings,
     roundStartTime: null,
     allCharactersDrafted: [],
-    roundResolutionLocks: {}
+    roundResolutionLocks: {},
+    pendingFinalRound: null,
+    evalPrecompute: {
+      rounds: {},
+      round4: null
+    }
   };
 }
 
@@ -1491,6 +1774,15 @@ function revealPlotTwist(io, roomCode) {
     }))
   });
 
+  const preseedHeadStartMs = Math.max(0, Math.min(3000, Number(process.env.EVAL_PRESEED_HEADSTART_MS) || 900));
+  const preseedPromise = preseedRoundContextCache(roomCode, game);
+  Promise.race([
+    Promise.resolve(preseedPromise).catch(() => null),
+    new Promise((resolve) => setTimeout(resolve, preseedHeadStartMs))
+  ]).finally(() => {
+    startRoundIntelPrecompute(roomCode, game);
+  });
+
   markRoomsDirty();
   setTimeout(() => startVoting(io, roomCode), 3000);
 }
@@ -1520,6 +1812,8 @@ function startVoting(io, roomCode) {
     totalPlayers: game.players.length,
     roundNumber: game.currentRound + 1
   });
+
+  startRoundIntelPrecompute(roomCode, game);
 
   const voteTimeout = setTimeout(() => {
     if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
@@ -1556,28 +1850,19 @@ function startFinalRound(io, roomCode) {
   game.finalResultsReady = {};
   game.finalResultsEmitted = false;
 
-  // Collect each player's final team (from rounds 1-3)
+  const preparedFinal = prepareFinalRoundState(game, roomCode);
+
   game.players.forEach(p => {
-    p.finalTeam = [];
-    p.finalTeamDraftMeta = [];
-    for (let i = 0; i < 3; i++) {
-      if (game.results[i] && game.results[i].playerTeams && game.results[i].playerTeams[p.name]) {
-        p.finalTeam.push(...game.results[i].playerTeams[p.name]);
-      }
-      if (game.results[i] && game.results[i].playerTeamDraftMeta && game.results[i].playerTeamDraftMeta[p.name]) {
-        p.finalTeamDraftMeta.push(...game.results[i].playerTeamDraftMeta[p.name]);
-      }
-    }
     console.log(`👤 ${p.name}'s final team (${p.finalTeam.length} chars): ${p.finalTeam.join(', ')}`);
   });
 
-  // Generate a massively expanded, difficulty-scaled final scenario and twist for AI evaluation
-  const finalConditions = generateFinalScenarioAndTwist(game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal');
-  game.currentScenario = finalConditions.scenario;
-  game.currentTwist = finalConditions.twist;
+  game.currentScenario = preparedFinal && preparedFinal.scenario ? preparedFinal.scenario : game.currentScenario;
+  game.currentTwist = preparedFinal && preparedFinal.twist ? preparedFinal.twist : game.currentTwist;
 
   console.log(`🎯 Scenario: ${game.currentScenario}`);
   console.log(`🔄 Twist: ${game.currentTwist}`);
+
+  startRound4Precompute(roomCode, game);
 
   io.to(roomCode).emit('roundStart', {
     roundNumber: 4,
@@ -1654,18 +1939,47 @@ async function tallyResults(io, roomCode) {
 
   let roundIntel = null;
   try {
-    roundIntel = await evaluateRoundFromGame(game, roundIndex, {
-      onCharacterEvaluated: ({ playerName, character, success }) => {
-        completedFetches += 1;
-        io.to(roomCode).emit('voteTallyProgress', {
-          completed: completedFetches,
-          total: Math.max(1, totalFetches),
-          playerName,
-          character,
-          success: success !== false
-        });
-      }
-    });
+    const precomputeStore = ensureEvalPrecomputeStore(game);
+    const precomputedRound = precomputeStore && precomputeStore.rounds ? precomputeStore.rounds[roundIndex] : null;
+
+    if (precomputedRound && precomputedRound.result) {
+      roundIntel = precomputedRound.result;
+      completedFetches = Math.max(1, totalFetches);
+      io.to(roomCode).emit('voteTallyProgress', {
+        completed: completedFetches,
+        total: Math.max(1, totalFetches),
+        playerName: null,
+        character: null,
+        success: true,
+        source: 'precomputed'
+      });
+      console.log(`[Eval precompute] Reused round ${roundIndex + 1} intel for room ${roomCode}`);
+    } else if (precomputedRound && precomputedRound.promise) {
+      roundIntel = await precomputedRound.promise;
+      completedFetches = Math.max(1, totalFetches);
+      io.to(roomCode).emit('voteTallyProgress', {
+        completed: completedFetches,
+        total: Math.max(1, totalFetches),
+        playerName: null,
+        character: null,
+        success: true,
+        source: 'precomputed_wait'
+      });
+      console.log(`[Eval precompute] Awaited in-flight round ${roundIndex + 1} intel for room ${roomCode}`);
+    } else {
+      roundIntel = await evaluateRoundFromGame(game, roundIndex, {
+        onCharacterEvaluated: ({ playerName, character, success }) => {
+          completedFetches += 1;
+          io.to(roomCode).emit('voteTallyProgress', {
+            completed: completedFetches,
+            total: Math.max(1, totalFetches),
+            playerName,
+            character,
+            success: success !== false
+          });
+        }
+      });
+    }
   } catch (error) {
     console.error(`❌ Round ${roundIndex + 1} intel evaluation failed:`, error);
   }
@@ -1720,8 +2034,56 @@ async function tallyResults(io, roomCode) {
         acc[name] = data && data.summary ? data.summary : null;
         return acc;
       }, {})
+      : {},
+    roundIntelDiagnostics: roundIntel
+      ? Object.entries(roundIntel.playerEvaluations || {}).reduce((acc, [name, data]) => {
+        const evaluations = Array.isArray(data && data.evaluations) ? data.evaluations : [];
+        const engineModes = Array.from(new Set(
+          evaluations
+            .map((entry) => entry && entry.scoreMeta && entry.scoreMeta.evaluationEngineMode)
+            .filter(Boolean)
+            .map((value) => String(value))
+        ));
+        const engineNames = Array.from(new Set(
+          evaluations
+            .map((entry) => entry && entry.scoreMeta && entry.scoreMeta.evaluationEngine)
+            .filter(Boolean)
+            .map((value) => String(value))
+        ));
+        const trustedCount = evaluations.filter((entry) => entry && entry.scoreMeta && entry.scoreMeta.trustedInfo).length;
+        const avgConfidence = evaluations.length
+          ? Number((evaluations.reduce((sum, entry) => sum + (Number(entry && entry.scoreMeta && entry.scoreMeta.infoConfidence) || 0), 0) / evaluations.length).toFixed(3))
+          : 0;
+        const contextStatuses = Array.from(new Set(
+          evaluations
+            .map((entry) => entry && entry.scoreMeta && entry.scoreMeta.contextExplainability && entry.scoreMeta.contextExplainability.status)
+            .filter(Boolean)
+            .map((value) => String(value))
+        ));
+        const shadowStatuses = Array.from(new Set(
+          evaluations
+            .map((entry) => entry && entry.scoreMeta && entry.scoreMeta.contextShadow && entry.scoreMeta.contextShadow.status)
+            .filter(Boolean)
+            .map((value) => String(value))
+        ));
+        acc[name] = {
+          evaluationCount: evaluations.length,
+          engineModes,
+          engineNames,
+          trustedCount,
+          avgConfidence,
+          contextStatuses,
+          shadowStatuses
+        };
+        return acc;
+      }, {})
       : {}
   });
+
+  if (roundIndex === ((Number(game.totalRounds) || 3) - 1)) {
+    prepareFinalRoundState(game, roomCode);
+    startRound4Precompute(roomCode, game);
+  }
 
   game.players.forEach(p => p.voteLocked = false);
   game.resultsReady = {};

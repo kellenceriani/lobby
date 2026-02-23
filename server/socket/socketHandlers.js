@@ -12,6 +12,7 @@ const {
   markRoomsDirty
 } = require('../core/gameEngine');
 const { evaluateRound4FromGame } = require('../services/round4Service');
+const { warmCharacterEvaluationCaches, getEvaluationEngineMode } = require('../services/entryEvaluationService');
 const {
   sanitizeName,
   sanitizeRoomCode,
@@ -25,6 +26,37 @@ const {
 const allowRequest = createRateLimiter();
 const CHAT_MAX_MESSAGES = 10;
 const CHAT_PRUNE_BATCH = 1;
+const EVAL_WARMUP_ON_DRAFT = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.EVAL_WARMUP_ON_DRAFT || 'true').toLowerCase()
+);
+
+function shouldRunDraftWarmup() {
+  if (!EVAL_WARMUP_ON_DRAFT) return false;
+  const mode = getEvaluationEngineMode();
+  return mode === 'context' || mode === 'context_shadow';
+}
+
+function scheduleDraftWarmup(game, character) {
+  if (!shouldRunDraftWarmup()) return;
+  if (!game || !character) return;
+  const scenario = game.currentScenario || '';
+  const twist = game.currentTwist || 'NO PLOT TWIST';
+  warmCharacterEvaluationCaches(character, scenario, twist, {
+    evaluationMode: 'round',
+    fetchContext: {
+      scenario,
+      twist
+    }
+  })
+    .then((result) => {
+      if (!result || result.ok !== true) return;
+      if (process.env.EVAL_WARMUP_VERBOSE === '1') {
+        const imgTag = !result.imageUrl ? 'n' : (result.imageSynthetic ? 'syn' : 'y');
+        console.log(`[Eval warmup] ${character} source=${result.source || 'n/a'} conf=${Math.round((result.confidence || 0) * 100)}% img=${imgTag}`);
+      }
+    })
+    .catch(() => {});
+}
 
 function appendChatMessage(roomData, message) {
   if (!roomData || !Array.isArray(roomData.messages)) {
@@ -432,6 +464,8 @@ function registerSocketHandlers(io) {
         }, {})
       });
 
+      scheduleDraftWarmup(game, finalCharacter);
+
       markRoomsDirty();
     });
 
@@ -473,6 +507,12 @@ function registerSocketHandlers(io) {
         .every(p => p.draftLocked === true);
 
       if (allLocked) {
+        if (shouldRunDraftWarmup()) {
+          game.players.forEach((p) => {
+            const roster = Array.isArray(p && p.team) ? p.team : [];
+            roster.forEach((entry) => scheduleDraftWarmup(game, entry));
+          });
+        }
         clearTimeout(game.draftTimeout);
         revealPlotTwist(io, room);
       }
@@ -568,7 +608,20 @@ function registerSocketHandlers(io) {
       try {
         game.round4InProgress = true;
         const evaluationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const scored = await evaluateRound4FromGame(game);
+        const precomputeStore = game && game.evalPrecompute && typeof game.evalPrecompute === 'object'
+          ? game.evalPrecompute
+          : null;
+        const round4Precompute = precomputeStore && precomputeStore.round4 ? precomputeStore.round4 : null;
+        let scored;
+        if (round4Precompute && round4Precompute.result) {
+          scored = round4Precompute.result;
+          console.log(`[Eval precompute] Reused round 4 eval for room ${room}`);
+        } else if (round4Precompute && round4Precompute.promise) {
+          scored = await round4Precompute.promise;
+          console.log(`[Eval precompute] Awaited in-flight round 4 eval for room ${room}`);
+        } else {
+          scored = await evaluateRound4FromGame(game);
+        }
 
         if (!game.round4Applied) {
           game.players.forEach(p => {
@@ -722,6 +775,10 @@ function registerSocketHandlers(io) {
 
       if (roomData.gameState && Array.isArray(roomData.gameState.players)) {
         roomData.gameState.players = roomData.gameState.players.filter(p => p.name !== name);
+      }
+
+      if (roomData.gameState && roomData.gameState.evalPrecompute) {
+        roomData.gameState.evalPrecompute = { rounds: {}, round4: null };
       }
 
       if (roomData.gameState) {

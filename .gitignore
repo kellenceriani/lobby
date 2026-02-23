@@ -3,3 +3,8 @@ node_modules/
 .DS_Store
 .runtime/
 server/.runtime/
+tmp/
+server/benchmarks/contextEngine/fixtures/*resolver-cache*.json
+server/benchmarks/contextEngine/fixtures/random-500-last-report.json
+server/benchmarks/contextEngine/fixtures/random-500-passed*.txt
+server/benchmarks/contextEngine/fixtures/random-500-prune-test.txt

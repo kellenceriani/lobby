@@ -18,8 +18,15 @@ app.use(express.static(path.join(__dirname, 'public'), {
   lastModified: true,
   maxAge: '1d',
   setHeaders: (res, filePath) => {
+    const isDev = String(process.env.NODE_ENV || 'development').toLowerCase() !== 'production';
     if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache');
+      return;
+    }
+    if (isDev && (filePath.endsWith('.js') || filePath.endsWith('.css'))) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       return;
     }
     res.setHeader('Cache-Control', 'public, max-age=86400');

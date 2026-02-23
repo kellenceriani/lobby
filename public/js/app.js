@@ -2461,6 +2461,57 @@ function getRoundTierLabel(roundTier = 'low') {
   return 'BLACK TIER';
 }
 
+function getEvalModeBadgeLabel(mode) {
+  const normalized = String(mode || '').toLowerCase();
+  if (normalized === 'context') return 'CE';
+  if (normalized === 'context_shadow') return 'SHADOW';
+  if (normalized === 'legacy') return 'LEGACY';
+  return normalized ? normalized.toUpperCase() : 'UNKNOWN';
+}
+
+function buildRoundIntelDiagnosticsMarkup(roundIntelDiagnostics = {}, roundIntelSummary = {}) {
+  const rows = Object.entries(roundIntelDiagnostics || {});
+  if (!rows.length) return '';
+
+  const markup = rows.map(([playerName, diag]) => {
+    const safeDiag = diag && typeof diag === 'object' ? diag : {};
+    const summary = roundIntelSummary && roundIntelSummary[playerName] ? roundIntelSummary[playerName] : null;
+    const avgConfidence = Number.isFinite(Number(safeDiag.avgConfidence))
+      ? Math.round(Number(safeDiag.avgConfidence) * 100)
+      : (summary && Number.isFinite(Number(summary.averageConfidence)) ? Math.round(Number(summary.averageConfidence) * 100) : 0);
+    const trustedCount = Number(safeDiag.trustedCount) || 0;
+    const evaluationCount = Number(safeDiag.evaluationCount) || 0;
+    const engineModes = Array.isArray(safeDiag.engineModes) ? safeDiag.engineModes : [];
+    const contextStatuses = Array.isArray(safeDiag.contextStatuses) ? safeDiag.contextStatuses : [];
+    const shadowStatuses = Array.isArray(safeDiag.shadowStatuses) ? safeDiag.shadowStatuses : [];
+    const statusText = contextStatuses[0] || shadowStatuses[0] || 'n/a';
+    const modeBadge = getEvalModeBadgeLabel(engineModes[0]);
+
+    return `
+      <div class="results-intel-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(0,0,0,0.16);margin-top:8px;">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+          <strong style="font-size:0.95rem;">${escapeHtml(playerName)}</strong>
+          <small style="opacity:0.82;">Engine ${escapeHtml(modeBadge)} · status ${escapeHtml(statusText)} · trusted ${trustedCount}/${evaluationCount}</small>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+          <span style="font-size:0.72rem;padding:4px 8px;border-radius:999px;background:rgba(0,188,212,0.18);border:1px solid rgba(0,188,212,0.35);letter-spacing:0.04em;">${escapeHtml(modeBadge)}</span>
+          <span style="font-weight:700;">${avgConfidence}%</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="results-intel-panel" style="margin-top:12px;padding:12px;border-radius:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <strong style="font-size:0.95rem;">Evaluator Trace</strong>
+        <small style="opacity:0.8;">Per-player engine + trust summary</small>
+      </div>
+      ${markup}
+    </div>
+  `;
+}
+
 function polarToCartesian(cx, cy, radius, angleDeg) {
   const angleRad = (angleDeg - 90) * (Math.PI / 180);
   return {
@@ -2714,8 +2765,14 @@ socket.on('roundResults', (data) => {
 
   const intelSummaryContainer = document.getElementById('resultsIntelSummary');
   if (intelSummaryContainer) {
-    intelSummaryContainer.style.display = 'none';
-    intelSummaryContainer.innerHTML = '';
+    const diagnosticsMarkup = buildRoundIntelDiagnosticsMarkup(data.roundIntelDiagnostics || {}, data.roundIntelSummary || {});
+    if (diagnosticsMarkup) {
+      intelSummaryContainer.style.display = 'block';
+      intelSummaryContainer.innerHTML = diagnosticsMarkup;
+    } else {
+      intelSummaryContainer.style.display = 'none';
+      intelSummaryContainer.innerHTML = '';
+    }
   }
 
   const resultsDetails = document.getElementById('resultsDetails');

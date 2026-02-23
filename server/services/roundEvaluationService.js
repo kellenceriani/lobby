@@ -1,4 +1,6 @@
-const { scoreCharacter } = require('../evaluator');
+﻿const { evaluateCharacter, evaluateCharactersBatch } = require('./entryEvaluationService');
+
+const { summarizeContextDiagnostics } = require('./evaluation/diagnostics/telemetry');
 
 const INTEL_TELEMETRY_VERBOSE = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.INTEL_TELEMETRY_VERBOSE || '').toLowerCase()
@@ -14,16 +16,20 @@ const ROUND_INTEL_TUNING = {
   maxIntelBonus: 12
 };
 
+const ROUND_INTEL_PLAYER_CONCURRENCY = Math.max(1, Math.min(6, Number(process.env.ROUND_INTEL_PLAYER_CONCURRENCY) || 3));
+const ROUND_INTEL_ENTRY_CONCURRENCY = Math.max(1, Math.min(6, Number(process.env.ROUND_INTEL_ENTRY_CONCURRENCY) || 2));
+
 async function mapWithConcurrency(items, concurrency, mapper) {
-  const safeConcurrency = Math.max(1, Math.min(concurrency || 1, items.length || 1));
-  const results = new Array(items.length);
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeConcurrency = Math.max(1, Math.min(concurrency || 1, safeItems.length || 1));
+  const results = new Array(safeItems.length);
   let index = 0;
 
   async function worker() {
-    while (index < items.length) {
+    while (index < safeItems.length) {
       const current = index;
       index += 1;
-      results[current] = await mapper(items[current], current);
+      results[current] = await mapper(safeItems[current], current);
     }
   }
 
@@ -75,9 +81,7 @@ function calculateIntelRoundBonus(summary) {
   const relevanceContribution = summary.averageRelevance * ROUND_INTEL_TUNING.relevanceWeight;
   const adaptabilityContribution = summary.averageAdaptability * ROUND_INTEL_TUNING.adaptabilityWeight;
   const confidenceContribution = summary.averageConfidence * ROUND_INTEL_TUNING.confidenceWeight;
-  const trustedRatio = summary.trustedCount > 0
-    ? (summary.trustedCount / 2)
-    : 0;
+  const trustedRatio = summary.trustedCount > 0 ? (summary.trustedCount / 2) : 0;
   const trustedRatioContribution = trustedRatio * ROUND_INTEL_TUNING.trustedRatioWeight;
   const ovrContribution = summary.averageOVR >= 90
     ? ROUND_INTEL_TUNING.ovrTierEliteBonus
@@ -114,6 +118,81 @@ function buildFailedEvaluation(character) {
   };
 }
 
+function buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex }) {
+  const draftedMeta = (Array.isArray(draftMeta) ? draftMeta : []).find((entry) =>
+    entry && entry.character && String(entry.character).toLowerCase() === String(character).toLowerCase()
+  );
+
+  return {
+    originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
+    originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
+    evaluationMode: 'round',
+    teamPool: Array.isArray(roster) ? roster : [],
+    fetchContext: {
+      scenario,
+      twist,
+      originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
+      originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
+      draftedRound: (roundIndex || 0) + 1
+    }
+  };
+}
+
+async function evaluatePlayerRoster({
+  player,
+  roster,
+  draftMeta,
+  scenario,
+  twist,
+  roundIndex,
+  roundPool,
+  onCharacterEvaluated
+}) {
+  const batchRows = roster.map((character) => ({
+    character,
+    scenario,
+    twist,
+    options: {
+      ...buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex }),
+      roundPool
+    }
+  }));
+
+  try {
+    const batchResults = await evaluateCharactersBatch(batchRows, { concurrency: ROUND_INTEL_ENTRY_CONCURRENCY });
+    return batchResults.map((entry, index) => {
+      const character = roster[index];
+      const success = Boolean(entry && typeof entry === 'object' && entry.character);
+      if (onCharacterEvaluated) {
+        onCharacterEvaluated({ playerName: player.name, character, success });
+      }
+      if (success) return entry;
+      console.warn(`Round ${roundIndex + 1} character evaluation fallback for "${character}": invalid batch result`);
+      return buildFailedEvaluation(character);
+    });
+  } catch (error) {
+    console.warn(`Round ${roundIndex + 1} batch evaluation failed for "${player.name}": ${error && error.message ? error.message : 'unknown error'}`);
+    return mapWithConcurrency(roster, ROUND_INTEL_ENTRY_CONCURRENCY, async (character) => {
+      try {
+        const evaluated = await evaluateCharacter(character, scenario, twist, {
+          ...buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex }),
+          roundPool
+        });
+        if (onCharacterEvaluated) {
+          onCharacterEvaluated({ playerName: player.name, character, success: true });
+        }
+        return evaluated;
+      } catch (itemError) {
+        console.warn(`Round ${roundIndex + 1} character evaluation fallback for "${character}": ${itemError && itemError.message ? itemError.message : 'unknown error'}`);
+        if (onCharacterEvaluated) {
+          onCharacterEvaluated({ playerName: player.name, character, success: false });
+        }
+        return buildFailedEvaluation(character);
+      }
+    });
+  }
+}
+
 async function evaluateRoundFromGame(game, roundIndex, options = {}) {
   const onCharacterEvaluated = options && typeof options.onCharacterEvaluated === 'function'
     ? options.onCharacterEvaluated
@@ -125,48 +204,25 @@ async function evaluateRoundFromGame(game, roundIndex, options = {}) {
   const intelBonuses = {};
   const intelBreakdown = {};
   const telemetryRows = [];
+  const roundPool = Array.isArray(game && game.players)
+    ? game.players.flatMap((player) => (
+      Array.isArray(player && player.team) ? player.team.slice(0, 2).filter(Boolean) : []
+    ))
+    : [];
 
-  await mapWithConcurrency(game.players, 2, async (player) => {
+  await mapWithConcurrency(game.players, ROUND_INTEL_PLAYER_CONCURRENCY, async (player) => {
     const roster = Array.isArray(player.team) ? player.team.slice(0, 2) : [];
     const draftMeta = Array.isArray(game.draftEntries[player.name]) ? game.draftEntries[player.name] : [];
 
-    const evaluations = await mapWithConcurrency(roster, 2, async (character) => {
-      const draftedMeta = draftMeta.find((entry) =>
-        entry && entry.character && String(entry.character).toLowerCase() === String(character).toLowerCase()
-      );
-
-      try {
-        const evaluated = await scoreCharacter(character, scenario, twist, {
-          originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
-          originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
-          evaluationMode: 'round',
-          fetchContext: {
-            scenario,
-            twist,
-            originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
-            originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
-            draftedRound: (roundIndex || 0) + 1
-          }
-        });
-        if (onCharacterEvaluated) {
-          onCharacterEvaluated({
-            playerName: player.name,
-            character,
-            success: true
-          });
-        }
-        return evaluated;
-      } catch (error) {
-        console.warn(`⚠️ Round ${roundIndex + 1} character evaluation fallback for "${character}": ${error && error.message ? error.message : 'unknown error'}`);
-        if (onCharacterEvaluated) {
-          onCharacterEvaluated({
-            playerName: player.name,
-            character,
-            success: false
-          });
-        }
-        return buildFailedEvaluation(character);
-      }
+    const evaluations = await evaluatePlayerRoster({
+      player,
+      roster,
+      draftMeta,
+      scenario,
+      twist,
+      roundIndex,
+      roundPool,
+      onCharacterEvaluated
     });
 
     const summary = buildIntelSummary(evaluations);
@@ -203,14 +259,48 @@ async function evaluateRoundFromGame(game, roundIndex, options = {}) {
   const evalTotal = safeRows.reduce((sum, row) => sum + (row.totalEvaluations || 0), 0);
 
   console.log(
-    `📈 [Round ${roundIndex + 1} Intel Telemetry] avgConfidence=${Math.round(avgConfidence * 100)}% avgFetchMs=${avgFetchDurationMs} trusted=${trustedTotal}/${evalTotal}`
+    `Round ${roundIndex + 1} Intel Telemetry avgConfidence=${Math.round(avgConfidence * 100)}% avgFetchMs=${avgFetchDurationMs} trusted=${trustedTotal}/${evalTotal}`
   );
 
   if (INTEL_TELEMETRY_VERBOSE) {
     const playerRows = safeRows
       .map((row) => `${row.playerName}: conf=${Math.round((row.averageConfidence || 0) * 100)}% fetchMs=${row.averageFetchDurationMs} trusted=${row.trustedCount}/${row.totalEvaluations}`)
       .join(' | ');
-    console.log(`📊 [Round ${roundIndex + 1} Intel Telemetry:Verbose] ${playerRows}`);
+    console.log(`Round ${roundIndex + 1} Intel Telemetry Verbose ${playerRows}`);
+  }
+
+  const allEvaluations = Object.values(playerEvaluations).flatMap((playerData) => (
+    Array.isArray(playerData && playerData.evaluations) ? playerData.evaluations : []
+  ));
+  if (allEvaluations.length) {
+    const ctxDiag = summarizeContextDiagnostics(allEvaluations, { suspiciousLimit: 6 });
+    const topSources = Object.entries(ctxDiag.sources)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(',');
+    console.log(
+      `Round ${roundIndex + 1} Context Quality img(real/syn/none)=${ctxDiag.images.real}/${ctxDiag.images.synthetic}/${ctxDiag.images.none}` +
+      ` titleDiff=${ctxDiag.counts.titleDiffers}` +
+      ` lowConf=${ctxDiag.counts.lowConfidence}` +
+      ` fastFallback=${ctxDiag.counts.fastFallback}` +
+      ` sources=[${topSources}]`
+    );
+    console.log(
+      `Round ${roundIndex + 1} Context Scores avgOVR=${ctxDiag.averages.ovr}` +
+      ` avgScore=${ctxDiag.averages.score}` +
+      ` avgBase=${ctxDiag.averages.baseAbility}` +
+      ` avgSFit=${ctxDiag.averages.scenarioFit}` +
+      ` avgTFit=${ctxDiag.averages.twistFit}` +
+      ` avgFitDelta=${ctxDiag.averages.fitDelta}`
+    );
+    if (INTEL_TELEMETRY_VERBOSE && ctxDiag.suspicious.length) {
+      console.log(
+        `Round ${roundIndex + 1} Context Suspects ${ctxDiag.suspicious.map((row) => (
+          `${row.character}->${row.resolvedTitle || '?'} [img:${row.image} src:${row.source || '?'} conf:${Math.round(row.infoConfidence * 100)}% sf:${row.scenarioFit} tf:${row.twistFit} ba:${row.baseAbility} ovr:${row.ovr}]`
+        )).join(' | ')}`
+      );
+    }
   }
 
   return {

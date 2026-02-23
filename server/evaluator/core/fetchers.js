@@ -809,7 +809,7 @@ function pickLooseSearchCandidate(character, candidates) {
 async function fetchWikidataMetadata(entityId) {
   if (!entityId) return null;
 
-  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(entityId)}&languages=en&props=labels|descriptions|aliases|sitelinks&format=json&origin=*`;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(entityId)}&languages=en&props=labels|descriptions|aliases|sitelinks|claims&format=json&origin=*`;
   const json = await getJson(url);
   const entity = json && json.entities ? json.entities[entityId] : null;
   if (!entity) return null;
@@ -818,12 +818,25 @@ async function fetchWikidataMetadata(entityId) {
     ? entity.aliases.en.map(entry => entry && entry.value).filter(Boolean).slice(0, 20)
     : [];
 
+  const p18Claim = entity.claims && Array.isArray(entity.claims.P18) ? entity.claims.P18[0] : null;
+  const p18File = p18Claim
+    && p18Claim.mainsnak
+    && p18Claim.mainsnak.datavalue
+    && typeof p18Claim.mainsnak.datavalue.value === 'string'
+    ? p18Claim.mainsnak.datavalue.value
+    : null;
+  const wikidataImageUrl = p18File
+    ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(p18File)}`
+    : null;
+
   return {
     wikidataId: entityId,
     wikidataLabel: entity.labels && entity.labels.en ? entity.labels.en.value : null,
     wikidataDescription: entity.descriptions && entity.descriptions.en ? entity.descriptions.en.value : null,
     enwikiTitle: entity.sitelinks && entity.sitelinks.enwiki ? entity.sitelinks.enwiki.title : null,
-    aliases
+    aliases,
+    wikidataImageFile: p18File,
+    wikidataImageUrl
   };
 }
 
@@ -843,6 +856,7 @@ function mapWikipediaPageToCandidate(page, wikidataMeta = null) {
     imageUrl: upscaleWikipediaThumbnail(
       (page.original && page.original.source)
       || (page.thumbnail && page.thumbnail.source)
+      || (wikidataMeta && wikidataMeta.wikidataImageUrl)
       || null
     ),
     profession: extractProfessionFromWikipedia(page.extract),
@@ -850,7 +864,8 @@ function mapWikipediaPageToCandidate(page, wikidataMeta = null) {
     categories,
     aliases: wikidataMeta && Array.isArray(wikidataMeta.aliases) ? wikidataMeta.aliases : [],
     wikidataDescription: wikidataMeta ? wikidataMeta.wikidataDescription : null,
-    wikidataId: wikidataMeta ? wikidataMeta.wikidataId : null
+    wikidataId: wikidataMeta ? wikidataMeta.wikidataId : null,
+    wikidataImageFile: wikidataMeta ? wikidataMeta.wikidataImageFile : null
   };
 }
 
@@ -1300,6 +1315,8 @@ async function fetchFromOMDb(character) {
 async function fetchCharacterInfo(character, options = {}) {
   const forceRefresh = Boolean(options && options.forceRefresh);
   const mode = String(options.mode || 'default').toLowerCase();
+  const fastRoundMode = mode === 'round' && options && options.fastRoundMode !== false;
+  const skipImageEnrichment = Boolean(options && options.skipImageEnrichment);
   const cacheKey = normalizeName(character).toLowerCase();
   const inflightKey = `${cacheKey}:${mode}${forceRefresh ? ':refresh' : ''}`;
 
@@ -1311,8 +1328,8 @@ async function fetchCharacterInfo(character, options = {}) {
 
   const task = (async () => {
     const isRoundMode = mode === 'round';
-    const stageOneTargetConfidence = isRoundMode ? 0.68 : 0.75;
-    const preStageTwoTargetConfidence = isRoundMode ? 0.64 : 0.72;
+    const stageOneTargetConfidence = isRoundMode ? (fastRoundMode ? 0.58 : 0.68) : 0.75;
+    const preStageTwoTargetConfidence = isRoundMode ? (fastRoundMode ? 0.52 : 0.64) : 0.72;
     const profile = parseCharacterQuery(character);
     const seed = resolveCharacterSeed(character, profile);
     const variants = seed.variants;
@@ -1407,10 +1424,13 @@ async function fetchCharacterInfo(character, options = {}) {
       () => fetchFromWikipediaSummary(baseName),
       () => fetchFromWikidata(baseName, contextHints, entityHints)
     ];
+    if (fastRoundMode) {
+      stageOneFetches.length = Math.min(stageOneFetches.length, 5);
+    }
 
     const seedVariantFetches = variants
       .filter(variant => canonicalizeName(variant) !== canonicalizeName(baseName))
-      .slice(0, isRoundMode ? 2 : 3)
+      .slice(0, isRoundMode ? (fastRoundMode ? 1 : 2) : 3)
       .flatMap(variant => [
         () => fetchFromWikipediaEnhanced(variant),
         () => fetchFromWikipediaSearchEnhanced(variant, contextHints, entityHints)
@@ -1419,7 +1439,7 @@ async function fetchCharacterInfo(character, options = {}) {
     stageOneFetches.push(...seedVariantFetches);
 
     for (const runFetch of stageOneFetches) {
-      const candidate = await runWithRetries(runFetch, 2);
+      const candidate = await runWithRetries(runFetch, fastRoundMode ? 1 : 2);
       collectCandidates(candidate);
 
       const stageCandidates = toUniqueCandidates();
@@ -1434,7 +1454,7 @@ async function fetchCharacterInfo(character, options = {}) {
             resolution: seed.resolution
           }
         };
-        const resolvedWithImage = await enrichCandidateImage(resolved);
+        const resolvedWithImage = skipImageEnrichment ? resolved : await enrichCandidateImage(resolved);
         setCachedCharacter(character, resolvedWithImage);
         return resolvedWithImage;
       }
@@ -1452,9 +1472,48 @@ async function fetchCharacterInfo(character, options = {}) {
           resolution: seed.resolution
         }
       };
-      const resolvedWithImage = await enrichCandidateImage(resolved);
+      const resolvedWithImage = skipImageEnrichment ? resolved : await enrichCandidateImage(resolved);
       setCachedCharacter(character, resolvedWithImage);
       return resolvedWithImage;
+    }
+
+    if (fastRoundMode && best) {
+      const resolved = {
+        ...best,
+        lookupMeta: {
+          queriedVariants: variants,
+          candidateCount: candidates.length,
+          contextHints,
+          resolution: seed.resolution
+        }
+      };
+      const resolvedWithImage = skipImageEnrichment ? resolved : await enrichCandidateImage(resolved);
+      setCachedCharacter(character, resolvedWithImage);
+      return resolvedWithImage;
+    }
+
+    if (fastRoundMode) {
+      const aliasFallbackFast = fallbackFromAliasIndex(character);
+      if (aliasFallbackFast) {
+        setCachedCharacter(character, aliasFallbackFast, 10 * 60 * 1000);
+        return aliasFallbackFast;
+      }
+      const typoFallbackFast = fallbackFromTypo(character);
+      if (typoFallbackFast) {
+        setCachedCharacter(character, typoFallbackFast, 10 * 60 * 1000);
+        return typoFallbackFast;
+      }
+      const knowledgeFallbackFast = fallbackFromKnowledgeIndex(character);
+      if (knowledgeFallbackFast) {
+        setCachedCharacter(character, knowledgeFallbackFast, 10 * 60 * 1000);
+        return knowledgeFallbackFast;
+      }
+      const nameOnlyFallbackFast = fallbackFromNameOnly(character);
+      if (nameOnlyFallbackFast) {
+        setCachedCharacter(character, nameOnlyFallbackFast, 30 * 1000);
+        return nameOnlyFallbackFast;
+      }
+      return null;
     }
 
     const secondaryVariants = variants
@@ -1487,7 +1546,7 @@ async function fetchCharacterInfo(character, options = {}) {
           resolution: seed.resolution
         }
       };
-      const resolvedWithImage = await enrichCandidateImage(resolved);
+      const resolvedWithImage = skipImageEnrichment ? resolved : await enrichCandidateImage(resolved);
       setCachedCharacter(character, resolvedWithImage);
       return resolvedWithImage;
     }
@@ -1515,7 +1574,7 @@ async function fetchCharacterInfo(character, options = {}) {
           resolution: seed.resolution
         }
       };
-      const resolvedWithImage = await enrichCandidateImage(resolved);
+      const resolvedWithImage = skipImageEnrichment ? resolved : await enrichCandidateImage(resolved);
       setCachedCharacter(character, resolvedWithImage);
       return resolvedWithImage;
     }

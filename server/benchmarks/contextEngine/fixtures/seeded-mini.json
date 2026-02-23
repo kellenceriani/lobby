@@ -1,0 +1,70 @@
+﻿[
+  {
+    "id": "r1-batman",
+    "character": "Batman",
+    "scenario": "DEFEND A CITY FROM CHAOS",
+    "twist": "AT NIGHT DURING A BLACKOUT",
+    "options": {
+      "evaluationMode": "round",
+      "originalScenario": "DEFEND A CITY FROM CHAOS",
+      "originalTwist": "AT NIGHT DURING A BLACKOUT"
+    }
+  },
+  {
+    "id": "r1-sherlock",
+    "character": "Sherlock Holmes",
+    "scenario": "INVESTIGATE A SYSTEM FAILURE",
+    "twist": "WITH CONFUSING WITNESS REPORTS",
+    "options": {
+      "evaluationMode": "round"
+    }
+  },
+  {
+    "id": "r1-firetruck",
+    "character": "Firetruck",
+    "scenario": "EVACUATE A FLOODED DISTRICT",
+    "twist": "UNDER HEAVY TRAFFIC",
+    "options": {
+      "evaluationMode": "round"
+    }
+  },
+  {
+    "id": "f-batman-grid",
+    "character": "Batman",
+    "scenario": "DECODE A GRID CRASH",
+    "twist": "WITH ONE SHARED POWER SOURCE",
+    "options": {
+      "evaluationMode": "final",
+      "originalScenario": "DEFEND A CITY FROM CHAOS",
+      "originalTwist": "AT NIGHT DURING A BLACKOUT",
+      "teamPool": ["Batman", "Oracle", "Alfred", "The Flash", "Superman", "Aquaman"],
+      "roundPool": ["Batman", "Oracle", "Alfred", "The Flash", "Superman", "Aquaman", "Spider-Man", "Hulk", "Thor", "Iron Man", "Hawkeye", "Black Widow"]
+    }
+  },
+  {
+    "id": "f-spiderman-grid",
+    "character": "Spider-Man",
+    "scenario": "DECODE A GRID CRASH",
+    "twist": "WITH ONE SHARED POWER SOURCE",
+    "options": {
+      "evaluationMode": "final",
+      "originalScenario": "STOP A TRAIN DISASTER",
+      "originalTwist": "IN RUSH HOUR",
+      "teamPool": ["Spider-Man", "Hulk", "Thor", "Iron Man", "Hawkeye", "Black Widow"],
+      "roundPool": ["Batman", "Oracle", "Alfred", "The Flash", "Superman", "Aquaman", "Spider-Man", "Hulk", "Thor", "Iron Man", "Hawkeye", "Black Widow"]
+    }
+  },
+  {
+    "id": "f-rubberduck-grid",
+    "character": "A Rubber Duck",
+    "scenario": "DECODE A GRID CRASH",
+    "twist": "WITH ONE SHARED POWER SOURCE",
+    "options": {
+      "evaluationMode": "final",
+      "originalScenario": "MAKE A CHILD LAUGH",
+      "originalTwist": "ON LIVE TV",
+      "teamPool": ["A Rubber Duck", "A Cheeseburger", "Batman", "Johnny Test", "Jack Black", "God"],
+      "roundPool": ["A Rubber Duck", "A Cheeseburger", "Batman", "Johnny Test", "Jack Black", "God", "Aquaman", "Poseidon", "Peter Griffin", "A Shark", "A Cow", "David Goggins"]
+    }
+  }
+]

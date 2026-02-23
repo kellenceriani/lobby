@@ -1,39 +1,31 @@
 # LobbyWARS Documentation Hub
 
-This folder is now organized for fast execution when you need to make large, targeted changes (for example: "improve hybrid round scoring" or "retune Round 4 endgame scoring").
+This folder contains active planning docs plus older implementation notes. The current
+core direction is the Context Engine (non-LLM evaluator path), not the earlier live-AI runtime plan.
 
-## Fast Start (Read in this order)
+## Current Priority Docs (read first)
 
-1. `GAME_DESIGN_DOCUMENT.md` — game rules and round-by-round behavior.
-2. `ARCHITECTURE.md` — code-level architecture and ownership by folder.
-3. `SOCKET_EVENT_CONTRACT.md` — real-time API between client/server.
-4. `ROUND4_AI_EVALUATOR_SPEC.md` — Round 4 pipeline and result contract.
-5. `EVALUATOR_TUNING_GUIDE.md` — exact knobs for OVR/relevance/chemistry changes.
+1. `AI_CORE_MIGRATION_PLAN.md` - active Context Engine core plan and weighting standards
+2. `FUTURE_IMPLEMENTATIONS_ROADMAP.md` - active roadmap and priority sequencing
+3. `GAME_DESIGN_DOCUMENT.md` - game rules, pacing, and round flow
+4. `ARCHITECTURE.md` - codebase structure and module ownership
+5. `EVALUATOR_TUNING_GUIDE.md` - evaluator tuning and calibration notes
 
-## Operational Docs
+## Supporting Docs
 
-- `RUNBOOK.md` — safe workflow for implementing major changes quickly.
-- `IMPLEMENTATION_COMPLETE.md` — current implementation status and known limitations.
-- `OVR_CHEMISTRY_IMPROVEMENTS.md` — tuning history and priority opportunities.
+- `SOCKET_EVENT_CONTRACT.md` - client/server event contracts
+- `RUNBOOK.md` - safer workflow guidance for larger changes
+- `MASTER_EXECUTION_ROADMAP.md` - broader execution planning notes
+- `ROUND_RESULTS_UI_BLUEPRINTS.md` - results UI direction notes
 
-## What To Open For Common Requests
+## Legacy / Historical Notes (use with caution)
 
-- **"Improve draft/voting/round pacing"**
-	- `GAME_DESIGN_DOCUMENT.md`
-	- `ARCHITECTURE.md` (game engine + socket flow)
+These may still contain useful ideas, but parts can be outdated relative to the current Context Engine implementation:
 
-- **"Improve AI evaluator quality (Rounds 1–4)"**
-	- `ROUND4_AI_EVALUATOR_SPEC.md`
-	- `EVALUATOR_TUNING_GUIDE.md`
-	- `OVR_CHEMISTRY_IMPROVEMENTS.md`
+- `ROUND4_AI_EVALUATOR_SPEC.md`
+- `OVR_CHEMISTRY_IMPROVEMENTS.md`
+- `IMPLEMENTATION_COMPLETE.md`
 
-- **"Change networking or UI transitions"**
-	- `SOCKET_EVENT_CONTRACT.md`
-	- `ARCHITECTURE.md`
+## Rule
 
-- **"Ship quickly without regressions"**
-	- `RUNBOOK.md`
-
-## Source-of-Truth Rule
-
-If docs and code diverge, code is authoritative. These docs are written to mirror the current implementation in `server/` and `public/js/` and should be updated alongside behavior changes.
+If docs and code diverge, code is authoritative.

@@ -588,47 +588,45 @@
     <div class="ovr-modal-content">
       <div class="ovr-modal-header">
         <h2 id="modalTitle" class="ovr-modal-title">OVR Breakdown</h2>
-        <button class="ovr-modal-close" onclick="closeOVRBreakdown()" aria-label="Close modal">✕</button>
+        <button class="ovr-modal-close" onclick="closeOVRBreakdown()" aria-label="Close modal">&#10006;</button>
       </div>
       <div class="ovr-modal-body">
-        <!-- Character Summary -->
+        <!-- Character Summary (always expanded) -->
         <section class="ovr-breakdown-section">
-          <details class="ovr-dropdown" open>
-            <summary class="ovr-section-title">📋 Character</summary>
+          <div class="ovr-section-title">Character</div>
+          <div class="ovr-section-body">
             <div id="modalCharacterImageWrap" class="ovr-character-image-wrap">
               <img id="modalCharacterImage" class="ovr-character-image" src="" alt="Character portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer">
             </div>
             <p id="modalCharacterSummary" class="ovr-section-text"></p>
-          </details>
+          </div>
         </section>
-
         <!-- Scenario Relevance -->
         <section class="ovr-breakdown-section">
           <details class="ovr-dropdown" open>
-            <summary class="ovr-section-title">🎯 Scenario Fit</summary>
+            <summary class="ovr-section-title">Scenario Fit</summary>
             <p id="modalScenarioRelevance" class="ovr-section-text"></p>
             <div id="modalScenarioKeywords" class="ovr-keywords"></div>
           </details>
         </section>
-
         <!-- Twist Relevance -->
         <section class="ovr-breakdown-section">
           <details class="ovr-dropdown" open>
-            <summary class="ovr-section-title">🌀 Twist Fit</summary>
+            <summary class="ovr-section-title">Twist Fit</summary>
             <p id="modalTwistRelevance" class="ovr-section-text"></p>
             <div id="modalTwistKeywords" class="ovr-keywords"></div>
           </details>
         </section>
-
-        <!-- Score Breakdown -->
+        <!-- Score Breakdown (collapsed by default) -->
         <section class="ovr-breakdown-section">
-          <h3 class="ovr-section-title">📊 Score (0-30)</h3>
-          <div id="modalScoreBreakdown" class="score-breakdown-list"></div>
+          <details class="ovr-dropdown">
+            <summary class="ovr-section-title">Score (0-30)</summary>
+            <div id="modalScoreBreakdown" class="score-breakdown-list"></div>
+          </details>
         </section>
-
         <!-- OVR Breakdown -->
         <section class="ovr-breakdown-section">
-          <h3 class="ovr-section-title">⭐ OVR (0-99)</h3>
+          <h3 class="ovr-section-title">OVR (0-99)</h3>
           <div id="modalOVRBreakdown" class="ovr-breakdown-details">
             <div class="ovr-breakdown-items"></div>
           </div>

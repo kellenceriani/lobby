@@ -12,7 +12,11 @@ const {
   markRoomsDirty
 } = require('../core/gameEngine');
 const { evaluateRound4FromGame } = require('../services/round4Service');
-const { warmCharacterEvaluationCaches, getEvaluationEngineMode } = require('../services/entryEvaluationService');
+const {
+  warmCharacterEvaluationCaches,
+  peekCharacterEvaluationWarmup,
+  getEvaluationEngineMode
+} = require('../services/entryEvaluationService');
 const {
   sanitizeName,
   sanitizeRoomCode,
@@ -36,11 +40,17 @@ function shouldRunDraftWarmup() {
   return mode === 'context' || mode === 'context_shadow';
 }
 
+function getDraftWarmupTwist(game) {
+  if (!game) return 'NO PLOT TWIST';
+  if (game.activePhase === 'DRAFT') return 'NO PLOT TWIST';
+  return game.currentTwist || 'NO PLOT TWIST';
+}
+
 function scheduleDraftWarmup(game, character) {
   if (!shouldRunDraftWarmup()) return;
   if (!game || !character) return;
   const scenario = game.currentScenario || '';
-  const twist = game.currentTwist || 'NO PLOT TWIST';
+  const twist = getDraftWarmupTwist(game);
   warmCharacterEvaluationCaches(character, scenario, twist, {
     evaluationMode: 'round',
     fetchContext: {
@@ -124,6 +134,62 @@ function getEligibleFinalPlayers(roomData, game) {
   return game.players
     .filter((player) => !player.isBot && connectedNames.has(player.name))
     .map((player) => player.name);
+}
+
+async function buildDraftWaitPreviewForPlayer(game, playerName) {
+  if (!game || !playerName) return null;
+  if (game.activePhase !== 'DRAFT') return null;
+
+  const player = Array.isArray(game.players) ? game.players.find((p) => p && p.name === playerName) : null;
+  if (!player || player.draftLocked !== true) return null;
+
+  const roster = Array.isArray(player.team) ? player.team.slice(0, 2).filter(Boolean) : [];
+  if (!roster.length) return null;
+
+  const scenario = String(game.currentScenario || '').trim();
+  const twist = getDraftWarmupTwist(game);
+  if (!scenario) return null;
+
+  const warmups = await Promise.all(roster.map((character) => (
+    peekCharacterEvaluationWarmup(character, scenario, twist, { evaluationMode: 'round' })
+      .catch(() => null)
+  )));
+
+  const evaluations = roster.map((character, index) => {
+    const warm = warmups[index];
+    const hasWarm = Boolean(warm && typeof warm === 'object');
+    return {
+      character: String(character || `Pick ${index + 1}`),
+      ready: Boolean(hasWarm && warm.ok === true),
+      source: hasWarm && warm.source ? String(warm.source) : 'warming',
+      confidence: hasWarm ? (Number(warm.confidence) || 0) : 0,
+      imageUrl: hasWarm && warm.imageUrl ? String(warm.imageUrl) : '',
+      imageSynthetic: Boolean(hasWarm && warm.imageSynthetic),
+      resolverSeedReady: Boolean(hasWarm && warm.resolverSeedReady),
+      contextPreseeded: Boolean(hasWarm && warm.contextPreseeded),
+      fetchDurationMs: hasWarm ? (Number(warm.fetchDurationMs) || 0) : 0
+    };
+  });
+
+  const readyEntries = evaluations.filter((entry) => entry.ready);
+  const trustedCount = readyEntries.filter((entry) => entry.confidence >= 0.75).length;
+  const averageConfidence = readyEntries.length
+    ? (readyEntries.reduce((sum, entry) => sum + (Number(entry.confidence) || 0), 0) / readyEntries.length)
+    : 0;
+
+  return {
+    roundNumber: (Number(game.currentRound) || 0) + 1,
+    source: 'draft_warm_cache',
+    scenario,
+    twistPending: true,
+    summary: {
+      readyCount: readyEntries.length,
+      totalCount: evaluations.length,
+      trustedCount,
+      averageConfidence
+    },
+    evaluations
+  };
 }
 
 function emitFinalRoundResults(io, room, game) {
@@ -517,6 +583,27 @@ function registerSocketHandlers(io) {
         revealPlotTwist(io, room);
       }
       markRoomsDirty();
+    });
+
+    socket.on('requestDraftWaitPreview', async () => {
+      try {
+        const joined = getJoinedRoom(socket);
+        if (!joined) return;
+
+        if (!allowRequest(`${socket.id}:requestDraftWaitPreview`, 400, 20)) {
+          return;
+        }
+
+        const { name, roomData } = joined;
+        const game = roomData.gameState;
+        if (!game || game.activePhase !== 'DRAFT') return;
+
+        const payload = await buildDraftWaitPreviewForPlayer(game, name);
+        if (!payload) return;
+
+        socket.emit('draftWaitIntelPreview', payload);
+      } catch (error) {
+      }
     });
 
     socket.on('castVote', (votedPlayerName) => {

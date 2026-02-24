@@ -80,6 +80,44 @@
       </p>
       <p class="hint" style="font-size: 0.85em; color: #999;">Need 3-6 players to start a game</p>
     </div>
+    <aside class="creator-credit-shell creator-credit-shell-join" aria-label="Project credits and creator links">
+      <div class="creator-credit-head">
+        <span class="creator-credit-kicker">Built by</span>
+        <strong>Kellen Ceriani</strong>
+      </div>
+      <div class="creator-credit-links" role="list" aria-label="Creator links">
+        <a class="creator-credit-link" role="listitem" href="https://kellenceriani.github.io/" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani portfolio" title="Portfolio">
+          <span class="creator-credit-icon is-portfolio" aria-hidden="true">WEB</span>
+          <span>Portfolio</span>
+        </a>
+        <a class="creator-credit-link" role="listitem" href="https://github.com/kellenceriani" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani GitHub profile" title="GitHub">
+          <span class="creator-credit-icon is-github" aria-hidden="true">GH</span>
+          <span>GitHub</span>
+        </a>
+        <a class="creator-credit-link" role="listitem" href="https://www.linkedin.com/in/kellen-ceriani-435974210/" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani LinkedIn profile" title="LinkedIn">
+          <span class="creator-credit-icon is-linkedin" aria-hidden="true">in</span>
+          <span>LinkedIn</span>
+        </a>
+        <a class="creator-credit-link" role="listitem" href="mailto:kmceriani@cox.net" aria-label="Email Kellen Ceriani" title="Email">
+          <span class="creator-credit-icon is-email" aria-hidden="true">@</span>
+          <span>Email</span>
+        </a>
+      </div>
+      <p class="creator-credit-note">Branding / credit / contact</p>
+      <details class="project-credits-drawer project-credits-drawer-compact">
+        <summary>
+          <span class="project-credits-summary-title"><span aria-hidden="true">&#x1F4DC;</span> Credits & Licensing</span>
+          <span class="project-credits-summary-meta">assets + rights</span>
+        </summary>
+        <div class="project-credits-body">
+          <ul class="project-credits-list">
+            <li><span aria-hidden="true">&#x1F3AE;</span> LobbyWARS design / implementation branding by Kellen Ceriani.</li>
+            <li><span aria-hidden="true">&#x1F5BC;</span> Round 4 emotion PNGs are local assets in <code>public/img/emotions</code> (source attribution file not currently documented).</li>
+            <li><span aria-hidden="true">&#x2696;</span> Character names/images shown during gameplay may belong to their respective owners.</li>
+          </ul>
+        </div>
+      </details>
+    </aside>
   </div>
 
   <!-- ==================== TUTORIAL SCREEN (REDESIGNED) ==================== -->
@@ -152,6 +190,27 @@
           <span id="roomCode" class="room-badge">----</span>
           <span id="playerCountBadge" class="player-count-badge">0/6</span>
         </div>
+        <div class="lobby-creator-strip" aria-label="Creator credit links">
+          <span class="lobby-creator-strip-label">Created by Kellen Ceriani</span>
+          <div class="creator-credit-links creator-credit-links-inline" role="list" aria-label="Creator quick links">
+            <a class="creator-credit-link is-inline" role="listitem" href="https://kellenceriani.github.io/" target="_blank" rel="noopener noreferrer" aria-label="Portfolio" title="Portfolio">
+              <span class="creator-credit-icon is-portfolio" aria-hidden="true">WEB</span>
+              <span>Portfolio</span>
+            </a>
+            <a class="creator-credit-link is-inline" role="listitem" href="https://github.com/kellenceriani" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
+              <span class="creator-credit-icon is-github" aria-hidden="true">GH</span>
+              <span>GitHub</span>
+            </a>
+            <a class="creator-credit-link is-inline" role="listitem" href="https://www.linkedin.com/in/kellen-ceriani-435974210/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" title="LinkedIn">
+              <span class="creator-credit-icon is-linkedin" aria-hidden="true">in</span>
+              <span>LinkedIn</span>
+            </a>
+            <a class="creator-credit-link is-inline" role="listitem" href="mailto:kmceriani@cox.net" aria-label="Email Kellen Ceriani" title="Email">
+              <span class="creator-credit-icon is-email" aria-hidden="true">@</span>
+              <span>Email</span>
+            </a>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -168,6 +227,7 @@
       <button class="tab-btn" onclick="switchLobbyTab('chat')" data-tab="chat">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6 0-3.192-3.004-6-7-6S1 4.808 1 8c0 1.468.617 2.83 1.678 3.894zm-.493 3.905a21.682 21.682 0 0 1-.76.258.5.5 0 0 1-.616-.624c.012-.063.157-.721.33-1.557.137-.65.233-1.152.251-1.314a.5.5 0 0 1 .132-.301A9.927 9.927 0 0 1 0 8c0-3.866 3.582-7 8-7s8 3.134 8 7-3.582 7-8 7a9.06 9.06 0 0 1-2.347-.306c-.52.263-1.639.742-3.468 1.105z"/></svg>
         Chat
+        <span id="chatTabPing" class="tab-ping" hidden aria-live="polite" aria-atomic="true"></span>
       </button>
     </div>
 
@@ -299,6 +359,7 @@
               </div>
             </details>
           </section>
+
         </div>
         <div id="hostNote" class="host-note-modern" style="display: none;">
           <p><strong>Host:</strong> <span id="hostNameDisplay">Loading...</span></p>
@@ -306,6 +367,36 @@
         <div class="audio-settings-row">
           <button id="audioToggleMute" class="btn btn-secondary audio-settings-btn" type="button" aria-pressed="false" aria-label="Mute sound effects">Audio: On</button>
         </div>
+        <details class="project-credits-drawer project-credits-drawer-settings">
+          <summary>
+            <span class="project-credits-summary-title"><span aria-hidden="true">&#x1F4DC;</span> Credits & Licensing</span>
+            <span class="project-credits-summary-meta">creator + assets + usage notes</span>
+          </summary>
+          <div class="project-credits-body">
+            <div class="project-credits-grid">
+              <section class="project-credits-card">
+                <h4><span aria-hidden="true">&#x1F3AE;</span> Creator & Brand</h4>
+                <p>LobbyWARS concept, UI/UX direction, gameplay systems, and current project implementation are credited to Kellen Ceriani.</p>
+              </section>
+              <section class="project-credits-card">
+                <h4><span aria-hidden="true">&#x1F4E7;</span> Contact & Profiles</h4>
+                <p>Use the Portfolio / GitHub / LinkedIn / Email chips in the lobby header for creator contact, branding, and project identity links.</p>
+              </section>
+              <section class="project-credits-card">
+                <h4><span aria-hidden="true">&#x1F5BC;</span> Asset Notes</h4>
+                <p>Round 4 emotion PNGs are stored in <code>public/img/emotions</code>. Local README documents filenames/usage, but no source artist/license attribution is currently recorded in-repo.</p>
+              </section>
+              <section class="project-credits-card">
+                <h4><span aria-hidden="true">&#x2696;</span> Licensing / Rights</h4>
+                <p>Character names/images shown during gameplay may come from external sources and remain property of their respective owners. Add explicit asset attribution + project LICENSE files before commercial release.</p>
+              </section>
+            </div>
+            <div class="project-credits-foot">
+              <span><span aria-hidden="true">&#x1F517;</span> Portfolio repo README references an MIT license for the portfolio project.</span>
+              <span><span aria-hidden="true">&#x1F6E0;</span> Open-source dependency credits should remain documented in package manifests / repo docs.</span>
+            </div>
+          </div>
+        </details>
       </div>
 
       <!-- Chat Tab -->
@@ -415,7 +506,16 @@
           <button id="lockDraftBtn" class="btn btn-success btn-lock-draft" onclick="lockDraft()" style="display: none;">
             🔒 LOCK TEAM
           </button>
-          <div id="draftWaitVisual" class="draft-wait-visual" style="display: none;" aria-live="polite"></div>
+          <div id="draftWaitVisual" class="draft-wait-visual" style="display: none;" aria-live="polite">
+            <div id="draftWaitStatus" class="draft-wait-status"></div>
+            <section id="draftWaitIntelPreview" class="draft-wait-intel-preview" hidden aria-label="Early evaluator peek while waiting">
+              <div class="draft-wait-intel-preview-head">
+                <strong>EARLY EVAL PEEK</strong>
+                <small id="draftWaitIntelPreviewStatus">Checking cached evaluator prep...</small>
+              </div>
+              <div id="draftWaitIntelPreviewBody" class="draft-wait-intel-preview-body"></div>
+            </section>
+          </div>
         </div>
 
         <!-- Live Picks (Always Visible) -->
@@ -620,11 +720,11 @@
 
       <div id="evalTeamBoards" class="eval-team-boards"></div>
       <div id="evalHeroHost" class="eval-hero-host"></div>
+      <div class="eval-stage-actions">
+        <span id="evalCompletionBadge" class="eval-completion-badge" hidden>All 18 characters placed</span>
+        <span class="eval-stage-hint" aria-live="polite">Tap / click any placed card for OVR breakdown</span>
+      </div>
     </section>
-
-    <div class="eval-stage-actions">
-      <span id="evalCompletionBadge" class="eval-completion-badge" hidden>All 18 characters placed</span>
-    </div>
 
     <section id="evalLeaderboardContainer" class="eval-leaderboard-container"></section>
 
@@ -690,8 +790,8 @@
         </section>
         <!-- Score Breakdown (collapsed by default) -->
         <section class="ovr-breakdown-section">
-          <details class="ovr-dropdown">
-            <summary class="ovr-section-title">Score (0-30)</summary>
+          <details class="ovr-dropdown ovr-dropdown-score">
+            <summary class="ovr-section-title">Score 0/30</summary>
             <div id="modalScoreBreakdown" class="score-breakdown-list"></div>
           </details>
         </section>
@@ -710,5 +810,6 @@
   <script src="js/round4Eval.js?v=20260223-livefix1"></script>
   <script type="module" src="js/app.js?v=20260223-livefix1"></script>
   <link rel="stylesheet" href="css/round4Eval.css?v=20260223-livefix1">
+  <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260223-livefix1">
 </body>
 </html>

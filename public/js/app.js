@@ -357,6 +357,22 @@ function installFullscreenPromptFlow() {
   installPromptState.initialized = true;
 
   document.addEventListener('screenChanged', syncInstallPromptReopenVisibility);
+  document.addEventListener('screenChanged', (event) => {
+    const screenId = event && event.detail ? event.detail.screenId : '';
+    if (screenId === 'lobby' && getActiveLobbyTabName() === 'chat') {
+      resetChatTabPing();
+    }
+    if (screenId !== 'scenarioScreen') {
+      resetDraftWaitIntelPreview({ hide: true, statusText: 'Checking cached evaluator prep...' });
+    }
+  });
+  document.addEventListener('lobbyTabChanged', (event) => {
+    const tabName = event && event.detail ? event.detail.tabName : '';
+    if (tabName === 'chat') {
+      resetChatTabPing();
+      renderChatMessages({ forceBottom: true });
+    }
+  });
   syncInstallPromptReopenVisibility();
 
   if (!isLikelyMobileDevice()) {
@@ -552,6 +568,19 @@ const draftLockVisualState = {
   waitTicker: null,
   waitEmojiIndex: 0,
   waitDotIndex: 0
+};
+
+const chatPingState = {
+  unreadCount: 0,
+  roomCode: '',
+  lastMessageTs: 0
+};
+
+const draftWaitIntelPreviewState = {
+  pollTimer: null,
+  pollStopAtMs: 0,
+  receivedRound: null,
+  requestRound: null
 };
 
 function clampAudioLevel(value, fallback = 1) {
@@ -1046,6 +1075,192 @@ function renderChatMessages({ forceBottom = false } = {}) {
   }
 }
 
+function getActiveLobbyTabName() {
+  const active = document.querySelector('.tab-btn.active[data-tab]');
+  return active ? String(active.getAttribute('data-tab') || '').trim() : '';
+}
+
+function isLobbyScreenActive() {
+  const lobby = document.getElementById('lobby');
+  return Boolean(lobby && lobby.classList.contains('active'));
+}
+
+function syncChatTabPingBadge() {
+  const badge = document.getElementById('chatTabPing');
+  if (!badge) return;
+  const count = Math.max(0, Number(chatPingState.unreadCount) || 0);
+  const show = count > 0;
+  badge.hidden = !show;
+  if (!show) {
+    badge.textContent = '';
+    badge.classList.remove('is-live');
+    badge.removeAttribute('aria-label');
+    return;
+  }
+  badge.textContent = count > 9 ? '9+' : String(count);
+  badge.classList.add('is-live');
+  badge.setAttribute('aria-label', `${count} unread chat ${count === 1 ? 'message' : 'messages'}`);
+}
+
+function resetChatTabPing() {
+  chatPingState.unreadCount = 0;
+  syncChatTabPingBadge();
+}
+
+function incrementChatTabPing(messageTimestamp) {
+  const ts = Number(messageTimestamp) || Date.now();
+  if (ts && ts <= (Number(chatPingState.lastMessageTs) || 0)) return;
+  chatPingState.lastMessageTs = ts;
+  chatPingState.unreadCount = Math.min(99, (Number(chatPingState.unreadCount) || 0) + 1);
+  syncChatTabPingBadge();
+}
+
+function maybeHandleIncomingChatPing(msg) {
+  if (!msg || msg.player === player.name) return;
+  if (!isLobbyScreenActive()) return;
+  if (getActiveLobbyTabName() === 'chat') {
+    resetChatTabPing();
+    return;
+  }
+  incrementChatTabPing(msg.timestamp);
+}
+
+function stopDraftWaitIntelPreviewPolling() {
+  if (draftWaitIntelPreviewState.pollTimer) {
+    clearInterval(draftWaitIntelPreviewState.pollTimer);
+    draftWaitIntelPreviewState.pollTimer = null;
+  }
+  draftWaitIntelPreviewState.pollStopAtMs = 0;
+}
+
+function resetDraftWaitIntelPreview({ hide = true, statusText = 'Checking cached evaluator prep...' } = {}) {
+  stopDraftWaitIntelPreviewPolling();
+  draftWaitIntelPreviewState.receivedRound = null;
+  draftWaitIntelPreviewState.requestRound = null;
+
+  const panel = document.getElementById('draftWaitIntelPreview');
+  const body = document.getElementById('draftWaitIntelPreviewBody');
+  const status = document.getElementById('draftWaitIntelPreviewStatus');
+  if (status) status.textContent = statusText;
+  if (body) body.innerHTML = '';
+  if (panel) panel.hidden = Boolean(hide);
+}
+
+function getEarlyIntelEmotionEmoji(entry = {}) {
+  const confidence = Number(entry.confidence) || 0;
+  const emotion = String(entry.emotion || '').toLowerCase();
+  if (emotion.includes('mad')) return '&#x1F621;';
+  if (emotion.includes('confused')) return '&#x1F615;';
+  if (emotion.includes('disappointed')) return '&#x1F61E;';
+  if (emotion.includes('amazed')) return '&#x1F929;';
+  if (emotion.includes('happy')) return '&#x1F60A;';
+  if (entry.ready === false) return '&#x23F3;';
+  if (confidence >= 0.9) return '&#x1F92F;';
+  if (confidence >= 0.75) return '&#x2728;';
+  if (confidence >= 0.5) return '&#x1F60C;';
+  return '&#x1F914;';
+}
+
+function renderDraftWaitIntelPreview(preview) {
+  const panel = document.getElementById('draftWaitIntelPreview');
+  const body = document.getElementById('draftWaitIntelPreviewBody');
+  const status = document.getElementById('draftWaitIntelPreviewStatus');
+  if (!panel || !body) return;
+
+  const entries = Array.isArray(preview && preview.evaluations) ? preview.evaluations : [];
+  const summary = preview && preview.summary && typeof preview.summary === 'object' ? preview.summary : {};
+  if (!entries.length) {
+    panel.hidden = false;
+    body.innerHTML = '<p class="draft-wait-intel-preview-empty">No cached evaluator prep was ready before the twist.</p>';
+    if (status) status.textContent = 'No cached preview ready in time.';
+    return;
+  }
+
+  const avgConfidencePct = Number.isFinite(Number(summary.averageConfidence))
+    ? Math.round(Number(summary.averageConfidence) * 100)
+    : null;
+  const trustedCount = Number(summary.trustedCount) || 0;
+  const totalEvalCount = Number(summary.totalCount) || entries.length;
+  const readyCount = Number(summary.readyCount) || entries.filter((entry) => entry && entry.ready === true).length;
+
+  body.innerHTML = `
+    <div class="draft-wait-intel-preview-summary">
+      <span><small>Ready</small><b>${readyCount}/${totalEvalCount}</b></span>
+      <span><small>Trusted</small><b>${trustedCount}/${totalEvalCount}</b></span>
+      <span><small>Confidence</small><b>${avgConfidencePct == null ? 'n/a' : `${avgConfidencePct}%`}</b></span>
+    </div>
+    <div class="draft-wait-intel-preview-list">
+      ${entries.map((entry, idx) => {
+        const confidencePct = Number.isFinite(Number(entry.confidence)) ? Math.round(Number(entry.confidence) * 100) : null;
+        const source = entry.ready === true
+          ? (entry.source ? String(entry.source) : 'cache')
+          : 'warming';
+        const note = entry.ready === true
+          ? `${entry.contextPreseeded ? 'Context ready' : 'Resolver ready'}${entry.imageUrl ? ' + portrait' : ''}${entry.imageSynthetic ? ' (synthetic)' : ''}`
+          : 'Cached prep still warming. Twist has not been revealed yet.';
+        const mood = getEarlyIntelEmotionEmoji(entry);
+        return `
+          <article class="draft-wait-intel-card" style="--draft-wait-intel-index:${idx};">
+            <div class="draft-wait-intel-card-head">
+              <strong>${escapeHtml(entry.character || `Pick ${idx + 1}`)}</strong>
+              <span class="draft-wait-intel-card-mood" aria-hidden="true">${mood}</span>
+            </div>
+            <div class="draft-wait-intel-card-metrics">
+              <span>${entry.ready === true ? 'Ready' : 'Status'} <b>${entry.ready === true ? 'Yes' : 'Warming'}</b></span>
+              <span>Source <b>${escapeHtml(source)}</b></span>
+              <span>${confidencePct == null ? 'Confidence n/a' : `Confidence ${confidencePct}%`}</span>
+            </div>
+            <p>${escapeHtml(note)}</p>
+          </article>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  if (status) {
+    status.textContent = `Cache-only preview while waiting${readyCount < totalEvalCount ? ' (still warming...)' : ''}.`;
+  }
+  panel.hidden = false;
+}
+
+function startDraftWaitIntelPreviewPolling() {
+  const scenarioScreen = document.getElementById('scenarioScreen');
+  if (!scenarioScreen || !scenarioScreen.classList.contains('active')) return;
+  if (!gameState.draftLocked) return;
+
+  const currentRound = Number(gameState.currentRound) || 0;
+  if (
+    draftWaitIntelPreviewState.requestRound === currentRound
+    && (draftWaitIntelPreviewState.pollTimer || draftWaitIntelPreviewState.receivedRound === currentRound)
+  ) {
+    return;
+  }
+
+  resetDraftWaitIntelPreview({ hide: false, statusText: 'Checking cached evaluator prep...' });
+  draftWaitIntelPreviewState.pollStopAtMs = Date.now() + 3400;
+  draftWaitIntelPreviewState.receivedRound = null;
+  draftWaitIntelPreviewState.requestRound = currentRound;
+
+  const requestPreview = () => {
+    if (!socket || typeof socket.emit !== 'function') return;
+    if (!document.getElementById('scenarioScreen')?.classList.contains('active')) return;
+    if (!gameState.draftLocked) return;
+    if (Date.now() > draftWaitIntelPreviewState.pollStopAtMs) {
+      stopDraftWaitIntelPreviewPolling();
+      const status = document.getElementById('draftWaitIntelPreviewStatus');
+      if (status && !draftWaitIntelPreviewState.receivedRound) {
+        status.textContent = 'No cached peek this time. Twist is next.';
+      }
+      return;
+    }
+    socket.emit('requestDraftWaitPreview');
+  };
+
+  requestPreview();
+  draftWaitIntelPreviewState.pollTimer = setInterval(requestPreview, 450);
+  addTimer(draftWaitIntelPreviewState.pollTimer);
+}
+
 function setPreRoundProgress(percent = 0, fetchLabel = 'Preparing next phase…') {
   const bounded = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
   const progressFill = document.getElementById('preRoundProgressFill');
@@ -1332,6 +1547,12 @@ socket.on('roomData', (data) => {
   const prunedHistory = pruneChatMessages(roomState.messages);
   roomState.messages = prunedHistory.messages;
   updateChatEraseNotice({ prunedCount: prunedHistory.prunedCount });
+  if (chatPingState.roomCode !== (player.room || '')) {
+    chatPingState.roomCode = player.room || '';
+    resetChatTabPing();
+  } else {
+    syncChatTabPingBadge();
+  }
   const isHost = data.host === player.name;
 
   document.getElementById('roomCode').textContent = player.room;
@@ -1523,6 +1744,7 @@ socket.on('newMessage', (msg) => {
   const localPruned = pruneChatMessages(roomState.messages);
   roomState.messages = localPruned.messages;
   renderChatMessages();
+  maybeHandleIncomingChatPing(cleanMessage);
 
   if (msg.player !== player.name) {
     playMessageSound();
@@ -1537,6 +1759,7 @@ function sendStartGame() {
 // GAME EVENTS
 // ========================
 socket.on('gameStarting', (data) => {
+  resetDraftWaitIntelPreview({ hide: true });
   gameState.totalRounds = data.totalRounds;
   gameState.myTeam = [];
   gameState.draftEntryCount = 0;
@@ -1551,6 +1774,7 @@ socket.on('gameStarting', (data) => {
 });
 
 socket.on('roundStart', (data) => {
+  resetDraftWaitIntelPreview({ hide: true });
   gameState.currentRound = data.roundNumber;
   gameState.myTeam = [];
   gameState.draftEntryCount = 0;
@@ -1775,6 +1999,7 @@ function ensureDraftUrgencyTicker() {
 
 function setDraftWaitVisual(isLocked) {
   const waitVisual = document.getElementById('draftWaitVisual');
+  const waitStatus = document.getElementById('draftWaitStatus');
   const livePicksSection = document.querySelector('.live-picks-section');
   const myTeamList = document.getElementById('myTeam');
   if (!waitVisual) return;
@@ -1782,10 +2007,15 @@ function setDraftWaitVisual(isLocked) {
   if (!isLocked) {
     waitVisual.style.display = 'none';
     waitVisual.classList.remove('waiting-active');
-    waitVisual.textContent = '';
+    if (waitStatus) {
+      waitStatus.textContent = '';
+    } else {
+      waitVisual.textContent = '';
+    }
     if (livePicksSection) livePicksSection.classList.remove('draft-live-erased');
     if (myTeamList) myTeamList.classList.remove('draft-team-locked');
     stopDraftWaitTicker();
+    resetDraftWaitIntelPreview({ hide: true, statusText: 'Checking cached evaluator prep...' });
     draftLockVisualState.waitDotIndex = 0;
     return;
   }
@@ -1800,12 +2030,18 @@ function setDraftWaitVisual(isLocked) {
     const dotCount = (draftLockVisualState.waitDotIndex % 3) + 1;
     const dots = '.'.repeat(dotCount);
     const emoji = emojiCycle[draftLockVisualState.waitEmojiIndex % emojiCycle.length];
-    waitVisual.textContent = `${emoji} WAITING FOR SLOWER PLAYERS${dots}`;
+    const statusText = `${emoji} WAITING FOR SLOWER PLAYERS${dots}`;
+    if (waitStatus) {
+      waitStatus.textContent = statusText;
+    } else {
+      waitVisual.textContent = statusText;
+    }
     draftLockVisualState.waitDotIndex += 1;
     draftLockVisualState.waitEmojiIndex += 1;
   };
 
   renderWaitingText();
+  startDraftWaitIntelPreviewPolling();
   if (draftLockVisualState.waitTicker) return;
 
   draftLockVisualState.waitTicker = setInterval(renderWaitingText, 760);
@@ -2007,6 +2243,8 @@ socket.on('plotTwistRevealed', (data) => {
   clearTimers();
   gameState.currentTwist = data.twist;
   document.getElementById('twistText').textContent = `"${data.twist}"`;
+  stopDraftWaitIntelPreviewPolling();
+  resetDraftWaitIntelPreview({ hide: true });
   showScreen('twistScreen');
   playTwistSound();
   showToast('🌀 Plot twist incoming!', 'warning');
@@ -2017,6 +2255,8 @@ socket.on('plotTwistRevealed', (data) => {
 // ========================
 socket.on('votingPhaseStart', (data) => {
   clearTimers();
+  stopDraftWaitIntelPreviewPolling();
+  resetDraftWaitIntelPreview({ hide: true });
   playPhaseShiftSound();
   const charInput = document.getElementById('charInput');
   if (charInput) charInput.value = '';
@@ -2120,6 +2360,23 @@ socket.on('votingPhaseStart', (data) => {
   }, 1000);
 
   addTimer(voteTimer);
+});
+
+socket.on('draftWaitIntelPreview', (data) => {
+  if (!data || typeof data !== 'object') return;
+  if (!document.getElementById('scenarioScreen')?.classList.contains('active')) return;
+  if (!gameState.draftLocked) return;
+  const incomingRound = Number(data.roundNumber) || 0;
+  const activeRound = Number(gameState.currentRound) || 0;
+  if (incomingRound && activeRound && incomingRound !== activeRound) return;
+  draftWaitIntelPreviewState.receivedRound = incomingRound || activeRound || null;
+  renderDraftWaitIntelPreview(data);
+  const summary = data && data.summary && typeof data.summary === 'object' ? data.summary : {};
+  const readyCount = Number(summary.readyCount) || 0;
+  const totalCount = Number(summary.totalCount) || 0;
+  if (totalCount > 0 && readyCount >= totalCount) {
+    stopDraftWaitIntelPreviewPolling();
+  }
 });
 
 // ========================
@@ -2414,8 +2671,30 @@ function buildRadialSliceData(lines = [], emptyLabel = 'No scoring notes.') {
     note: compactBreakdownLine(topLine || emptyLabel),
     notePoints: topLine ? formatSignedNumber(topPoints) : '±0',
     rawTopPoints: topPoints,
+    hasLines: safeLines.length > 0,
     moreCount: Math.max(0, safeLines.length - 1)
   };
+}
+
+function buildRadialSliceHiddenNotesLabel(slice, laneKey = 'vote') {
+  const safeSlice = slice && typeof slice === 'object' ? slice : {};
+  const moreCount = Math.max(0, Number(safeSlice.moreCount) || 0);
+  if (moreCount <= 0) {
+    if (laneKey === 'intel') return 'No hidden intel notes';
+    if (laneKey === 'core') return 'No hidden modifier notes';
+    return 'No hidden vote notes';
+  }
+  if (laneKey === 'intel') return `+${moreCount} hidden intel notes`;
+  if (laneKey === 'core') return `+${moreCount} hidden modifier notes`;
+  return `+${moreCount} hidden vote notes`;
+}
+
+function getRadialBubblePrimaryNote(slice, impactLabel) {
+  const safeSlice = slice && typeof slice === 'object' ? slice : {};
+  if (String(impactLabel || '').toLowerCase() === 'boost' && safeSlice.hasLines !== true) {
+    return 'N/A';
+  }
+  return String(safeSlice.note || 'No scoring note.');
 }
 
 function getImpactDescriptor(points = 0) {
@@ -2753,24 +3032,24 @@ socket.on('roundResults', (data) => {
                   class="radial-bubble vote"
                 >
                   <h5>Votes ${formatSignedNumber(summary.votePoints)} • ${shares.vote}%</h5>
-                  <p><b>${voteImpact}:</b> ${escapeHtml(voteSlice.note)}</p>
-                  <small>${voteSlice.moreCount ? `+${voteSlice.moreCount} hidden vote notes` : 'No hidden vote notes'}</small>
+                  <p><b>${voteImpact}:</b> ${escapeHtml(getRadialBubblePrimaryNote(voteSlice, voteImpact))}</p>
+                  <small>${escapeHtml(buildRadialSliceHiddenNotesLabel(voteSlice, 'vote'))}</small>
                 </article>
 
                 <article
                   class="radial-bubble intel"
                 >
                   <h5>Intel ${formatSignedNumber(summary.intelPoints)} • ${shares.intel}%</h5>
-                  <p><b>${intelImpact}:</b> ${escapeHtml(intelSlice.note)}</p>
-                  <small>${intelSlice.moreCount ? `+${intelSlice.moreCount} hidden intel notes` : 'No hidden intel notes'}</small>
+                  <p><b>${intelImpact}:</b> ${escapeHtml(getRadialBubblePrimaryNote(intelSlice, intelImpact))}</p>
+                  <small>${escapeHtml(buildRadialSliceHiddenNotesLabel(intelSlice, 'intel'))}</small>
                 </article>
 
                 <article
                   class="radial-bubble core"
                 >
                   <h5>Other ${formatSignedNumber(summary.corePoints)} • ${shares.core}%</h5>
-                  <p><b>${coreImpact}:</b> ${escapeHtml(coreSlice.note)}</p>
-                  <small>${coreSlice.moreCount ? `+${coreSlice.moreCount} hidden modifier notes` : 'No hidden modifier notes'}</small>
+                  <p><b>${coreImpact}:</b> ${escapeHtml(getRadialBubblePrimaryNote(coreSlice, coreImpact))}</p>
+                  <small>${escapeHtml(buildRadialSliceHiddenNotesLabel(coreSlice, 'core'))}</small>
                 </article>
               </div>
             </div>
@@ -2853,6 +3132,12 @@ socket.on('gameEnded', (data) => {
   const placeholderImage = buildMissingWinnerImage();
   const winnerGallery = document.getElementById('finalWinnerCharacters');
   const finalContainerRoot = document.querySelector('.final-container-modern');
+  if (finalContainerRoot) {
+    finalContainerRoot.classList.remove('from-round4-archive');
+    finalContainerRoot.removeAttribute('data-final-view');
+    const staleArchiveBackbar = finalContainerRoot.querySelector('.final-archive-backbar');
+    if (staleArchiveBackbar) staleArchiveBackbar.remove();
+  }
   if (winnerGallery && finalContainerRoot) {
     const dockedFinalList = winnerGallery.querySelector('#finalLeaderboard');
     const dockedFinalActions = winnerGallery.querySelector('.final-actions-modern');
@@ -3059,43 +3344,43 @@ socket.on('gameEnded', (data) => {
       }).join('');
 
       winnerGallery.innerHTML = `
-        <section class="winner-squad-stage" aria-label="${usingGlobalEliteShowcase ? 'Global elite six showcase' : 'Champion squad stage'}">
-          <button class="winner-squad-compact" type="button" aria-expanded="false" aria-controls="winnerSquadExpanded" aria-label="${usingGlobalEliteShowcase ? 'Expand Global Elite Six Showcase' : 'Expand Champion Squad'}">
-            <div class="winner-compact-title">${usingGlobalEliteShowcase ? '🏆 GLOBAL ELITE FINAL SIX' : '🏆 ELITE FINAL SIX'}</div>
+        <section class="winner-squad-stage" aria-label="${usingGlobalEliteShowcase ? 'Global Top 6 Profiles showcase' : 'Champion squad stage'}">
+          <button class="winner-squad-compact" type="button" aria-expanded="false" aria-controls="winnerSquadExpanded" aria-label="${usingGlobalEliteShowcase ? 'Expand Top 6 Profiles showcase' : 'Expand Champion Squad'}">
+            <div class="winner-compact-title">${usingGlobalEliteShowcase ? '🏆 GLOBAL TOP 6 PROFILES' : '🏆 TOP 6 PROFILES'}</div>
             <div class="winner-compact-lineup">${compactSlots}</div>
-            <div class="winner-compact-stats" aria-label="${usingGlobalEliteShowcase ? 'Champion and elite showcase stats' : 'Champion stats'}">
+            <div class="winner-compact-stats" aria-label="${usingGlobalEliteShowcase ? 'Champion and Top 6 showcase stats' : 'Champion stats'}">
               <span class="winner-stat-chip champion">Champion: ${safeChampionName}</span>
               <span class="winner-stat-chip mvp">MVP: ${safeMVP}</span>
-              <span class="winner-stat-chip ovr ${teamOvrClass}">Team OVR: ${teamOVR}</span>
-              <span class="winner-stat-chip">Chemistry: ${chemistryLabel}</span>
-              <span class="winner-stat-chip">Rarity Score: ${rarityScore}</span>
-              <span class="winner-stat-chip">Power Index: ${powerIndex}</span>
+              <span class="winner-stat-chip ovr ${teamOvrClass}">Champion Team OVR: ${teamOVR}</span>
+              <span class="winner-stat-chip">Champion Chemistry: ${chemistryLabel}</span>
+              <span class="winner-stat-chip">Champion Rarity: ${rarityScore}</span>
+              <span class="winner-stat-chip">Champion Power Index: ${powerIndex}</span>
               <span class="winner-stat-chip">Avg Draft Value: ${avgDraftValueLabel}</span>
-              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Elite Avg OVR: ${showcaseAverageOVR}</span>` : ''}
-              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Teams in Elite: ${showcaseTeamsRepresented}</span>` : ''}
-              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Champion Picks in Elite: ${championEliteCount}/6</span>` : ''}
+              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Top 6 Avg OVR: ${showcaseAverageOVR}</span>` : ''}
+              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Teams in Top 6: ${showcaseTeamsRepresented}</span>` : ''}
+              ${usingGlobalEliteShowcase ? `<span class="winner-stat-chip elite-meta">Champion Picks in Top 6: ${championEliteCount}/6</span>` : ''}
             </div>
-            <div class="winner-compact-hint">${usingGlobalEliteShowcase ? 'Tap to open global elite showcase • Tap cards to flip' : 'Tap to morph into full squad intel • Tap cards to flip'}</div>
+            <div class="winner-compact-hint">${usingGlobalEliteShowcase ? 'Tap to open global Top 6 showcase • Tap cards to flip' : 'Tap to morph into full squad intel • Tap cards to flip'}</div>
           </button>
-          <div id="winnerSquadExpanded" class="winner-squad-shell winner-squad-shell-expanded" role="region" aria-label="${usingGlobalEliteShowcase ? 'Global elite showcase expanded' : 'Champion team expanded'}" aria-hidden="true">
-          <button class="winner-squad-close" type="button" aria-label="${usingGlobalEliteShowcase ? 'Close Global Elite Showcase' : 'Close Champion Squad'}">✕</button>
-          <div class="winner-squad-banner">${usingGlobalEliteShowcase ? '🏆 GLOBAL ELITE FINAL SIX • LEAGUE SHOWCASE' : '🏆 ELITE FINAL SIX • CHAMPION BREAKDOWN'}</div>
+          <div id="winnerSquadExpanded" class="winner-squad-shell winner-squad-shell-expanded" role="region" aria-label="${usingGlobalEliteShowcase ? 'Global Top 6 Profiles showcase expanded' : 'Champion team expanded'}" aria-hidden="true">
+          <button class="winner-squad-close" type="button" aria-label="${usingGlobalEliteShowcase ? 'Close Global Top 6 Profiles Showcase' : 'Close Champion Squad'}">✕</button>
+          <div class="winner-squad-banner">${usingGlobalEliteShowcase ? '🏆 GLOBAL TOP 6 PROFILES • LEAGUE SHOWCASE' : '🏆 TOP 6 PROFILES • CHAMPION BREAKDOWN'}</div>
           <div class="winner-squad-tools">
             <button class="winner-flip-all" type="button" aria-pressed="false">🃏 FLIP ALL</button>
           </div>
           <div class="winner-expanded-stats" aria-label="Champion detail stats">
             <div class="winner-expanded-stat mvp wide"><span>MVP</span><strong>${safeMVP} (${Number(stats.mvpOVR) || 0} OVR)</strong></div>
-            <div class="winner-expanded-stat team-ovr"><span>Team OVR</span><strong class="${teamOvrClass}">${teamOVR}</strong></div>
-            <div class="winner-expanded-stat power"><span>Power Index</span><strong>${powerIndex}</strong><em>Tier ${powerTier}</em></div>
-            <div class="winner-expanded-stat rarity wide"><span>Rarity Score</span><div class="rarity-topline"><strong>${rarityScore}</strong><strong class="rarity-rareplus">Rare+: ${Number(stats.rarePlusCount) || 0}/${Number(stats.picks) || championCharacters.length}</strong></div><div class="rarity-meter" aria-hidden="true"><span style="width:${rarityPercent}%"></span></div><div class="rarity-gems" aria-label="Rarity intensity">${rarityGems}</div></div>
-            <div class="winner-expanded-stat"><span>Chemistry</span><strong>${chemistryLabel}</strong></div>
+            <div class="winner-expanded-stat team-ovr"><span>Champion Team OVR</span><strong class="${teamOvrClass}">${teamOVR}</strong></div>
+            <div class="winner-expanded-stat power"><span>Champion Power Index</span><strong>${powerIndex}</strong><em>Tier ${powerTier}</em></div>
+            <div class="winner-expanded-stat rarity wide"><span>Champion Rarity Score</span><div class="rarity-topline"><strong>${rarityScore}</strong><strong class="rarity-rareplus">Rare+: ${Number(stats.rarePlusCount) || 0}/${Number(stats.picks) || championCharacters.length}</strong></div><div class="rarity-meter" aria-hidden="true"><span style="width:${rarityPercent}%"></span></div><div class="rarity-gems" aria-label="Rarity intensity">${rarityGems}</div></div>
+            <div class="winner-expanded-stat"><span>Champion Chemistry</span><strong>${chemistryLabel}</strong></div>
             <div class="winner-expanded-stat"><span>Avg Draft Value</span><strong class="${avgDraftValue >= 0 ? 'plus' : 'minus'}">${avgDraftValueLabel}</strong></div>
-            ${usingGlobalEliteShowcase ? `<div class="winner-expanded-stat elite wide"><span>Global Elite Snapshot</span><strong>Avg OVR ${showcaseAverageOVR} • Teams ${showcaseTeamsRepresented}</strong><em>Champion entries in elite: ${championEliteCount}/6</em></div>` : ''}
+            ${usingGlobalEliteShowcase ? `<div class="winner-expanded-stat elite wide"><span>Top 6 Profiles Snapshot</span><strong>Avg OVR ${showcaseAverageOVR} • Teams ${showcaseTeamsRepresented}</strong><em>Champion entries in Top 6: ${championEliteCount}/6</em></div>` : ''}
           </div>
           <div class="winner-char-gallery">
             ${expandedSlots}
           </div>
-          <div class="winner-squad-footer">${usingGlobalEliteShowcase ? 'Global Elite Six by final OVR. Champion result remains score-based.' : 'Elite Final Six.'}</div>
+          <div class="winner-squad-footer">${usingGlobalEliteShowcase ? 'Top 6 Profiles by final OVR. Champion result remains score-based.' : 'Top 6 Profiles.'}</div>
           </div>
         </section>
       `;
@@ -3111,16 +3396,16 @@ socket.on('gameEnded', (data) => {
             <p class="final-ceremony-subtitle">${bridgeNarrative}</p>
             <div class="final-ceremony-kpis" aria-label="Champion quick summary">
               <span class="final-ceremony-kpi champion">Champion ${safeChampionName}</span>
-              <span class="final-ceremony-kpi">Round 4 ${round4Points} pts</span>
-              <span class="final-ceremony-kpi ${teamOvrClass}">Team OVR ${teamOVR}</span>
-              <span class="final-ceremony-kpi">Power ${powerIndex}</span>
+              <span class="final-ceremony-kpi">Champion R4 ${round4Points} pts</span>
+              <span class="final-ceremony-kpi ${teamOvrClass}">Champion Team OVR ${teamOVR}</span>
+              <span class="final-ceremony-kpi">Champion Power ${powerIndex}</span>
               <span class="final-ceremony-kpi">${finalMarginLabel}</span>
-              ${usingGlobalEliteShowcase ? `<span class="final-ceremony-kpi">Elite Split ${championEliteCount}/6</span>` : ''}
+              ${usingGlobalEliteShowcase ? `<span class="final-ceremony-kpi">Top 6 Split ${championEliteCount}/6</span>` : ''}
             </div>
           </header>
           <div class="final-ceremony-tabs" role="tablist" aria-label="Final result views">
             <button type="button" class="final-ceremony-tab is-active" data-final-view="story" role="tab" aria-selected="true" aria-controls="finalCeremonyPanelStory">Bridge</button>
-            <button type="button" class="final-ceremony-tab" data-final-view="elite" role="tab" aria-selected="false" aria-controls="finalCeremonyPanelElite">Elite Six</button>
+            <button type="button" class="final-ceremony-tab" data-final-view="elite" role="tab" aria-selected="false" aria-controls="finalCeremonyPanelElite">Top 6 Profiles</button>
             <button type="button" class="final-ceremony-tab" data-final-view="standings" role="tab" aria-selected="false" aria-controls="finalCeremonyPanelStandings">Standings</button>
           </div>
           <section id="finalCeremonyPanelStory" class="final-ceremony-panel is-active" data-final-panel="story" role="tabpanel" aria-label="Bridge summary">
@@ -3130,9 +3415,9 @@ socket.on('gameEnded', (data) => {
                 <p>Round 4 handles the placement drama. Final Results now gives three clean views so mobile players can focus one layer at a time.</p>
                 <ul class="final-bridge-list">
                   <li>MVP: ${safeMVP}</li>
-                  <li>Chemistry: ${chemistryLabel} | Rarity Score: ${rarityScore}</li>
+                  <li>Champion Chemistry: ${chemistryLabel} | Champion Rarity: ${rarityScore}</li>
                   <li>Avg Draft Value: ${avgDraftValueLabel} | Power Tier: ${powerTier}</li>
-                  ${usingGlobalEliteShowcase ? `<li>Elite Avg OVR: ${showcaseAverageOVR} | Teams: ${showcaseTeamsRepresented}</li>` : ''}
+                  ${usingGlobalEliteShowcase ? `<li>Top 6 Avg OVR: ${showcaseAverageOVR} | Teams: ${showcaseTeamsRepresented}</li>` : ''}
                 </ul>
               </article>
               <article class="final-bridge-card podium">
@@ -3141,20 +3426,20 @@ socket.on('gameEnded', (data) => {
                   ${podiumPreviewMarkup || '<li class="final-podium-preview-empty">Standings unavailable.</li>'}
                 </ol>
                 <div class="final-bridge-actions">
-                  <button type="button" class="final-bridge-jump" data-final-jump="elite">Open Elite Six</button>
+                  <button type="button" class="final-bridge-jump" data-final-jump="elite">Open Top 6 Profiles</button>
                   <button type="button" class="final-bridge-jump alt" data-final-jump="standings">Open Standings</button>
                 </div>
               </article>
             </div>
           </section>
-          <section id="finalCeremonyPanelElite" class="final-ceremony-panel" data-final-panel="elite" role="tabpanel" aria-label="Elite six showcase" hidden></section>
+          <section id="finalCeremonyPanelElite" class="final-ceremony-panel" data-final-panel="elite" role="tabpanel" aria-label="Top 6 Profiles showcase" hidden></section>
           <section id="finalCeremonyPanelStandings" class="final-ceremony-panel" data-final-panel="standings" role="tabpanel" aria-label="Final standings" hidden>
             <div class="final-standings-intro">
               <div>
                 <strong>Scoreboard Verdict</strong>
-                <p>Full match totals with per-round breakdowns.</p>
+                <p>Score-based final standings with per-round breakdowns (separate from the Top 6 OVR showcase).</p>
               </div>
-              <button type="button" class="final-bridge-jump alt" data-final-jump="elite">Back to Elite Six</button>
+              <button type="button" class="final-bridge-jump alt" data-final-jump="elite">Back to Top 6 Profiles</button>
             </div>
             <div id="finalStandingsMount"></div>
           </section>
@@ -3342,12 +3627,51 @@ function sendPlayAgain() {
 }
 
 function openFinalResultsArchive() {
+  const finalContainer = document.querySelector('.final-container-modern');
+  if (finalContainer) {
+    finalContainer.classList.add('from-round4-archive');
+    if (!finalContainer.querySelector('.final-archive-backbar')) {
+      const backbar = document.createElement('div');
+      backbar.className = 'final-archive-backbar';
+      backbar.innerHTML = `
+        <button type="button" class="final-archive-backbtn" onclick="returnToRound4Finale()">
+          <span aria-hidden="true">←</span>
+          <span>Back to Round 4 Finale</span>
+        </button>
+        <div class="final-archive-backmeta">
+          <strong>Final Results Archive</strong>
+          <small>Detailed archive view (Round 4 remains the primary finale)</small>
+        </div>
+      `;
+      finalContainer.insertBefore(backbar, finalContainer.firstChild);
+    }
+  }
   showScreen('finalScreen');
+
+  const standingsTab = document.querySelector('.final-ceremony-tab[data-final-view="standings"]');
+  if (standingsTab && typeof standingsTab.click === 'function') {
+    standingsTab.click();
+  }
+}
+
+function returnToRound4Finale() {
+  showScreen('round4EvalScreen');
+  const finale = document.querySelector('.eval-finale-ceremony');
+  if (finale) {
+    try {
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      finale.scrollIntoView(reduceMotion ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
+    } catch (error) {
+    }
+  }
 }
 
 function goToLobby() {
   if (confirm('Are you sure? This will return to the lobby.')) {
     clearTimers();
+    resetDraftWaitIntelPreview({ hide: true });
+    chatPingState.roomCode = '';
+    resetChatTabPing();
     audioState.hasPlayedLobbyEntry = false;
     resetAllState();
     socket.disconnect();
@@ -3394,6 +3718,7 @@ window.lockVote = lockVote;
 window.readyForNextRound = readyForNextRound;
 window.sendPlayAgain = sendPlayAgain;
 window.openFinalResultsArchive = openFinalResultsArchive;
+window.returnToRound4Finale = returnToRound4Finale;
 window.goToLobby = goToLobby;
 
 if (shouldAutoOpenRound4Loading()) {

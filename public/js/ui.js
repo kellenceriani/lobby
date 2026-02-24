@@ -142,6 +142,12 @@ export function switchLobbyTab(tabName) {
 
   const selectedBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
   if (selectedBtn) selectedBtn.classList.add('active');
+
+  try {
+    window.__activeLobbyTab = tabName;
+  } catch (error) {
+  }
+  document.dispatchEvent(new CustomEvent('lobbyTabChanged', { detail: { tabName } }));
 }
 
 export function toggleAccordion(header) {

@@ -34,7 +34,17 @@ const round4State = {
   loadingTwist: '',
   animationPrimed: false,
   animationPrimePromise: null,
-  revealPerfMode: null
+  revealPerfMode: null,
+  finaleObserver: null,
+  finaleAutoCollapseTimer: null,
+  finaleLastTouchedAt: Object.create(null),
+  pageObserver: null,
+  pageAutoCollapseTimer: null,
+  pageLastTouchedAt: Object.create(null),
+  pageCollapsed: Object.create(null),
+  pageNavActive: 'cards',
+  pageNavMenuOpen: false,
+  pageNavGlobalHandlersBound: false
 };
 
 const IMAGE_PRELOAD_CACHE = new Map();
@@ -553,6 +563,10 @@ function setRevealCeremonyProgress(percent, stageLabel = '') {
   if (queueBar) queueBar.setAttribute('aria-valuenow', String(safePercent));
   if (queuePct) queuePct.textContent = `${safePercent}%`;
   if (stageCurrent && stageLabel) stageCurrent.textContent = `Stage: ${stageLabel}`;
+  const revealButton = document.getElementById('evalStartRevealBtn');
+  if (revealButton) {
+    revealButton.classList.toggle('is-near-ready', safePercent >= 78 && !round4State.loadingReadyToStart);
+  }
 
   updateLoadingVisualGraph(safePercent, readPercentText('evalPreloadPct'));
 }
@@ -593,10 +607,12 @@ function setLoadingReadyState(isReady) {
 
   if (!button) return;
   button.disabled = !round4State.loadingReadyToStart;
+  button.classList.toggle('is-ready-live', round4State.loadingReadyToStart);
+  button.classList.remove('is-near-ready');
 
   if (round4State.loadingReadyToStart) {
     button.textContent = 'START REVEAL CEREMONY';
-    if (hint) hint.textContent = 'Everything is staged. Start the reveal when everyone is ready.';
+    if (hint) hint.textContent = 'Everything is staged. You can start this reveal locally as soon as you are ready.';
     if (status) status.textContent = 'Showdown ready. Tap start to begin the final reveal.';
   } else {
     button.textContent = 'PREPARING REVEAL CEREMONY...';
@@ -612,9 +628,13 @@ function setRound4LoadingPhase(isLoadingPhase) {
   if (isLoadingPhase) {
     const completion = document.getElementById('evalCompletionBadge');
     const continueBtn = document.getElementById('evalContinueBtn');
-    if (completion) completion.hidden = true;
+    if (completion) {
+      completion.hidden = true;
+      completion.textContent = '0 characters placed';
+    }
     if (continueBtn) continueBtn.hidden = true;
   }
+  refreshRound4PageUi();
 }
 
 function setHeaderContextPhase(phase) {
@@ -640,6 +660,7 @@ function startRound4Reveal() {
   if (loading) loading.style.display = 'none';
   setRound4LoadingPhase(false);
   setHeaderContextPhase('reveal');
+  refreshRound4PageUi();
   if (status) status.textContent = 'Final showdown starting...';
 
   setLoadingBotContext(null, null, '');
@@ -660,11 +681,32 @@ function signed(value) {
 
 function formatLockDuration(ms) {
   const numeric = Number(ms);
-  if (!Number.isFinite(numeric) || numeric <= 0) return '—';
+  if (!Number.isFinite(numeric) || numeric <= 0) return '--';
   const totalSeconds = Math.max(1, Math.ceil(numeric / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function updatePlacementCompletionBadge(count, total, { final = false } = {}) {
+  const badge = document.getElementById('evalCompletionBadge');
+  if (!badge) return;
+
+  const safeTotal = Math.max(0, Number(total) || 0);
+  const safeCount = Math.max(0, Number(count) || 0);
+
+  if (safeTotal <= 0 || safeCount <= 0) {
+    badge.hidden = true;
+    return;
+  }
+
+  badge.hidden = false;
+  if (final || safeCount >= safeTotal) {
+    badge.textContent = `${safeTotal} characters placed!`;
+    return;
+  }
+
+  badge.textContent = `${safeCount} character${safeCount === 1 ? '' : 's'} placed`;
 }
 
 function boardStateClass(filledCount) {
@@ -691,6 +733,8 @@ function updateEvalProgress(current, total) {
 }
 
 function clearEvalSurface() {
+  teardownRound4PageUi();
+  teardownRound4FinaleUi();
   const boards = document.getElementById('evalTeamBoards');
   const hero = document.getElementById('evalHeroHost');
   const leaderboard = document.getElementById('evalLeaderboardContainer');
@@ -700,6 +744,8 @@ function clearEvalSurface() {
 }
 
 function resetCinematicState() {
+  teardownRound4PageUi();
+  teardownRound4FinaleUi();
   if (round4State.revealTimer) {
     window.clearTimeout(round4State.revealTimer);
     round4State.revealTimer = null;
@@ -729,6 +775,10 @@ function resetCinematicState() {
   round4State.teamBoardCollapsed = Object.create(null);
   round4State.loadingScenario = '';
   round4State.loadingTwist = '';
+  round4State.pageCollapsed = Object.create(null);
+  round4State.pageLastTouchedAt = Object.create(null);
+  round4State.pageNavActive = 'cards';
+  round4State.pageNavMenuOpen = false;
 
   const boards = document.getElementById('evalTeamBoards');
   if (boards) boards.classList.remove('is-elite-crash');
@@ -741,12 +791,15 @@ function resetCinematicState() {
   const completion = document.getElementById('evalCompletionBadge');
   const status = document.getElementById('evalFinalStatus');
   const continueBtn = document.getElementById('evalContinueBtn');
-  if (completion) completion.hidden = true;
+  if (completion) {
+    completion.hidden = true;
+    completion.textContent = '0 characters placed';
+  }
   if (status) status.textContent = 'Preparing the final showdown...';
   if (continueBtn) {
     continueBtn.hidden = true;
     continueBtn.disabled = true;
-    continueBtn.textContent = '✅ LOCK IN & CONTINUE';
+    continueBtn.textContent = 'LOCK IN & CONTINUE';
   }
 }
 
@@ -761,6 +814,7 @@ function initRound4Evaluation(data) {
     evalScreen.classList.add('active');
   }
   setRound4LoadingPhase(true);
+  refreshRound4PageUi();
 
   round4State.totalCharacters = Object.values(finalTeams).reduce((sum, team) => sum + (Array.isArray(team) ? team.length : 0), 0);
   round4State.totalTeams = Object.keys(finalTeams || {}).length;
@@ -962,7 +1016,7 @@ function renderTeamBoards() {
             <img src="${escapeHtml(image)}" alt="${escapeHtml(evalData.character || 'Character')} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
             <span>
               <span class="eval-docked-name ${tierClass}">${escapeHtml(evalData.character || 'Unknown')}</span>
-              <span class="eval-docked-ovr ${tierClass}">OVR ${Number(evalData.ovr) || 0} · ${escapeHtml(evalData.evalTraceBadge || 'LG')}</span>
+              <span class="eval-docked-ovr ${tierClass}">OVR ${Number(evalData.ovr) || 0} | ${escapeHtml(evalData.evalTraceBadge || 'LG')}</span>
             </span>
           </button>
         </div>
@@ -973,7 +1027,7 @@ function renderTeamBoards() {
       <section class="eval-team-board ${boardStateClass(filled)} ${isFocus ? 'is-focus' : ''} ${isMuted ? 'is-muted' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-team-board="${team.teamIndex}" data-filled="${filled}">
         <header class="eval-team-board-head">
           <h3 class="${teamTierClass}">${escapeHtml(team.playerName)}</h3>
-          <p>${filled}/6 placed • Team OVR ${Number(team.teamSummary && team.teamSummary.totalOVR) || 0}</p>
+          <p>${filled}/6 placed | Team OVR ${Number(team.teamSummary && team.teamSummary.totalOVR) || 0}</p>
           <button class="eval-team-toggle" type="button" data-team-toggle="${team.teamIndex}" ${allTeamsComplete ? '' : 'disabled'} aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-label="Toggle ${escapeHtml(team.playerName)} board">${isCollapsed ? 'Expand' : 'Collapse'}</button>
         </header>
         <div class="eval-team-slots">${slotsHtml}</div>
@@ -1016,7 +1070,6 @@ function renderActivePlaque() {
   const fitDelta = Number(evalData.fitDelta) || 0;
   const fitClass = fitDelta >= 0 ? 'fit-positive' : 'fit-negative';
   const image = resolveCharacterImage(evalData.imageUrl, evalData.character || 'No Portrait');
-  const notes = Array.isArray(evalData.notes) ? evalData.notes : [];
 
   host.innerHTML = `
     <article id="evalActivePlaque" class="eval-active-plaque ${tierClass} reveal-tier-${getRevealTierFromEval(evalData)}" data-reveal-tier="${getRevealTierFromEval(evalData)}" aria-live="polite">
@@ -1024,8 +1077,8 @@ function renderActivePlaque() {
         <img src="${escapeHtml(image)}" alt="${escapeHtml(evalData.character || 'Character')} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
         <div>
           <h3 class="${tierClass}">${escapeHtml(evalData.character || 'Unknown')}</h3>
-          <p>${escapeHtml(evalData.roleType || 'Balanced')} • ${escapeHtml(evalData.rarity || 'Common')}</p>
-          <p>${escapeHtml(evalData.evalEngineMode || 'legacy')} • ${escapeHtml(evalData.evalTraceStatusLabel || evalData.evalTraceStatus || 'n/a')} • ${escapeHtml(evalData.evalTrustLabel || `Trust ${Number(evalData.evalTrustPct) || 0}%`)}</p>
+          <p>${escapeHtml(evalData.roleType || 'Balanced')} | ${escapeHtml(evalData.rarity || 'Common')}</p>
+          <p>${escapeHtml(evalData.evalEngineMode || 'legacy')} | ${escapeHtml(evalData.evalTraceStatusLabel || evalData.evalTraceStatus || 'n/a')} | ${escapeHtml(evalData.evalTrustLabel || `Trust ${Number(evalData.evalTrustPct) || 0}%`)}</p>
           <p>${escapeHtml(evalData.shortReason || 'No reason provided.')}</p>
         </div>
       </div>
@@ -1041,12 +1094,6 @@ function renderActivePlaque() {
         <div class="eval-active-chip"><span>Trace (R/C)</span><strong>${Number(evalData.evalResolvePct) || 0}/${Number(evalData.evalContextPct) || 0}</strong></div>
         <div class="eval-active-chip trace-${escapeHtml(String(evalData.evalRiskSeverity || 'low'))}"><span>Risk</span><strong>${escapeHtml(String(evalData.evalRiskSeverity || 'low').toUpperCase())}</strong></div>
       </div>
-      <details class="eval-active-details">
-        <summary>Details + Notes</summary>
-        ${evalData.evalRiskSummary || evalData.evalTraceLine ? `<p class="eval-active-trace-summary">${escapeHtml(evalData.evalTraceLine || '')}${evalData.evalRiskSummary ? ` • ${escapeHtml(evalData.evalRiskSummary)}` : ''}</p>` : ''}
-        <ul>${notes.length ? notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('') : '<li>No additional evaluator notes.</li>'}</ul>
-        <p class="eval-active-phrase">"${escapeHtml(evalData.phrase || 'No phrase available.')}"</p>
-      </details>
     </article>
   `;
 
@@ -1292,8 +1339,7 @@ function finishSequenceIfComplete() {
   const completion = document.getElementById('evalCompletionBadge');
   const status = document.getElementById('evalFinalStatus');
   if (completion) {
-    completion.hidden = false;
-    completion.textContent = `All ${round4State.queue.length} characters placed`;
+    updatePlacementCompletionBadge(round4State.queue.length, round4State.queue.length, { final: true });
   }
   if (status) status.textContent = 'Reveal complete. Lock this result when your team is ready.';
 
@@ -1301,7 +1347,7 @@ function finishSequenceIfComplete() {
   if (continueBtn) {
     continueBtn.hidden = false;
     continueBtn.disabled = false;
-    continueBtn.textContent = '✅ LOCK IN & CONTINUE';
+    continueBtn.textContent = 'LOCK IN & CONTINUE';
   }
 
   renderFinalLeaderboard();
@@ -1414,6 +1460,7 @@ function handleNextCharacter(onComplete) {
     round4State.transitionRunning = false;
 
     updateEvalProgress(round4State.placements.length, round4State.queue.length);
+    updatePlacementCompletionBadge(round4State.placements.length, round4State.queue.length);
     renderTeamBoards();
 
     if (round4State.placements.length >= round4State.queue.length) {
@@ -1468,7 +1515,14 @@ function renderFinalLeaderboard() {
     return String(a && a.playerName ? a.playerName : '').localeCompare(String(b && b.playerName ? b.playerName : ''));
   });
 
-  container.innerHTML = `
+  let resultsMount = container.querySelector('.eval-round4-results-mount');
+  if (!resultsMount) {
+    resultsMount = document.createElement('div');
+    resultsMount.className = 'eval-round4-results-mount';
+    container.prepend(resultsMount);
+  }
+
+  resultsMount.innerHTML = `
     <section class="eval-leaderboard-rich" aria-label="Round 4 detailed leaderboard">
       <header class="eval-leaderboard-rich-head">
         <h3>Final Showdown Leaderboard</h3>
@@ -1491,7 +1545,7 @@ function renderFinalLeaderboard() {
               <div class="eval-lb-rank">#${index + 1}</div>
               <div class="eval-lb-player">
                 <h4 class="${tierClass}">${escapeHtml(row && row.playerName ? row.playerName : 'Unknown')}</h4>
-                <p class="eval-lb-sub">Team OVR ${Number(row && row.totalOVR) || 0} • Chemistry ${signed(Number(row && row.chemistryBonus) || 0)}</p>
+                <p class="eval-lb-sub">Team OVR ${Number(row && row.totalOVR) || 0} | Chemistry ${signed(Number(row && row.chemistryBonus) || 0)}</p>
               </div>
               <div class="eval-lb-top-pick">
                 <img src="${escapeHtml(topPickImage)}" alt="${escapeHtml(row && row.topPick ? row.topPick : 'Top pick')} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
@@ -1501,10 +1555,10 @@ function renderFinalLeaderboard() {
                 </div>
               </div>
               <div class="eval-lb-stats">
-                <span><small>OVR CUM 💦</small><b>${safeCumulativeOVR}</b></span>
-                <span><small>OVR AVG 🧢</small><b>${averageOVR}</b></span>
-                <span><small>FASTEST LOCK 🔒</small><b>${fastestLock}</b></span>
-                <span><small>R4 PTS🫵</small><b>${roundPoints}</b></span>
+                <span class="eval-lb-stat-chip stat-ovr-cum"><small>OVR CUM &#x1F4A6;</small><b>${safeCumulativeOVR}</b></span>
+                <span class="eval-lb-stat-chip stat-ovr-avg"><small>OVR AVG &#x1F9E2;</small><b>${averageOVR}</b></span>
+                <span class="eval-lb-stat-chip stat-lock"><small>FASTEST LOCK &#x1F512;</small><b>${fastestLock}</b></span>
+                <span class="eval-lb-stat-chip stat-r4"><small>R4 PTS &#x1FAF5;</small><b>${roundPoints}</b></span>
               </div>
             </article>
           `;
@@ -1512,11 +1566,590 @@ function renderFinalLeaderboard() {
       </div>
     </section>
   `;
+  refreshRound4PageUi();
 }
 
 function isRound4EvalScreenActive() {
   const screen = document.getElementById('round4EvalScreen');
   return Boolean(screen && screen.classList.contains('active'));
+}
+
+function teardownRound4PageUi() {
+  if (round4State.pageObserver && typeof round4State.pageObserver.disconnect === 'function') {
+    try {
+      round4State.pageObserver.disconnect();
+    } catch (error) {
+    }
+  }
+  round4State.pageObserver = null;
+  if (round4State.pageAutoCollapseTimer) {
+    window.clearTimeout(round4State.pageAutoCollapseTimer);
+    round4State.pageAutoCollapseTimer = null;
+  }
+}
+
+function ensureRound4PageNavigator() {
+  const screen = document.getElementById('round4EvalScreen');
+  if (!screen) return null;
+  let shell = screen.querySelector('.eval-page-nav-shell');
+  if (shell) return shell;
+
+  shell = document.createElement('div');
+  shell.className = 'eval-page-nav-shell';
+  shell.hidden = true;
+  shell.innerHTML = `
+    <button type="button" class="eval-page-nav-edge-tab" data-page-menu-toggle aria-label="Toggle Round 4 section navigator" aria-expanded="false">
+      <span aria-hidden="true">&#9776;</span>
+      <span>Sections</span>
+    </button>
+    <div class="eval-page-nav-rail">
+      <div class="eval-page-nav-head">
+        <button type="button" class="eval-page-nav-hamburger" data-page-menu-toggle aria-label="Toggle Round 4 section navigator" aria-expanded="false">
+          <span aria-hidden="true">&#9776;</span>
+          <span>Sections</span>
+        </button>
+      </div>
+      <div class="eval-page-nav" role="tablist" aria-label="Round 4 page sections"></div>
+      <button type="button" class="eval-page-nextcue" data-page-next aria-label="Scroll to next section">
+        <span class="eval-page-nextcue-label">Scroll for results</span>
+        <strong class="eval-page-nextcue-target">Round 4 Results</strong>
+        <em aria-hidden="true">&#x2193;</em>
+      </button>
+    </div>
+  `;
+
+  const header = screen.querySelector('.eval-header-sticky');
+  if (header && header.parentNode) {
+    header.insertAdjacentElement('afterend', shell);
+  } else {
+    screen.insertAdjacentElement('afterbegin', shell);
+  }
+  return shell;
+}
+
+function getRound4PageSectionEntries() {
+  const screen = document.getElementById('round4EvalScreen');
+  const resultsContainer = document.getElementById('evalLeaderboardContainer');
+  const cardsNode = screen ? screen.querySelector('.eval-cinematic-stage') : null;
+  const resultsNode = resultsContainer ? (resultsContainer.querySelector('.eval-round4-results-mount') || null) : null;
+  const finaleNode = resultsContainer ? (resultsContainer.querySelector('.eval-finale-ceremony') || null) : null;
+
+  return [
+    {
+      id: 'cards',
+      label: 'Player Cards',
+      icon: '&#x1F0CF;',
+      node: cardsNode,
+      available: Boolean(cardsNode),
+      collapsible: Boolean(cardsNode) && !screen?.classList.contains('is-loading-phase') && Boolean(round4State.sequenceComplete || finaleNode)
+    },
+    {
+      id: 'results',
+      label: 'Round 4 Results',
+      icon: '&#x1F4CA;',
+      node: resultsNode,
+      available: Boolean(resultsNode),
+      collapsible: Boolean(resultsNode)
+    },
+    {
+      id: 'finale',
+      label: 'Final Results',
+      icon: '&#x1F3C6;',
+      node: finaleNode,
+      available: Boolean(finaleNode),
+      collapsible: false
+    }
+  ];
+}
+
+function setRound4PageSectionCollapsed(sectionId, shouldCollapse) {
+  const entries = getRound4PageSectionEntries();
+  const entry = entries.find((item) => item.id === sectionId);
+  if (!entry || !entry.node || !entry.collapsible) return false;
+
+  const collapsed = Boolean(shouldCollapse);
+  round4State.pageCollapsed[sectionId] = collapsed;
+  entry.node.classList.toggle('is-page-collapsed', collapsed);
+  entry.node.setAttribute('data-page-collapsed', collapsed ? 'true' : 'false');
+  return true;
+}
+
+function refreshRound4PageUi() {
+  const shell = ensureRound4PageNavigator();
+  const screen = document.getElementById('round4EvalScreen');
+  if (!shell || !screen) return;
+
+  teardownRound4PageUi();
+
+  const isVisible = screen.classList.contains('active') && !screen.classList.contains('is-loading-phase');
+  shell.hidden = !isVisible;
+  if (!isVisible) return;
+
+  const entries = getRound4PageSectionEntries();
+  const nav = shell.querySelector('.eval-page-nav');
+  const nextCue = shell.querySelector('[data-page-next]');
+  const menuToggles = Array.from(shell.querySelectorAll('[data-page-menu-toggle]'));
+  if (!nav) return;
+
+  const headerNode = screen.querySelector('.eval-header-sticky');
+  const headerOffset = Math.max(54, Math.round(headerNode?.getBoundingClientRect?.().height || 0));
+  shell.style.setProperty('--eval-page-header-offset', `${headerOffset}px`);
+
+  const compactNavMode = window.innerWidth <= 900;
+  if (!compactNavMode) round4State.pageNavMenuOpen = false;
+  shell.classList.toggle('is-menu-open', Boolean(round4State.pageNavMenuOpen) && compactNavMode);
+  menuToggles.forEach((menuToggle) => {
+    menuToggle.setAttribute('aria-expanded', (Boolean(round4State.pageNavMenuOpen) && compactNavMode) ? 'true' : 'false');
+    if (menuToggle.getAttribute('data-bound') !== 'true') {
+      menuToggle.addEventListener('click', () => {
+        round4State.pageNavMenuOpen = !round4State.pageNavMenuOpen;
+        refreshRound4PageUi();
+      });
+      menuToggle.setAttribute('data-bound', 'true');
+    }
+  });
+
+  nav.innerHTML = entries.map((entry) => `
+    <div class="eval-page-nav-item ${entry.available ? '' : 'is-disabled'} ${entry.collapsible ? 'has-fold' : 'no-fold'}" data-page-item="${entry.id}">
+      <button
+        type="button"
+        class="eval-page-nav-btn"
+        role="tab"
+        aria-selected="${entry.id === round4State.pageNavActive ? 'true' : 'false'}"
+        data-page-target="${entry.id}"
+        ${entry.available ? '' : 'disabled'}
+      >
+        <span class="eval-page-nav-ico" aria-hidden="true">${entry.icon}</span>
+        <span class="eval-page-nav-text">${entry.label}</span>
+      </button>
+      ${entry.collapsible ? `
+        <button
+          type="button"
+          class="eval-page-nav-fold"
+          data-page-toggle="${entry.id}"
+          aria-label="${(round4State.pageCollapsed[entry.id] ? 'Expand' : 'Collapse')} ${entry.label}"
+          aria-pressed="${round4State.pageCollapsed[entry.id] ? 'true' : 'false'}"
+        >
+          <span class="eval-page-nav-fold-pointer" aria-hidden="true">&#x2192;</span>
+          <span class="eval-page-nav-fold-label">${round4State.pageCollapsed[entry.id] ? 'Expand' : 'Collapse'}</span>
+          <span class="eval-page-nav-fold-icon" aria-hidden="true">${round4State.pageCollapsed[entry.id] ? '&#x003E;' : '&#x25BE;'}</span>
+        </button>
+      ` : ''}
+    </div>
+  `).join('');
+
+  const reducedMotion = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const availableEntries = entries.filter((entry) => entry.available && entry.node);
+
+  const updateActive = (id) => {
+    if (!id) return;
+    round4State.pageNavActive = id;
+    nav.querySelectorAll('.eval-page-nav-btn').forEach((button) => {
+      const active = (button.getAttribute('data-page-target') || '') === id;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+
+    if (nextCue) {
+      const sequence = availableEntries.map((entry) => entry.id);
+      const currentIndex = sequence.indexOf(id);
+      const nextId = currentIndex >= 0 ? sequence[currentIndex + 1] : sequence[0];
+      const nextEntry = availableEntries.find((entry) => entry.id === nextId) || availableEntries[0];
+      const canShowNext = Boolean(nextEntry && nextEntry.id && nextEntry.id !== id);
+      nextCue.hidden = !canShowNext;
+      if (canShowNext) {
+        nextCue.setAttribute('data-page-next-target', nextEntry.id);
+        const labelEl = nextCue.querySelector('.eval-page-nextcue-label');
+        const targetEl = nextCue.querySelector('.eval-page-nextcue-target');
+        const arrowEl = nextCue.querySelector('em');
+        const wrapsToTop = currentIndex >= 0 && currentIndex === (sequence.length - 1);
+        if (labelEl) {
+          labelEl.textContent = wrapsToTop
+            ? 'Scroll up for player cards'
+            : (id === 'cards' ? 'Scroll for results' : 'Scroll for final verdict');
+        }
+        if (targetEl) targetEl.textContent = nextEntry.label;
+        if (arrowEl) arrowEl.innerHTML = wrapsToTop ? '&#x2191;' : '&#x2193;';
+        nextCue.setAttribute('data-scroll-direction', wrapsToTop ? 'up' : 'down');
+        nextCue.setAttribute('aria-label', wrapsToTop ? 'Scroll to previous section' : 'Scroll to next section');
+      }
+    }
+  };
+
+  const markTouched = (id) => {
+    round4State.pageLastTouchedAt[id] = Date.now();
+  };
+
+  const scheduleAutoCollapse = (focusId) => {
+    if (round4State.pageAutoCollapseTimer) {
+      window.clearTimeout(round4State.pageAutoCollapseTimer);
+    }
+    round4State.pageAutoCollapseTimer = window.setTimeout(() => {
+      const compactMode = window.innerWidth <= 900;
+      if (!compactMode) {
+        round4State.pageAutoCollapseTimer = null;
+        return;
+      }
+      const now = Date.now();
+      availableEntries.forEach((entry) => {
+        if (entry.id === focusId || !entry.collapsible) return;
+        if (entry.id === 'finale') return;
+        const touchedAt = Number(round4State.pageLastTouchedAt[entry.id]) || 0;
+        if ((now - touchedAt) < 2600) return;
+        if (entry.node.getAttribute('data-in-view') === 'true') return;
+        setRound4PageSectionCollapsed(entry.id, true);
+      });
+      round4State.pageAutoCollapseTimer = null;
+    }, 2000);
+  };
+
+  const scrollToPageSection = (id) => {
+    const target = availableEntries.find((entry) => entry.id === id);
+    if (!target || !target.node) return;
+    setRound4PageSectionCollapsed(id, false);
+    markTouched(id);
+    updateActive(id);
+    scheduleAutoCollapse(id);
+    try {
+      target.node.scrollIntoView(reducedMotion ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
+    } catch (error) {
+    }
+  };
+
+  if (!round4State.pageNavGlobalHandlersBound) {
+    document.addEventListener('pointerdown', (event) => {
+      if (!round4State.pageNavMenuOpen || window.innerWidth > 900) return;
+      if (!shell || shell.hidden) return;
+      const target = event && event.target;
+      if (target && shell.contains(target)) return;
+      round4State.pageNavMenuOpen = false;
+      refreshRound4PageUi();
+    }, true);
+
+    document.addEventListener('keydown', (event) => {
+      if (!round4State.pageNavMenuOpen || window.innerWidth > 900) return;
+      if (!event || event.key !== 'Escape') return;
+      round4State.pageNavMenuOpen = false;
+      refreshRound4PageUi();
+    });
+
+    window.addEventListener('resize', () => {
+      if (!isRound4EvalScreenActive()) return;
+      refreshRound4PageUi();
+    }, { passive: true });
+
+    round4State.pageNavGlobalHandlersBound = true;
+  }
+
+  nav.querySelectorAll('.eval-page-nav-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (compactNavMode) round4State.pageNavMenuOpen = false;
+      scrollToPageSection(button.getAttribute('data-page-target') || 'cards');
+    });
+  });
+
+  nav.querySelectorAll('.eval-page-nav-fold').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const id = button.getAttribute('data-page-toggle') || '';
+      if (!id) return;
+      const current = Boolean(round4State.pageCollapsed[id]);
+      const changed = setRound4PageSectionCollapsed(id, !current);
+      if (!changed) return;
+      markTouched(id);
+      if (compactNavMode) round4State.pageNavMenuOpen = false;
+      refreshRound4PageUi();
+    });
+  });
+
+  if (nextCue) {
+    nextCue.addEventListener('click', () => {
+      const targetId = nextCue.getAttribute('data-page-next-target') || '';
+      if (targetId) scrollToPageSection(targetId);
+    });
+  }
+
+  availableEntries.forEach((entry) => {
+    if (!entry.collapsible) {
+      round4State.pageCollapsed[entry.id] = false;
+    }
+    const isCollapsed = entry.collapsible ? Boolean(round4State.pageCollapsed[entry.id]) : false;
+    entry.node.setAttribute('data-page-section-id', entry.id);
+    entry.node.classList.toggle('is-page-collapsed', isCollapsed);
+    entry.node.setAttribute('data-page-collapsed', isCollapsed ? 'true' : 'false');
+    if (entry.node.getAttribute('data-page-touch-bound') !== 'true') {
+      ['pointerenter', 'focusin', 'click'].forEach((eventName) => {
+        entry.node.addEventListener(eventName, () => markTouched(entry.id), { passive: true });
+      });
+      entry.node.setAttribute('data-page-touch-bound', 'true');
+    }
+  });
+
+  if (typeof IntersectionObserver === 'function' && availableEntries.length) {
+    round4State.pageObserver = new IntersectionObserver((observerEntries) => {
+      observerEntries.forEach((observerEntry) => {
+        const node = observerEntry.target;
+        const id = node.getAttribute('data-page-section-id') || '';
+        if (!id) return;
+        const inView = observerEntry.isIntersecting && observerEntry.intersectionRatio >= 0.18;
+        node.setAttribute('data-in-view', inView ? 'true' : 'false');
+        if (inView) updateActive(id);
+      });
+    }, { threshold: [0.18, 0.35, 0.55], rootMargin: '-10% 0px -35% 0px' });
+
+    availableEntries.forEach((entry) => {
+      try {
+        round4State.pageObserver.observe(entry.node);
+      } catch (error) {
+      }
+    });
+  }
+
+  const preferredActive = availableEntries.find((entry) => entry.id === round4State.pageNavActive)
+    || availableEntries[0]
+    || entries[0];
+  if (preferredActive) updateActive(preferredActive.id);
+}
+
+function teardownRound4FinaleUi() {
+  if (round4State.finaleObserver && typeof round4State.finaleObserver.disconnect === 'function') {
+    try {
+      round4State.finaleObserver.disconnect();
+    } catch (error) {
+    }
+  }
+  round4State.finaleObserver = null;
+  if (round4State.finaleAutoCollapseTimer) {
+    window.clearTimeout(round4State.finaleAutoCollapseTimer);
+    round4State.finaleAutoCollapseTimer = null;
+  }
+  round4State.finaleLastTouchedAt = Object.create(null);
+}
+
+function getRound4FinaleVerdictTier(teamOVR, margin, rarityScore) {
+  const safeOVR = Number(teamOVR) || 0;
+  const safeMargin = Number.isFinite(Number(margin)) ? Number(margin) : 0;
+  const safeRarity = Number(rarityScore) || 0;
+  const score = (safeOVR * 1.1) + (safeMargin * 1.4) + (safeRarity * 0.35);
+  if (score >= 135 || safeOVR >= 94) return 'tier-elite';
+  if (score >= 112 || safeOVR >= 88) return 'tier-diamond';
+  if (score >= 92 || safeOVR >= 82) return 'tier-gold';
+  if (score >= 74 || safeOVR >= 74) return 'tier-azure';
+  return 'tier-iron';
+}
+
+function getFinalStandingRankFlavor(index) {
+  if (index === 0) return { medal: '&#x1F947;', accent: 'gold', vibe: 'Champion Lock' };
+  if (index === 1) return { medal: '&#x1F948;', accent: 'silver', vibe: 'Runner Pressure' };
+  if (index === 2) return { medal: '&#x1F949;', accent: 'bronze', vibe: 'Podium Hold' };
+  if (index <= 4) return { medal: '&#x2728;', accent: 'top', vibe: 'Strong Finish' };
+  return { medal: '&#x1F3AF;', accent: 'base', vibe: 'Final Board' };
+}
+
+function getFinalStandingTopPickMeta(entry) {
+  const safeName = String(entry && entry.name ? entry.name : '');
+  const round4Row = Array.isArray(round4State.finalLeaderboard)
+    ? round4State.finalLeaderboard.find((row) => String(row && row.playerName ? row.playerName : '') === safeName)
+    : null;
+
+  const topPick = String(
+    (entry && entry.topPick) || (round4Row && round4Row.topPick) || 'No Pick'
+  );
+  const imageUrl = getLeaderboardTopPickImage({
+    ...(round4Row || {}),
+    playerName: (round4Row && round4Row.playerName) || safeName,
+    topPick,
+    topPickImageUrl: (entry && entry.topPickImageUrl) || (round4Row && round4Row.topPickImageUrl) || ''
+  });
+
+  return { topPick, imageUrl };
+}
+
+function getFinalStandingEmotionMeta(entry, index, championScore) {
+  const score = Number(entry && entry.score) || 0;
+  const gap = Math.max(0, (Number(championScore) || 0) - score);
+  let key = 'neutral';
+
+  if (index === 0) {
+    key = gap >= 40 ? 'mindBlown' : 'happy';
+  } else if (index === 1) {
+    key = gap <= 12 ? 'amazed' : gap <= 28 ? 'neutral' : 'disappointed';
+  } else if (index === 2) {
+    key = gap <= 20 ? 'amazed' : 'confused';
+  } else if (gap >= 50) {
+    key = 'mad';
+  } else if (gap >= 28) {
+    key = 'disappointed';
+  } else if (gap >= 16) {
+    key = 'confused';
+  } else {
+    key = 'neutral';
+  }
+
+  const labels = {
+    happy: 'Happy',
+    mindBlown: 'Mind blown',
+    amazed: 'Amazed',
+    neutral: 'Neutral',
+    confused: 'Confused',
+    disappointed: 'Disappointed',
+    mad: 'Mad'
+  };
+
+  return {
+    key,
+    label: labels[key] || 'Emotion',
+    src: `/img/emotions/${key}.png`
+  };
+}
+
+function bindRound4FinaleUi(root) {
+  if (!root) return;
+  teardownRound4FinaleUi();
+
+  const tabs = Array.from(root.querySelectorAll('.eval-finale-spotlight-tab'));
+  const sections = Array.from(root.querySelectorAll('.eval-finale-panel'));
+  const spotlightPanels = Array.from(root.querySelectorAll('.eval-finale-panel[data-finale-spotlight="true"]'));
+  const pinnedPanels = Array.from(root.querySelectorAll('.eval-finale-panel[data-finale-pinned="true"]'));
+  const reducedMotion = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let activeSectionId = spotlightPanels[0] ? (spotlightPanels[0].getAttribute('data-finale-section') || 'overview') : 'standings';
+
+  const updateTabs = (sectionId) => {
+    activeSectionId = sectionId || activeSectionId;
+    tabs.forEach((tab) => {
+      const isActive = (tab.getAttribute('data-finale-target') || '') === activeSectionId;
+      tab.classList.toggle('is-active', isActive);
+      tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    root.setAttribute('data-active-spotlight', activeSectionId);
+  };
+
+  const closeLessRelevantSections = (keepId) => {
+    const now = Date.now();
+    const compactMode = window.innerWidth <= 900;
+    spotlightPanels.forEach((panel) => {
+      const id = panel.getAttribute('data-finale-section') || '';
+      if (!id || id === keepId) return;
+      if (!panel.open) return;
+      const touchedAt = Number(round4State.finaleLastTouchedAt[id]) || 0;
+      const justTouched = (now - touchedAt) < 3500;
+      const inViewport = panel.getAttribute('data-in-view') === 'true';
+      if (justTouched) return;
+      if (compactMode || !inViewport) {
+        panel.open = false;
+      }
+    });
+  };
+
+  const scheduleSmartCollapse = (focusId) => {
+    if (!spotlightPanels.length) return;
+    if (round4State.finaleAutoCollapseTimer) {
+      window.clearTimeout(round4State.finaleAutoCollapseTimer);
+    }
+    round4State.finaleAutoCollapseTimer = window.setTimeout(() => {
+      closeLessRelevantSections(focusId || activeSectionId);
+      round4State.finaleAutoCollapseTimer = null;
+    }, 2600);
+  };
+
+  const openAndFocusSection = (sectionId, { shouldScroll = true } = {}) => {
+    const panel = sections.find((item) => (item.getAttribute('data-finale-section') || '') === sectionId);
+    if (!panel) return;
+    const isSpotlight = panel.getAttribute('data-finale-spotlight') === 'true';
+    if (typeof panel.open === 'boolean') {
+      panel.open = true;
+    }
+    if (isSpotlight) {
+      spotlightPanels.forEach((item) => {
+        if (item !== panel) item.open = false;
+      });
+    }
+    round4State.finaleLastTouchedAt[sectionId] = Date.now();
+    if (isSpotlight) {
+      updateTabs(sectionId);
+      closeLessRelevantSections(sectionId);
+      scheduleSmartCollapse(sectionId);
+    }
+    if (shouldScroll) {
+      try {
+        panel.scrollIntoView(reducedMotion ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
+      } catch (error) {
+      }
+    }
+  };
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const targetId = tab.getAttribute('data-finale-target') || (spotlightPanels[0] && spotlightPanels[0].getAttribute('data-finale-section')) || 'overview';
+      openAndFocusSection(targetId, { shouldScroll: false });
+    });
+  });
+
+
+  sections.forEach((panel) => {
+    const sectionId = panel.getAttribute('data-finale-section') || '';
+    if (!sectionId) return;
+    const panelIsSpotlight = panel.getAttribute('data-finale-spotlight') === 'true';
+    const markTouched = () => {
+      round4State.finaleLastTouchedAt[sectionId] = Date.now();
+      if (panel.open && panelIsSpotlight) scheduleSmartCollapse(sectionId);
+    };
+
+    panel.addEventListener('toggle', () => {
+      const isPinned = panel.getAttribute('data-finale-pinned') === 'true';
+      const isSpotlight = panel.getAttribute('data-finale-spotlight') === 'true';
+      if (isPinned && !panel.open) {
+        panel.open = true;
+        return;
+      }
+      if (panel.open) {
+        markTouched();
+        if (isSpotlight) {
+          spotlightPanels.forEach((item) => {
+            if (item !== panel) item.open = false;
+          });
+          updateTabs(sectionId);
+          closeLessRelevantSections(sectionId);
+        }
+      } else if (activeSectionId === sectionId) {
+        const fallback = spotlightPanels.find((item) => item.open) || sections.find((item) => item.open) || panel;
+        updateTabs(fallback.getAttribute('data-finale-section') || 'overview');
+      }
+    });
+
+    panel.addEventListener('pointerenter', markTouched);
+    panel.addEventListener('focusin', markTouched);
+    panel.addEventListener('click', markTouched);
+  });
+
+  if (typeof IntersectionObserver === 'function') {
+    round4State.finaleObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const panel = entry.target;
+        const id = panel && panel.getAttribute ? (panel.getAttribute('data-finale-section') || '') : '';
+        if (!id) return;
+        const inView = entry.isIntersecting && entry.intersectionRatio >= 0.2;
+        panel.setAttribute('data-in-view', inView ? 'true' : 'false');
+        if (inView && panel.getAttribute('data-finale-spotlight') === 'true') updateTabs(id);
+      });
+    }, { root: null, threshold: [0.2, 0.45, 0.7], rootMargin: '-8% 0px -30% 0px' });
+
+    sections.forEach((panel) => {
+      try {
+        round4State.finaleObserver.observe(panel);
+      } catch (error) {
+      }
+    });
+  }
+
+  pinnedPanels.forEach((panel) => {
+    if (typeof panel.open === 'boolean') panel.open = true;
+  });
+
+  spotlightPanels.forEach((panel) => {
+    panel.open = false;
+  });
+  root.setAttribute('data-active-spotlight', 'none');
 }
 
 function renderRound4FinaleCeremony(gameEndedData = {}) {
@@ -1545,27 +2178,64 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
   const marginLabel = margin == null
     ? 'No runner-up data'
     : (margin === 0 ? 'Photo-finish tie' : `Margin ${margin > 0 ? '+' : ''}${margin}`);
+  const marginKpiHtml = margin == null
+    ? 'Margin <b>N/A</b>'
+    : (margin === 0 ? 'Margin <b>Tie</b>' : `Margin <b>${escapeHtml(signed(margin))}</b>`);
 
   const teamOVR = Number(winnerTeamStats.teamOVR) || 0;
   const round4Points = Number(winnerTeamStats.round4Points) || 0;
   const chemistryBonus = Number(winnerTeamStats.chemistryBonus) || 0;
   const rarityScore = Number(winnerTeamStats.rarityScore) || 0;
   const mvp = String(winnerTeamStats.mvp || 'N/A');
+  const winnerAverageOVR = Number(winnerTeamStats.averageOVR) || (teamOVR ? Math.round(teamOVR / 6) : 0);
+  const fastestLockMs = Number(winnerTeamStats.fastestLockMs);
+  const verdictTier = getRound4FinaleVerdictTier(teamOVR, margin, rarityScore);
+  const eliteSectionAvailable = Boolean(eliteFinalSix && eliteFinalSix.length);
+  const fastestLockText = Number.isFinite(fastestLockMs) ? formatLockDuration(fastestLockMs) : 'n/a';
 
   const podiumRows = finalLeaderboard.slice(0, Math.max(3, Math.min(6, finalLeaderboard.length || 0))).map((entry, index) => {
     const score = Number(entry && entry.score) || 0;
     const name = escapeHtml(entry && entry.name ? entry.name : `Player ${index + 1}`);
     const rankLabel = index === 0 ? 'Champion' : index === 1 ? 'Runner-up' : index === 2 ? '3rd' : `#${index + 1}`;
-    const breakdown = Array.isArray(entry && entry.breakdown)
-      ? entry.breakdown.map((pts, round) => `R${round + 1}:${pts}`).join(' | ')
+    const breakdownList = Array.isArray(entry && entry.breakdown) ? entry.breakdown : [];
+    const breakdown = breakdownList.length
+      ? breakdownList.map((pts, round) => `R${round + 1}:${pts}`).join(' | ')
+      : '';
+    const flavor = getFinalStandingRankFlavor(index);
+    const topPickMeta = getFinalStandingTopPickMeta(entry || {});
+    const emotionMeta = getFinalStandingEmotionMeta(entry || {}, index, winnerScore);
+    const gapToLeader = index === 0 ? 0 : (winnerScore - score);
+    const gapLabel = index === 0
+      ? 'Takes the crown'
+      : `-${Math.max(0, gapToLeader)} to champion`;
+    const round4Only = Number(entry && entry.round4Points);
+    const round4Label = Number.isFinite(round4Only) ? `R4 ${round4Only} pts` : '';
+    const breakdownPills = breakdownList.length
+      ? breakdownList.map((pts, round) => `<span class="eval-finale-round-pill r${round + 1} place-${flavor.accent}">R${round + 1} ${Number(pts) || 0}</span>`).join('')
       : '';
     return `
-      <li class="eval-finale-podium-row ${index === 0 ? 'is-champion' : ''}">
+      <li class="eval-finale-podium-row ${index === 0 ? 'is-champion' : ''} accent-${flavor.accent}" style="--podium-delay:${index};">
+        <div class="eval-finale-podium-medal" aria-hidden="true">${flavor.medal}</div>
+        <div class="eval-finale-podium-avatar">
+          <img src="${escapeHtml(topPickMeta.imageUrl)}" alt="${escapeHtml(topPickMeta.topPick)} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
+        </div>
+        <div class="eval-finale-podium-emotion">
+          <img src="${escapeHtml(emotionMeta.src)}" alt="${escapeHtml(emotionMeta.label)} reaction" loading="lazy" decoding="async" onerror="this.hidden=true;this.closest('.eval-finale-podium-emotion')?.classList.add('fallback');">
+          <span>${escapeHtml(emotionMeta.label)}</span>
+        </div>
         <div class="eval-finale-podium-main">
           <span class="eval-finale-podium-rank">${escapeHtml(rankLabel)}</span>
           <strong class="eval-finale-podium-name">${name}</strong>
+          <div class="eval-finale-podium-tags">
+            <span class="eval-finale-podium-tag vibe">${escapeHtml(flavor.vibe)}</span>
+            ${round4Label ? `<span class="eval-finale-podium-tag r4">&#x26A1; ${escapeHtml(round4Label)}</span>` : ''}
+          </div>
         </div>
-        <div class="eval-finale-podium-score">${score} pts</div>
+        <div class="eval-finale-podium-score-wrap">
+          <div class="eval-finale-podium-score">${score} pts</div>
+          <div class="eval-finale-podium-gap">${escapeHtml(gapLabel)}</div>
+        </div>
+        ${breakdownPills ? `<div class="eval-finale-podium-rounds">${breakdownPills}</div>` : ''}
         ${breakdown ? `<div class="eval-finale-podium-breakdown">${escapeHtml(breakdown)}</div>` : ''}
       </li>
     `;
@@ -1576,6 +2246,7 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
     const imageUrl = rawImage ? resolveCharacterImage(rawImage, entry && entry.character ? entry.character : 'No Portrait') : buildMissingCharacterImage('No Portrait');
     const safeName = escapeHtml(entry && entry.character ? entry.character : `Elite ${index + 1}`);
     const eliteRank = Number(entry && entry.eliteRank) || (index + 1);
+    const eliteOVR = Number(entry && entry.ovr) || 0;
     const ownerName = entry && entry.ownerName ? String(entry.ownerName) : '';
     const ownerAbbr = ownerName
       ? ownerName.split(/\s+/).filter(Boolean).map((part) => part[0]).join('').slice(0, 3).toUpperCase()
@@ -1584,57 +2255,126 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
     return `
       <div class="eval-finale-elite-slot ${isChampionMember ? 'is-champion-member' : ''}" title="${safeName}${ownerName ? ` | ${escapeHtml(ownerName)}` : ''}">
         <img src="${escapeHtml(imageUrl)}" alt="${safeName}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
+        <span class="eval-finale-elite-ovr" aria-hidden="true"><small>OVR</small><strong>${eliteOVR}</strong></span>
         <span class="eval-finale-elite-rank">#${eliteRank}</span>
         ${ownerAbbr ? `<span class="eval-finale-elite-owner">${escapeHtml(ownerAbbr)}</span>` : ''}
       </div>
     `;
   }).join('');
 
-  const existing = container.querySelector('.eval-finale-ceremony');
+  let finaleMount = container.querySelector('.eval-finale-mount');
+  if (!finaleMount) {
+    finaleMount = document.createElement('div');
+    finaleMount.className = 'eval-finale-mount';
+    container.appendChild(finaleMount);
+  }
+
+  const existing = finaleMount.querySelector('.eval-finale-ceremony');
   if (existing) existing.remove();
 
-  container.insertAdjacentHTML('beforeend', `
-    <section class="eval-finale-ceremony" aria-live="polite" aria-label="Final game results in round 4 ceremony">
+  finaleMount.insertAdjacentHTML('beforeend', `
+    <section class="eval-finale-ceremony ${verdictTier} is-arriving" aria-live="polite" aria-label="Final game results in round 4 ceremony">
+      <div class="eval-finale-eyebrow eval-finale-stage-badge">Final Verdict | Round 4 Ceremony</div>
       <header class="eval-finale-hero">
-        <div class="eval-finale-eyebrow">Final Verdict | Round 4 Ceremony</div>
         <h3>${escapeHtml(winnerName)} wins the match</h3>
-        <p>The finale now lands directly inside the Round 4 phase so the reveal and payoff stay connected.</p>
         <div class="eval-finale-kpis">
-          <span>Score <b>${winnerScore}</b></span>
-          <span>${escapeHtml(marginLabel)}</span>
-          <span>R4 <b>${round4Points}</b></span>
-          <span>Team OVR <b>${teamOVR}</b></span>
-          <span>Chem ${chemistryBonus >= 0 ? '+' : ''}${chemistryBonus}</span>
-          <span>MVP <b>${escapeHtml(mvp)}</b></span>
-          <span>Rarity <b>${rarityScore}</b></span>
+          <span class="kpi-score">Score <b>${winnerScore}</b></span>
+          <span class="kpi-margin${margin == null ? ' is-empty' : ''}">${marginKpiHtml}</span>
+          <span class="kpi-mvp">MVP <b>${escapeHtml(mvp)}</b></span>
+          <span class="kpi-rarity">Rarity <b>${rarityScore}</b></span>
         </div>
       </header>
 
-      ${eliteSlots ? `
-        <section class="eval-finale-elite-strip" aria-label="Elite Final Six preview">
-          <div class="eval-finale-section-head">
-            <strong>Elite Final Six</strong>
-            <small>OVR showcase (score champion remains separate)</small>
+      <div class="eval-finale-spotlight-shell">
+        ${eliteSectionAvailable ? `
+          <nav class="eval-finale-spotlight-nav" role="tablist" aria-label="Final verdict spotlight">
+            <button class="eval-finale-spotlight-tab" type="button" role="tab" aria-selected="false" data-finale-target="overview">
+              <span aria-hidden="true">&#x1F451;</span>
+              <span>Champion Snapshot</span>
+            </button>
+            <button class="eval-finale-spotlight-tab" type="button" role="tab" aria-selected="false" data-finale-target="elite">
+              <span aria-hidden="true">&#x1F525;</span>
+              <span>Top 6 Profiles</span>
+            </button>
+          </nav>
+        ` : ''}
+
+        <details class="eval-finale-panel" data-finale-section="overview" data-finale-spotlight="true">
+          <summary class="eval-finale-panel-summary">
+            <span class="eval-finale-panel-title">Champion Snapshot &#x1F451;</span>
+            <span class="eval-finale-panel-meta">${escapeHtml(marginLabel)}</span>
+          </summary>
+          <div class="eval-finale-panel-body">
+            <div class="eval-finale-overview-grid">
+              <div class="eval-finale-overview-card ovr">
+                <span>Team OVR &#x1F4AA;</span>
+                <strong>${teamOVR}</strong>
+                <small>Avg ${winnerAverageOVR} | Round 4 ${round4Points} pts | Lock ${escapeHtml(fastestLockText)}</small>
+              </div>
+              <div class="eval-finale-overview-card chemistry">
+                <span>Chem + Rarity &#x2728;</span>
+                <strong>${chemistryBonus >= 0 ? '+' : ''}${chemistryBonus} | ${rarityScore}</strong>
+                <small>MVP ${escapeHtml(mvp)}</small>
+              </div>
+              <div class="eval-finale-overview-card archive">
+                <span>Archive Access &#x1F5C2;</span>
+                <strong>Full Final Results</strong>
+                <small>Detailed archive page with a back path to Round 4</small>
+              </div>
+            </div>
           </div>
-          <div class="eval-finale-elite-grid">${eliteSlots}</div>
-        </section>
-      ` : ''}
+        </details>
 
-      <section class="eval-finale-standings" aria-label="Final standings">
-        <div class="eval-finale-section-head">
-          <strong>Final Standings</strong>
-          <small>Full totals with round breakdowns</small>
-        </div>
-        <ol class="eval-finale-podium">
-          ${podiumRows || '<li class="eval-finale-podium-empty">No standings available.</li>'}
-        </ol>
-      </section>
-
-      <div class="eval-finale-actions">
-        <button class="btn btn-secondary" type="button" onclick="openFinalResultsArchive()">OPEN FULL ARCHIVE</button>
-        <button class="btn btn-success" type="button" onclick="sendPlayAgain()">PLAY AGAIN</button>
-        <button class="btn btn-secondary" type="button" onclick="goToLobby()">NEW GAME</button>
+        ${eliteSlots ? `
+          <details class="eval-finale-panel" data-finale-section="elite" data-finale-spotlight="true">
+            <summary class="eval-finale-panel-summary">
+              <span class="eval-finale-panel-title">Top 6 Profiles &#x1F525;</span>
+              <span class="eval-finale-panel-meta">OVR showcase</span>
+            </summary>
+            <div class="eval-finale-panel-body">
+              <section class="eval-finale-elite-strip" aria-label="Top 6 Profiles preview">
+                <div class="eval-finale-section-head">
+                  <strong>Top 6 Profiles</strong>
+                  <small>OVR showcase (score champion remains separate)</small>
+                </div>
+                <div class="eval-finale-elite-grid">${eliteSlots}</div>
+              </section>
+            </div>
+          </details>
+        ` : ''}
       </div>
+
+      <details class="eval-finale-panel eval-finale-panel-pinned" data-finale-section="standings" data-finale-pinned="true" open>
+        <summary class="eval-finale-panel-summary">
+          <span class="eval-finale-panel-title">Final Standings &#x1F4CB;</span>
+          <span class="eval-finale-panel-meta">${finalLeaderboard.length || 0} teams</span>
+        </summary>
+        <div class="eval-finale-panel-body">
+          <section class="eval-finale-standings" aria-label="Final standings">
+            <div class="eval-finale-section-head">
+              <strong>Final Standings</strong>
+              <small>Totals, round pills, gap to champion, and reactions</small>
+            </div>
+            <ol class="eval-finale-podium">
+              ${podiumRows || '<li class="eval-finale-podium-empty">No standings available.</li>'}
+            </ol>
+          </section>
+        </div>
+      </details>
+
+      <details class="eval-finale-panel eval-finale-panel-pinned" data-finale-section="actions" data-finale-pinned="true" open>
+        <summary class="eval-finale-panel-summary">
+          <span class="eval-finale-panel-title">Next Move &#x27A1;</span>
+          <span class="eval-finale-panel-meta">Archive + replay</span>
+        </summary>
+        <div class="eval-finale-panel-body">
+          <div class="eval-finale-actions">
+            <button class="btn btn-secondary btn-archive-subtle" type="button" onclick="openFinalResultsArchive()"><span>OPEN FULL ARCHIVE</span><small>Legacy Results Page</small></button>
+            <button class="btn btn-success" type="button" onclick="sendPlayAgain()">PLAY AGAIN</button>
+            <button class="btn btn-secondary" type="button" onclick="goToLobby()">NEW GAME</button>
+          </div>
+        </div>
+      </details>
     </section>
   `);
 
@@ -1649,6 +2389,13 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
 
   const panel = container.querySelector('.eval-finale-ceremony');
   if (panel) {
+    setRound4PageSectionCollapsed('cards', true);
+    setRound4PageSectionCollapsed('results', true);
+    setRound4PageSectionCollapsed('finale', false);
+    round4State.pageNavActive = 'finale';
+    round4State.pageNavMenuOpen = false;
+    bindRound4FinaleUi(panel);
+    refreshRound4PageUi();
     try {
       const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       panel.scrollIntoView(reduceMotion ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
@@ -1927,7 +2674,7 @@ function enhanceActiveOVRBreakdownContextLayout(evalData) {
   layout.quickPane.innerHTML = [
     buildActiveContextQuickCardHtml({
       label: 'Scenario Fit',
-      emoji: '🎯',
+      emoji: 'S',
       text: scenarioText,
       keywords: scenarioKeywords,
       promptText: contextPrompts.scenario || '',
@@ -1936,7 +2683,7 @@ function enhanceActiveOVRBreakdownContextLayout(evalData) {
     }),
     buildActiveContextQuickCardHtml({
       label: 'Twist Fit',
-      emoji: '🌀',
+      emoji: 'T',
       text: twistText,
       keywords: twistKeywords,
       promptText: contextPrompts.twist || '',
@@ -1957,16 +2704,72 @@ function enhanceActiveOVRBreakdownContextLayout(evalData) {
   }
 }
 
+function getOVRBreakdownEmotionMeta(evalData, fallbackOVR = null) {
+  const breakdownOVR = Number(
+    evalData && evalData.breakdown && evalData.breakdown.ovrBreakdown && evalData.breakdown.ovrBreakdown.finalOVR
+  );
+  const rawOVR = Number(evalData && evalData.ovr);
+  const ovr = Math.max(0, Math.min(99, Number.isFinite(breakdownOVR)
+    ? breakdownOVR
+    : (Number.isFinite(rawOVR) ? rawOVR : (Number(fallbackOVR) || 0))));
+
+  let key = 'neutral';
+  let label = 'Balanced';
+  let flavor = 'Stable read';
+
+  if (ovr >= 92) {
+    key = 'mindBlown';
+    label = 'Mind Blown';
+    flavor = 'Elite ceiling';
+  } else if (ovr >= 84) {
+    key = 'amazed';
+    label = 'Amazed';
+    flavor = 'High-tier output';
+  } else if (ovr >= 72) {
+    key = 'happy';
+    label = 'Happy';
+    flavor = 'Strong lane fit';
+  } else if (ovr >= 58) {
+    key = 'neutral';
+    label = 'Neutral';
+    flavor = 'Playable balance';
+  } else if (ovr >= 46) {
+    key = 'confused';
+    label = 'Confused';
+    flavor = 'Swingy profile';
+  } else if (ovr >= 34) {
+    key = 'disappointed';
+    label = 'Disappointed';
+    flavor = 'Low conversion';
+  } else {
+    key = 'mad';
+    label = 'Mad';
+    flavor = 'Severe drag';
+  }
+
+  return {
+    key,
+    label,
+    flavor,
+    src: `/img/emotions/${key}.png`,
+    ovr
+  };
+}
+
 function openOVRBreakdown(evalData) {
   const modal = document.getElementById('ovrBreakdownModal');
   if (!modal || !evalData) return;
   try {
     const modalContent = modal.querySelector('.ovr-modal-content');
+    const modalBody = modal.querySelector('.ovr-modal-body');
     const tierClass = getTierClassFromEval(evalData);
     if (modalContent) {
       modalContent.classList.remove('tier-icon', 'tier-legendary', 'tier-epic', 'tier-rare', 'tier-gold', 'tier-silver', 'tier-bronze');
       modalContent.classList.add('ovr-tiered', tierClass);
       modalContent.setAttribute('data-tier', tierClass.replace('tier-', ''));
+    }
+    if (modalBody) {
+      modalBody.setAttribute('data-tier', tierClass.replace('tier-', ''));
     }
 
     const modalTitle = document.getElementById('modalTitle');
@@ -2022,8 +2825,12 @@ function openOVRBreakdown(evalData) {
     }
 
     const scoreBreakdownEl = document.getElementById('modalScoreBreakdown');
+    const scoreDetails = scoreBreakdownEl ? scoreBreakdownEl.closest('details') : null;
+    const scoreSummary = scoreDetails ? scoreDetails.querySelector('summary.ovr-section-title') : null;
+    if (scoreSummary) {
+      scoreSummary.textContent = `Score ${Number(evalData.score) || 0}/30`;
+    }
     if (scoreBreakdownEl && evalData.breakdown && Array.isArray(evalData.breakdown.scoreBreakdown)) {
-      const scoreDetails = scoreBreakdownEl.closest('details');
       if (scoreDetails) scoreDetails.open = false;
       const steps = evalData.breakdown.scoreBreakdown;
       scoreBreakdownEl.innerHTML = `
@@ -2057,6 +2864,7 @@ function openOVRBreakdown(evalData) {
       const attributePct = toPct(percentages.attributeContribution || 0);
       const scenarioPct = Math.max(-100, Math.min(100, Math.round(Number(percentages.scenarioEffect) || 0)));
       const scenarioSigned = scenarioPct > 0 ? `+${scenarioPct}` : `${scenarioPct}`;
+      const ovrMoodMeta = getOVRBreakdownEmotionMeta(evalData, safeFinalOVR);
 
       ovrBreakdownEl.innerHTML = `
         <div class="ovr-visual-shell ${ovrTierClass}">
@@ -2072,6 +2880,15 @@ function openOVRBreakdown(evalData) {
               <span class="ovr-chip ovr-chip-attr">Attr ${ovr.attributeBonus}</span>
               <span class="ovr-chip ovr-chip-scenario">Fit ${scenarioSigned}%</span>
             </div>
+          </div>
+          <div class="ovr-visual-mood" aria-label="OVR mood read">
+            <img src="${escapeHtml(ovrMoodMeta.src)}" alt="${escapeHtml(ovrMoodMeta.label)} emotion" loading="lazy" decoding="async" onerror="this.hidden=true;this.closest('.ovr-visual-mood')?.classList.add('fallback');">
+            <div class="ovr-visual-mood-copy">
+              <small>OVR Mood</small>
+              <strong>${escapeHtml(ovrMoodMeta.label)}</strong>
+              <span>${escapeHtml(ovrMoodMeta.flavor)}</span>
+            </div>
+            <em>${safeFinalOVR}</em>
           </div>
           <div class="ovr-visual-bars">
             <div class="ovr-visual-bar-row" data-hue="208">
@@ -2092,7 +2909,7 @@ function openOVRBreakdown(evalData) {
             <div class="ovr-visual-bar-row ${scenarioPct < 0 ? 'is-negative' : 'is-positive'}" data-hue="144">
               <span>Scenario Effect</span>
               <div class="ovr-visual-bar"><i class="bar-scenario" style="width:${Math.abs(scenarioPct)}%;--delay:0.23s;"></i></div>
-              <b>${scenarioSigned}% (×${Number(ovr.scenarioMultiplier || 1).toFixed(2)})</b>
+              <b>${scenarioSigned}% (x${Number(ovr.scenarioMultiplier || 1).toFixed(2)})</b>
             </div>
           </div>
         </div>
@@ -2183,7 +3000,7 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
 
       const continueBtn = document.getElementById('evalContinueBtn');
       if (continueBtn && round4State.finalResultsRequested) {
-        continueBtn.textContent = `⏳ WAITING (${readyCount}/${totalPlayers})`;
+        continueBtn.textContent = `WAITING (${readyCount}/${totalPlayers})`;
       }
     });
   }, 100);
@@ -2204,3 +3021,4 @@ window.openOVRBreakdown = openOVRBreakdown;
 window.closeOVRBreakdown = closeOVRBreakdown;
 window.switchEvalTab = switchEvalTab;
 window.renderRound4FinaleCeremony = renderRound4FinaleCeremony;
+

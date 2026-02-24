@@ -356,6 +356,18 @@ async function warmCharacterEvaluationCaches(character, scenario, twist, options
   }
 }
 
+async function peekCharacterEvaluationWarmup(character, scenario, twist, options = {}) {
+  const safeCharacter = String(character || '').trim();
+  if (!safeCharacter) return null;
+
+  const safeOptions = options && typeof options === 'object' ? options : {};
+  const key = buildWarmupKey(safeCharacter, scenario, twist, safeOptions);
+  const cached = WARMUP_CACHE.get(key);
+  if (cached) return cloneValue(cached);
+
+  return awaitWarmupIfInFlight(safeCharacter, scenario, twist, safeOptions);
+}
+
 async function evaluateCharacter(character, scenario, twist, options = {}) {
   const mode = getEvaluationEngineMode();
 
@@ -508,5 +520,6 @@ module.exports = {
   getEvaluationEngineMode,
   evaluateCharacter,
   evaluateCharactersBatch,
-  warmCharacterEvaluationCaches
+  warmCharacterEvaluationCaches,
+  peekCharacterEvaluationWarmup
 };

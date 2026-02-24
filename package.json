@@ -5,6 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
+    "packs:validate": "node server/content/validatePacks.js",
     "eval:viability": "node server/viabilityTestHarness.js",
     "bench:context": "node server/benchmarks/contextEngine/replayHarness.js",
     "bench:random500": "node server/benchmarks/contextEngine/random500Harness.js"

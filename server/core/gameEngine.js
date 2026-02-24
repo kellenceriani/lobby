@@ -48,6 +48,12 @@ const { evaluateRoundFromGame } = require('../services/roundEvaluationService');
 const { evaluateRound4FromGame } = require('../services/round4Service');
 const { warmCharacterEvaluationCaches, getEvaluationEngineMode } = require('../services/entryEvaluationService');
 const { loadRoomsSnapshot, queueRoomsSnapshot } = require('../storage/statePersistence');
+const {
+  resolveContentPack,
+  getPublicPackMeta,
+  recordPackMatchStart,
+  recordPackMatchCompletion
+} = require('../content/packRegistry');
 
 function normalizeWordCandidate(value) {
   if (typeof value !== 'string') return null;
@@ -634,18 +640,69 @@ function composeDynamicTwist({ difficulty = 'normal', scenarioText = '' }) {
   return applyPromptBrevity([primary, domainLine, modifier].filter(Boolean).join(' | '), 'twist');
 }
 
-function generateScenario(theme = 'all') {
-  const categories = theme === 'all'
-    ? Object.keys(SCENARIO_TEMPLATES)
-    : [theme];
+function normalizePackRuntime(packRuntime) {
+  if (!packRuntime || typeof packRuntime !== 'object') return null;
+  if (packRuntime.id === 'default') return packRuntime;
+  return packRuntime;
+}
 
+function getPackAllowedThemes(packRuntime) {
+  const pack = normalizePackRuntime(packRuntime);
+  if (!pack || !pack.gameplay || !Array.isArray(pack.gameplay.allowedThemes)) return [];
+  return pack.gameplay.allowedThemes
+    .map((theme) => String(theme || '').toLowerCase())
+    .filter((theme) => Object.prototype.hasOwnProperty.call(SCENARIO_TEMPLATES, theme));
+}
+
+function getPackScenarioCards(packRuntime) {
+  const pack = normalizePackRuntime(packRuntime);
+  if (!pack || !pack.gameplay || !Array.isArray(pack.gameplay.scenarioCards)) return [];
+  return pack.gameplay.scenarioCards
+    .filter((entry) => entry && typeof entry === 'object' && entry.text)
+    .map((entry) => ({
+      text: String(entry.text),
+      category: entry.category ? String(entry.category) : 'pack'
+    }));
+}
+
+function buildScenarioCategoryPool(theme = 'all', packRuntime = null) {
+  const requestedTheme = String(theme || 'all').toLowerCase();
+  const baseCategories = requestedTheme === 'all'
+    ? Object.keys(SCENARIO_TEMPLATES)
+    : (Object.prototype.hasOwnProperty.call(SCENARIO_TEMPLATES, requestedTheme) ? [requestedTheme] : Object.keys(SCENARIO_TEMPLATES));
+
+  const packAllowedThemes = getPackAllowedThemes(packRuntime);
+  if (!packAllowedThemes.length) return baseCategories;
+
+  const filtered = baseCategories.filter((category) => packAllowedThemes.includes(category));
+  return filtered.length ? filtered : baseCategories;
+}
+
+function generateScenario(theme = 'all', packRuntime = null) {
+  const packCards = getPackScenarioCards(packRuntime);
+  const requestedTheme = String(theme || 'all').toLowerCase();
+  const eligiblePackCards = packCards.filter((card) => (
+    requestedTheme === 'all'
+      ? true
+      : String(card.category || '').toLowerCase() === requestedTheme
+  ));
+
+  if (eligiblePackCards.length && Math.random() < 0.75) {
+    const selectedCard = eligiblePackCards[Math.floor(Math.random() * eligiblePackCards.length)];
+    return {
+      scenario: applyPromptBrevity(selectedCard.text, 'scenario'),
+      category: selectedCard.category || 'pack'
+    };
+  }
+
+  const categories = buildScenarioCategoryPool(requestedTheme, packRuntime);
   const category = categories[Math.floor(Math.random() * categories.length)];
-  const templates = SCENARIO_TEMPLATES[category];
+  const templates = SCENARIO_TEMPLATES[category] || SCENARIO_TEMPLATES.action;
   const template = templates[Math.floor(Math.random() * templates.length)];
 
   let scenario = template.template;
   template.vars.forEach(varName => {
-    const words = WORD_BANKS[varName];
+    const words = WORD_BANKS[varName] || FALLBACK_WORDS;
     const word = words[Math.floor(Math.random() * words.length)];
     scenario = scenario.replace(`{${varName}}`, word);
   });
@@ -653,13 +710,21 @@ function generateScenario(theme = 'all') {
   return { scenario: applyPromptBrevity(scenario, 'scenario'), category };
 }
 
-function generateTwists(difficulty = 'normal', count = 4, scenarioText = '') {
+function getPackTwistAdds(packRuntime, difficulty) {
+  const pack = normalizePackRuntime(packRuntime);
+  if (!pack || !pack.gameplay || !pack.gameplay.twistAdds) return [];
+  const twists = pack.gameplay.twistAdds[difficulty];
+  return Array.isArray(twists) ? twists.slice() : [];
+}
+
+function generateTwists(difficulty = 'normal', count = 4, scenarioText = '', packRuntime = null) {
   if (difficulty && typeof difficulty === 'object') {
     const options = difficulty;
     return generateTwists(
       options.difficulty || 'normal',
       options.count || 4,
-      options.scenarioText || options.scenario || ''
+      options.scenarioText || options.scenario || '',
+      options.packRuntime || options.pack || null
     );
   }
 
@@ -677,6 +742,7 @@ function generateTwists(difficulty = 'normal', count = 4, scenarioText = '') {
   } else {
     pool = [...easyTwists.slice(0, 2), ...normalTwists, ...hardTwists.slice(0, 2)];
   }
+  pool.push(...getPackTwistAdds(packRuntime, safeDifficulty));
 
   const dynamicPool = [];
   for (let i = 0; i < (targetCount * 3); i++) {
@@ -695,12 +761,12 @@ function generateTwists(difficulty = 'normal', count = 4, scenarioText = '') {
   return shufflePool(concise).slice(0, targetCount);
 }
 
-function generateScenarios(count = 3, theme = 'all', difficulty = 'normal') {
+function generateScenarios(count = 3, theme = 'all', difficulty = 'normal', packRuntime = null) {
   const scenarios = [];
   for (let i = 0; i < count; i++) {
-    const generated = generateScenario(theme);
+    const generated = generateScenario(theme, packRuntime);
     const scenario = generated.scenario;
-    const twists = generateTwists(difficulty, 6, scenario);
+    const twists = generateTwists(difficulty, 6, scenario, packRuntime);
     scenarios.push({ scenario, twists, category: generated.category });
   }
   return scenarios;
@@ -1133,7 +1199,26 @@ function applyPromptBrevity(value, profileKey = 'scenario') {
   return normalized;
 }
 
-function generateFinalScenario(difficulty = 'normal') {
+function getPackFinalScenarioPool(packRuntime) {
+  const pack = normalizePackRuntime(packRuntime);
+  if (!pack || !pack.gameplay || !pack.gameplay.final) return [];
+  const pool = pack.gameplay.final.scenarioPool;
+  return Array.isArray(pool) ? pool.slice() : [];
+}
+
+function getPackFinalTwistPool(packRuntime, difficulty = 'normal') {
+  const pack = normalizePackRuntime(packRuntime);
+  if (!pack || !pack.gameplay || !pack.gameplay.final || !pack.gameplay.final.twistPool) return [];
+  const twists = pack.gameplay.final.twistPool[difficulty];
+  return Array.isArray(twists) ? twists.slice() : [];
+}
+
+function generateFinalScenario(difficulty = 'normal', packRuntime = null) {
+  const packScenarioPool = getPackFinalScenarioPool(packRuntime);
+  if (packScenarioPool.length && Math.random() < 0.7) {
+    return applyPromptBrevity(randomFrom(packScenarioPool), 'finalScenario');
+  }
+
   const patternWeights = difficulty === 'hard'
     ? FINAL_SCENARIO_PATTERNS
     : difficulty === 'easy'
@@ -1158,7 +1243,12 @@ function generateFinalScenario(difficulty = 'normal') {
   return applyPromptBrevity(fillTemplate(chosenPattern, values), 'finalScenario');
 }
 
-function generateFinalTwist(difficulty = 'normal', scenarioText = '') {
+function generateFinalTwist(difficulty = 'normal', scenarioText = '', packRuntime = null) {
+  const packTwists = getPackFinalTwistPool(packRuntime, difficulty);
+  if (packTwists.length && Math.random() < 0.65) {
+    return applyPromptBrevity(randomFrom(packTwists), 'finalTwist');
+  }
+
   const domains = inferTwistDomains(scenarioText);
   const prefixPool = difficulty === 'easy'
     ? FINAL_TWIST_COMPONENTS.PREFIX.slice(0, 14)
@@ -1173,11 +1263,11 @@ function generateFinalTwist(difficulty = 'normal', scenarioText = '') {
   return applyPromptBrevity([prefix, domainConstraint].filter(Boolean).join(' | '), 'finalTwist');
 }
 
-function generateFinalScenarioAndTwist(difficulty = 'normal') {
-  const scenario = generateFinalScenario(difficulty);
+function generateFinalScenarioAndTwist(difficulty = 'normal', packRuntime = null) {
+  const scenario = generateFinalScenario(difficulty, packRuntime);
   return {
     scenario,
-    twist: generateFinalTwist(difficulty, scenario)
+    twist: generateFinalTwist(difficulty, scenario, packRuntime)
   };
 }
 
@@ -1452,7 +1542,10 @@ function prepareFinalRoundState(game, roomCode) {
 
   if (!game.pendingFinalRound || !game.pendingFinalRound.scenario || !game.pendingFinalRound.twist) {
     const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
-    const finalConditions = generateFinalScenarioAndTwist(difficulty);
+    const pack = resolveContentPack(game && game.packMeta && game.packMeta.id
+      ? game.packMeta.id
+      : (game.settings && game.settings.contentPackId));
+    const finalConditions = generateFinalScenarioAndTwist(difficulty, pack);
     game.pendingFinalRound = {
       scenario: finalConditions.scenario,
       twist: finalConditions.twist,
@@ -1478,7 +1571,8 @@ function createRoom(roomCode) {
       scenarioTheme: 'all',
       plotTwists: true,
       maxPlayers: 6,
-      customScenario: ''
+      customScenario: '',
+      contentPackId: 'default'
     },
     messages: [],
     reactions: {}
@@ -1488,16 +1582,18 @@ function createRoom(roomCode) {
 }
 
 function createGameInstance(roomCode, players, settings) {
+  const pack = resolveContentPack(settings && settings.contentPackId);
+  const packMeta = getPublicPackMeta(pack.id);
   const theme = settings.scenarioTheme || 'all';
   const difficulty = settings.difficulty || 'normal';
-  const scenarios = generateScenarios(3, theme, difficulty);
+  const scenarios = generateScenarios(3, theme, difficulty, pack);
 
   if (settings.customScenario && settings.customScenario.trim()) {
     const customIndex = Math.floor(Math.random() * scenarios.length);
     const customScenario = applyPromptBrevity(settings.customScenario.trim(), 'scenario');
     scenarios[customIndex] = {
       scenario: customScenario,
-      twists: generateTwists(difficulty, 6, customScenario),
+      twists: generateTwists(difficulty, 6, customScenario, pack),
       category: 'custom'
     };
   }
@@ -1532,7 +1628,11 @@ function createGameInstance(roomCode, players, settings) {
     currentScenario: '',
     currentTwist: '',
     results: [],
-    settings,
+    settings: {
+      ...settings,
+      contentPackId: pack.id
+    },
+    packMeta,
     roundStartTime: null,
     allCharactersDrafted: [],
     roundResolutionLocks: {},
@@ -1681,11 +1781,17 @@ function startGame(io, roomCode) {
 
   room.isGameActive = true;
   room.gameState = createGameInstance(roomCode, room.players, room.settings);
+  room.settings = {
+    ...room.settings,
+    contentPackId: room.gameState && room.gameState.packMeta ? room.gameState.packMeta.id : 'default'
+  };
+  recordPackMatchStart(room.settings.contentPackId);
 
   io.to(roomCode).emit('gameStarting', {
     totalRounds: 3,
     players: room.gameState.players.map(p => p.name),
-    settings: room.settings
+    settings: room.settings,
+    packMeta: room.gameState.packMeta || getPublicPackMeta(room.settings.contentPackId)
   });
 
   markRoomsDirty();
@@ -1742,6 +1848,7 @@ function revealScenario(io, roomCode) {
     draftTimeRemaining: draftSeconds,
     maxCharactersPerPlayer: 2,
     roundNumber: game.currentRound + 1,
+    packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     wordApiSource: wordSourceMeta.label,
     wordApiSourceKey: wordSourceMeta.key,
     wordApiSourceIndex: wordSourceMeta.index,
@@ -1763,9 +1870,12 @@ function revealPlotTwist(io, roomCode) {
   }
 
   const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
+  const pack = resolveContentPack(game && game.packMeta && game.packMeta.id
+    ? game.packMeta.id
+    : (game.settings && game.settings.contentPackId));
   const generatedTwists = (Array.isArray(scenario && scenario.twists) && scenario.twists.length)
     ? scenario.twists
-    : generateTwists(difficulty, 6, game.currentScenario || (scenario && scenario.scenario) || '');
+    : generateTwists(difficulty, 6, game.currentScenario || (scenario && scenario.scenario) || '', pack);
   game.currentTwist = generatedTwists[Math.floor(Math.random() * generatedTwists.length)] || 'NO RULE BREAKERS';
 
   game.activePhase = 'TWIST';
@@ -1786,6 +1896,7 @@ function revealPlotTwist(io, roomCode) {
   io.to(roomCode).emit('plotTwistRevealed', {
     twist: game.currentTwist,
     scenario: game.currentScenario,
+    packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     currentTeams: game.players.map(p => ({
       name: p.name,
       team: p.team
@@ -1827,6 +1938,7 @@ function startVoting(io, roomCode) {
     votingTimeRemaining: getVoteSeconds(),
     scenario: game.currentScenario,
     twist: game.currentTwist,
+    packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     totalPlayers: game.players.length,
     roundNumber: game.currentRound + 1
   });
@@ -1900,7 +2012,8 @@ function startFinalRound(io, roomCode) {
     io.to(roomCode).emit('round4Start', {
       scenario: game.currentScenario,
       twist: game.currentTwist,
-      finalTeams
+      finalTeams,
+      packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId)
     });
   }, 3000);
   markRoomsDirty();
@@ -2047,6 +2160,7 @@ async function tallyResults(io, roomCode) {
     leaderboard: leaderboardData,
     pointBreakdown,
     round: game.currentRound + 1,
+    packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     roundIntelSummary: roundIntel
       ? Object.entries(roundIntel.playerEvaluations || {}).reduce((acc, [name, data]) => {
         acc[name] = data && data.summary ? data.summary : null;
@@ -2380,11 +2494,17 @@ function endGame(io, roomCode) {
   };
 
   const winnerCharacters = winnerTeamCharacters;
+  const packMeta = game && game.packMeta
+    ? game.packMeta
+    : getPublicPackMeta(game && game.settings && game.settings.contentPackId);
+
+  recordPackMatchCompletion(packMeta && packMeta.id ? packMeta.id : 'default');
 
   io.to(roomCode).emit('gameEnded', {
     finalLeaderboard,
     totalRounds: game.totalRounds,
     winner,
+    packMeta,
     winnerCharacters,
     winnerTeamCharacters,
     eliteFinalSix,

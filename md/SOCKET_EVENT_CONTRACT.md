@@ -1,6 +1,6 @@
 # Socket Event Contract
 
-Last updated: February 19, 2026
+Last updated: February 24, 2026
 
 This document maps the current client/server event API used by Socket.IO.
 
@@ -53,15 +53,23 @@ This document maps the current client/server event API used by Socket.IO.
 - `round4Evaluated` may be emitted to one requester first (cached replay path) or room-wide when freshly computed.
 - `finalRoundResults` is room-wide and only sent after all active players emit `requestFinalResults`.
 - `roomData` is the canonical lobby sync payload after join/ready/disconnect/playAgain changes.
-- `roundResults` now includes both vote-driven points and intel-driven additions for rounds 1–3.
+- `roomData` now includes `packCatalog` (available content packs + featured pack id) and `selectedPackMeta`.
+- `roundResults` now includes both vote-driven points and intel-driven additions for rounds 1-3.
+- `gameStarting`, `scenarioRevealed`, `round4Start`, `roundResults`, `finalRoundResults`, and `gameEnded` may include `packMeta` for themed UI/branding continuity.
 - `voteTallying` is emitted when voting closes (timer or all-lock), allowing clients to show a short tally/loading state before `roundResults`.
 
 ## Important Payload Notes
 
 - `roundResults` includes:
-	- `roundPoints`, `voteCount`, `leaderboard`, `pointBreakdown`, `round`
-	- `roundIntelSummary` (per player):
-		- `averageScore`, `averageOVR`, `averageRelevance`, `averageAdaptability`, `averageConfidence`, `averageFetchDurationMs`, `trustedCount`
+  - `roundPoints`, `voteCount`, `leaderboard`, `pointBreakdown`, `round`
+  - `packMeta` `{ id, label, description, themeTags[], visuals, availability }`
+  - `roundIntelSummary` (per player):
+    - `averageScore`, `averageOVR`, `averageRelevance`, `averageAdaptability`, `averageConfidence`, `averageFetchDurationMs`, `trustedCount`
+- `roomData.settings` may include `contentPackId`
+- `roomData.packCatalog` includes:
+  - `packs[]` (catalog entries for host selector / themed UI)
+  - `featuredPackId`
+  - `loadedAt`, `loadWarnings[]`, `loadErrors[]` (QA/debug support)
 
 ## Error Surfaces
 

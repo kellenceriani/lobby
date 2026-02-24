@@ -15,11 +15,12 @@ const createDefaultGameState = () => ({
   currentVoteChoice: null,
   leaderboard: [],
   myFinalTeam: [],
-  draftWarnings: {}
+  draftWarnings: {},
+  activePackMeta: null
 });
 
 export const player = { name: '', room: '', ready: false };
-export const roomState = { host: null, settings: {}, players: [], messages: [] };
+export const roomState = { host: null, settings: {}, players: [], messages: [], packCatalog: null, selectedPackMeta: null };
 export const gameState = createDefaultGameState();
 
 export const activeTimers = [];
@@ -49,6 +50,8 @@ export function resetRoomState() {
   roomState.settings = {};
   roomState.players = [];
   roomState.messages = [];
+  roomState.packCatalog = null;
+  roomState.selectedPackMeta = null;
 }
 
 export function resetGameState() {

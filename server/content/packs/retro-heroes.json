@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "retro-heroes",
+  "label": "Retro Heroes",
+  "description": "Arcade-energy heroics with neon danger, glitchy constraints, and over-the-top rescue prompts.",
+  "themeTags": ["retro", "arcade", "heroes", "neon"],
+  "visuals": {
+    "chipLabel": "RETRO",
+    "accentColor": "#ff8a00",
+    "tone": "neon-arcade"
+  },
+  "availability": {
+    "tier": "free",
+    "featuredEligible": true,
+    "unlockedByDefault": true
+  },
+  "gameplay": {
+    "allowedThemes": ["action", "adventure", "absurd", "performance"],
+    "scenarioCards": [
+      { "text": "SAVE A NEON ARCADE DISTRICT", "category": "action" },
+      { "text": "ESCORT A PIXEL PRINCESS THROUGH A GLITCH STORM", "category": "adventure" },
+      { "text": "DEFEND A CITY FROM AN 8-BIT KAIJU", "category": "action" },
+      { "text": "WIN A LASER-TAG CHAMPIONSHIP ON A SPACE MALL", "category": "sports" },
+      { "text": "REBOOT A COLLAPSING VIRTUAL KINGDOM", "category": "building" },
+      { "text": "STOP A BOSS RUSH INSIDE A GAME CARTRIDGE", "category": "mystery" },
+      { "text": "PERFORM A COMEBACK SHOW IN A POWER-OUTAGE ARCADE", "category": "performance" },
+      { "text": "SURVIVE A HIGH-SCORE HUNT ACROSS A GLITCH CITY", "category": "adventure" },
+      { "text": "NEGOTIATE PEACE BETWEEN RIVAL SPEEDRUN CLANS", "category": "social" },
+      { "text": "RESCUE CIVILIANS FROM A PINBALL FACTORY MELTDOWN", "category": "action" },
+      { "text": "STEAL BACK THE MASTER KEY TO THE NEON GRID", "category": "mystery" },
+      { "text": "RUN AN EMERGENCY PATCH FOR A SENTIENT ARCADE", "category": "building" }
+    ],
+    "twistAdds": {
+      "easy": [
+        "WITH ONLY THREE BUTTONS",
+        "UNDER STROBE LIGHTS",
+        "WHILE THE CROWD SHOUTS WRONG DIRECTIONS"
+      ],
+      "normal": [
+        "WITH INPUT LAG SPIKES",
+        "WHILE THE MAP SCROLLS SIDEWAYS",
+        "UNDER A LIVE SPEEDRUN TIMER",
+        "AND CHECKPOINTS KEEP MOVING"
+      ],
+      "hard": [
+        "WHILE GLITCH COPIES SPAWN EACH PHASE",
+        "UNDER PERMADEATH RULES",
+        "WITH BOSSES ADAPTING TO EVERY WIN"
+      ]
+    },
+    "final": {
+      "scenarioPool": [
+        "SECURE A CITYWIDE ARCADE POWER GRID BEFORE SHUTDOWN",
+        "REBUILD A FRACTURED NEON RESISTANCE ACROSS A GLITCH METRO",
+        "COORDINATE A LAST-STAGE EVACUATION THROUGH A PIXEL WARZONE"
+      ],
+      "twistPool": {
+        "easy": [
+          "WITH BONUS LIVES SHARED ACROSS THE TEAM"
+        ],
+        "normal": [
+          "WHILE CHECKPOINTS RESET EVERY 90 SECONDS",
+          "WITH ONLY ONE WORKING HUD"
+        ],
+        "hard": [
+          "UNDER A HARDCORE NO-RESPAWN FINAL",
+          "WHILE THE BOSS COPIES YOUR LAST STRATEGY"
+        ]
+      }
+    }
+  }
+}

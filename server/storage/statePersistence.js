@@ -77,7 +77,8 @@ function hydrateRooms(serialized) {
         scenarioTheme: 'all',
         plotTwists: true,
         maxPlayers: 6,
-        customScenario: ''
+        customScenario: '',
+        contentPackId: 'default'
       },
       messages: Array.isArray(room.messages) ? room.messages.slice(-10) : [],
       reactions: {}

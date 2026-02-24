@@ -5,6 +5,7 @@ const compression = require('compression');
 const { Server } = require('socket.io');
 const { initWordCache } = require('./server/core/gameEngine');
 const registerSocketHandlers = require('./server/socket/socketHandlers');
+const { getPackCatalog, getPackMetricsSnapshot } = require('./server/content/packRegistry');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,6 +13,14 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 app.disable('x-powered-by');
 app.use(compression());
+
+app.get('/api/packs', (_req, res) => {
+  res.json(getPackCatalog());
+});
+
+app.get('/api/packs/metrics', (_req, res) => {
+  res.json(getPackMetricsSnapshot());
+});
 
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,

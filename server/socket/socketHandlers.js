@@ -26,6 +26,12 @@ const {
   sanitizeSettings,
   createRateLimiter
 } = require('./inputValidation');
+const {
+  getPackCatalog,
+  getPublicPackMeta,
+  coercePackId,
+  recordPackRematch
+} = require('../content/packRegistry');
 
 const allowRequest = createRateLimiter();
 const CHAT_MAX_MESSAGES = 10;
@@ -89,12 +95,18 @@ function getRoomData(roomCode) {
 }
 
 function emitRoomData(io, roomCode, roomData) {
+  const safePackId = coercePackId(roomData && roomData.settings && roomData.settings.contentPackId);
+  if (roomData && roomData.settings) {
+    roomData.settings.contentPackId = safePackId;
+  }
   io.to(roomCode).emit('roomData', {
     players: roomData.players,
     isGameActive: roomData.isGameActive,
     host: roomData.host,
     settings: roomData.settings,
-    messages: roomData.messages
+    messages: roomData.messages,
+    packCatalog: getPackCatalog(),
+    selectedPackMeta: getPublicPackMeta(safePackId)
   });
 }
 
@@ -204,7 +216,8 @@ function emitFinalRoundResults(io, room, game) {
     roundPoints: game.round4Results.roundPoints,
     voteCount: {},
     leaderboard: game.round4Results.leaderboardData,
-    pointBreakdown: game.round4Results.pointBreakdown
+    pointBreakdown: game.round4Results.pointBreakdown,
+    packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId)
   });
 
   setTimeout(() => endGame(io, room), 3000);
@@ -316,7 +329,11 @@ function registerSocketHandlers(io) {
       if (roomData.host !== name || roomData.isGameActive) return;
 
       const cleaned = sanitizeSettings(newSettings);
+      if (Object.prototype.hasOwnProperty.call(cleaned, 'contentPackId')) {
+        cleaned.contentPackId = coercePackId(cleaned.contentPackId);
+      }
       roomData.settings = { ...roomData.settings, ...cleaned };
+      roomData.settings.contentPackId = coercePackId(roomData.settings.contentPackId);
 
       io.to(room).emit('settingsUpdated', roomData.settings);
       markRoomsDirty();
@@ -839,6 +856,10 @@ function registerSocketHandlers(io) {
       if (!joined) return;
 
       const { room, roomData } = joined;
+      const priorPackId = roomData && roomData.gameState && roomData.gameState.packMeta
+        ? roomData.gameState.packMeta.id
+        : (roomData && roomData.settings ? roomData.settings.contentPackId : 'default');
+      recordPackRematch(priorPackId);
       roomData.gameState = null;
       roomData.isGameActive = false;
       roomData.players.forEach(p => {

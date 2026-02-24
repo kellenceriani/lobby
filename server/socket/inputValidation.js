@@ -56,6 +56,13 @@ function sanitizeSettings(input) {
     cleaned.customScenario = settings.customScenario.trim().slice(0, 120);
   }
 
+  if (typeof settings.contentPackId === 'string') {
+    const packId = settings.contentPackId.trim().toLowerCase().slice(0, 48);
+    if (/^[a-z0-9-]{3,48}$/.test(packId) || packId === 'default') {
+      cleaned.contentPackId = packId;
+    }
+  }
+
   return cleaned;
 }
 

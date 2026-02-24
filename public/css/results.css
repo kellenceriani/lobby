@@ -3133,3 +3133,49 @@
     transform: translateY(0);
   }
 }
+
+.pack-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  margin: 6px auto 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.88rem;
+  line-height: 1.2;
+}
+
+.pack-meta-caption {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+
+.pack-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--pack-accent, #3ec5ff), rgba(255, 255, 255, 0.18));
+  color: #081018;
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.pack-meta-tags {
+  opacity: 0.78;
+  font-size: 0.8rem;
+}

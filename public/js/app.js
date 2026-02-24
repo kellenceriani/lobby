@@ -1470,6 +1470,116 @@ function startPreRoundLoadingSequence({
   addTimer(tick);
 }
 
+function normalizePackMeta(meta) {
+  if (!meta || typeof meta !== 'object') return null;
+  const visuals = meta.visuals && typeof meta.visuals === 'object' ? meta.visuals : {};
+  return {
+    id: meta.id ? String(meta.id) : 'default',
+    label: meta.label ? String(meta.label) : 'Default',
+    description: meta.description ? String(meta.description) : '',
+    themeTags: Array.isArray(meta.themeTags) ? meta.themeTags.map((tag) => String(tag)).filter(Boolean).slice(0, 6) : [],
+    visuals: {
+      chipLabel: visuals.chipLabel ? String(visuals.chipLabel) : '',
+      accentColor: visuals.accentColor ? String(visuals.accentColor) : '',
+      tone: visuals.tone ? String(visuals.tone) : ''
+    }
+  };
+}
+
+function getPackCatalogPacks() {
+  const catalog = roomState.packCatalog && typeof roomState.packCatalog === 'object' ? roomState.packCatalog : null;
+  return catalog && Array.isArray(catalog.packs) ? catalog.packs : [];
+}
+
+function getCatalogPackEntry(packId) {
+  const id = String(packId || '').toLowerCase() || 'default';
+  return getPackCatalogPacks().find((entry) => entry && String(entry.id || '').toLowerCase() === id) || null;
+}
+
+function resolveActivePackMeta(incomingMeta = null) {
+  const normalizedIncoming = normalizePackMeta(incomingMeta);
+  if (normalizedIncoming) return normalizedIncoming;
+  const fromGameState = normalizePackMeta(gameState.activePackMeta);
+  if (fromGameState) return fromGameState;
+  const fromRoom = normalizePackMeta(roomState.selectedPackMeta);
+  if (fromRoom) return fromRoom;
+  const packId = roomState && roomState.settings ? roomState.settings.contentPackId : 'default';
+  return normalizePackMeta(getCatalogPackEntry(packId)) || {
+    id: 'default',
+    label: 'Default',
+    description: 'Core LobbyWARS pack.',
+    themeTags: [],
+    visuals: { chipLabel: 'CORE', accentColor: '', tone: '' }
+  };
+}
+
+function buildPackChipMarkup(meta) {
+  const pack = resolveActivePackMeta(meta);
+  const chipLabel = pack.visuals && pack.visuals.chipLabel ? pack.visuals.chipLabel : pack.label;
+  const accent = pack.visuals && pack.visuals.accentColor ? pack.visuals.accentColor : '';
+  const style = accent ? ` style="--pack-accent:${escapeHtml(accent)}"` : '';
+  return `<span class="pack-meta-pill"${style}>${escapeHtml(chipLabel)}</span> ${escapeHtml(pack.label)}`;
+}
+
+function updateContentPackDescription(selectedPackId) {
+  const helpEl = document.getElementById('contentPackDescription');
+  if (!helpEl) return;
+  const selected = getCatalogPackEntry(selectedPackId || (roomState.settings && roomState.settings.contentPackId));
+  const featuredPackId = roomState.packCatalog && roomState.packCatalog.featuredPackId
+    ? String(roomState.packCatalog.featuredPackId)
+    : '';
+  const isFeatured = selected && featuredPackId && String(selected.id) === featuredPackId;
+  const baseDescription = selected && selected.description
+    ? String(selected.description)
+    : 'Curated pack themes for scenarios, twists, and finals.';
+  helpEl.textContent = isFeatured ? `Featured today: ${baseDescription}` : baseDescription;
+}
+
+function renderContentPackOptions() {
+  const select = document.getElementById('contentPack');
+  if (!select) return;
+
+  const catalogPacks = getPackCatalogPacks();
+  const fallbackOptions = [{ id: 'default', label: 'Default', description: 'Core LobbyWARS pack.', visuals: { chipLabel: 'CORE' } }];
+  const packs = catalogPacks.length ? catalogPacks : fallbackOptions;
+  const currentValue = String((roomState.settings && roomState.settings.contentPackId) || select.value || 'default');
+
+  select.innerHTML = '';
+  packs.forEach((entry) => {
+    const option = document.createElement('option');
+    const id = entry && entry.id ? String(entry.id) : 'default';
+    const label = entry && entry.label ? String(entry.label) : id;
+    const chip = entry && entry.visuals && entry.visuals.chipLabel ? String(entry.visuals.chipLabel) : '';
+    const featuredId = roomState.packCatalog && roomState.packCatalog.featuredPackId
+      ? String(roomState.packCatalog.featuredPackId)
+      : '';
+    const featuredTag = featuredId && featuredId === id ? ' (Featured)' : '';
+    option.value = id;
+    option.textContent = chip ? `${label} [${chip}]${featuredTag}` : `${label}${featuredTag}`;
+    select.appendChild(option);
+  });
+
+  select.value = packs.some((entry) => String(entry && entry.id) === currentValue) ? currentValue : 'default';
+  updateContentPackDescription(select.value);
+}
+
+function setFinalPackMetaLine(meta) {
+  const line = document.getElementById('finalPackMeta');
+  if (!line) return;
+  const pack = resolveActivePackMeta(meta);
+  const tags = Array.isArray(pack.themeTags) && pack.themeTags.length
+    ? ` <span class="pack-meta-tags">${escapeHtml(pack.themeTags.slice(0, 3).join(' • '))}</span>`
+    : '';
+  line.innerHTML = `<span class="pack-meta-caption">Pack:</span> ${buildPackChipMarkup(pack)}${tags}`;
+  line.hidden = false;
+}
+
+function buildRoundScoringMetaText(packMeta = null) {
+  const pack = resolveActivePackMeta(packMeta);
+  const packSuffix = pack && pack.label ? ` • Pack: ${pack.label}` : '';
+  return `<strong>Scoring:</strong> Community votes + contextual intel fit + other rule-based modifiers${escapeHtml(packSuffix)}`;
+}
+
 // ========================
 // JOIN & LOBBY
 // ========================
@@ -1543,6 +1653,8 @@ socket.on('gameError', (msg) => {
 socket.on('roomData', (data) => {
   console.log('📍 Received roomData:', data);
   Object.assign(roomState, data);
+  roomState.packCatalog = data && data.packCatalog ? data.packCatalog : roomState.packCatalog;
+  roomState.selectedPackMeta = normalizePackMeta(data && data.selectedPackMeta) || roomState.selectedPackMeta;
   roomState.messages = normalizeChatMessages(data.messages);
   const prunedHistory = pruneChatMessages(roomState.messages);
   roomState.messages = prunedHistory.messages;
@@ -1570,13 +1682,18 @@ socket.on('roomData', (data) => {
 
   const settingsContent = document.getElementById('settingsContent');
   const hostNote = document.getElementById('hostNote');
+  renderContentPackOptions();
 
   if (isHost) {
     settingsContent.style.display = 'block';
     hostNote.style.display = 'none';
     if (data.settings) {
       if (data.settings.difficulty) document.getElementById('difficulty').value = data.settings.difficulty;
+      if (data.settings.scenarioTheme) document.getElementById('scenarioTheme').value = data.settings.scenarioTheme;
+      if (data.settings.customScenario !== undefined) document.getElementById('customScenario').value = data.settings.customScenario;
+      if (data.settings.contentPackId) document.getElementById('contentPack').value = data.settings.contentPackId;
       if (data.settings.plotTwists !== undefined) document.getElementById('plotTwists').checked = data.settings.plotTwists;
+      updateContentPackDescription(data.settings.contentPackId);
     }
   } else {
     settingsContent.style.display = 'none';
@@ -1689,11 +1806,14 @@ socket.on('settingsUpdated', (settings) => {
   const difficulty = document.getElementById('difficulty');
   const scenarioTheme = document.getElementById('scenarioTheme');
   const customScenario = document.getElementById('customScenario');
+  const contentPack = document.getElementById('contentPack');
   const plotTwists = document.getElementById('plotTwists');
   if (difficulty && settings.difficulty) difficulty.value = settings.difficulty;
   if (scenarioTheme && settings.scenarioTheme) scenarioTheme.value = settings.scenarioTheme;
   if (customScenario && settings.customScenario !== undefined) customScenario.value = settings.customScenario;
+  if (contentPack && settings.contentPackId) contentPack.value = settings.contentPackId;
   if (plotTwists && settings.plotTwists !== undefined) plotTwists.checked = settings.plotTwists;
+  updateContentPackDescription(settings && settings.contentPackId);
 });
 
 function toggleReady() {
@@ -1705,6 +1825,9 @@ function updateSetting(key, value) {
   if (roomState.host !== player.name) return;
   const settings = { ...roomState.settings };
   settings[key] = value;
+  if (key === 'contentPackId') {
+    updateContentPackDescription(value);
+  }
   socket.emit('updateSettings', settings);
 }
 
@@ -1761,6 +1884,7 @@ function sendStartGame() {
 socket.on('gameStarting', (data) => {
   resetDraftWaitIntelPreview({ hide: true });
   gameState.totalRounds = data.totalRounds;
+  gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   gameState.myTeam = [];
   gameState.draftEntryCount = 0;
   gameState.draftLocked = false;
@@ -1770,6 +1894,11 @@ socket.on('gameStarting', (data) => {
   gameState.draftWarnings = {};
   playPhaseShiftSound();
   showToast('🎉 Game starting! Get ready!', 'info');
+  const finalPackMeta = document.getElementById('finalPackMeta');
+  if (finalPackMeta) {
+    finalPackMeta.hidden = true;
+    finalPackMeta.innerHTML = '';
+  }
   showScreen('preRound');
 });
 
@@ -1821,6 +1950,7 @@ socket.on('roundStart', (data) => {
 socket.on('scenarioRevealed', (data) => {
   clearTimers();
   gameState.currentScenario = data.scenario;
+  gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   gameState.myTeam = [];
   gameState.draftEntryCount = 0;
   gameState.draftLocked = false;
@@ -1838,7 +1968,8 @@ socket.on('scenarioRevealed', (data) => {
     const sourceIndex = Number.isFinite(Number(data.wordApiSourceIndex)) ? Number(data.wordApiSourceIndex) : null;
     const sourceTotal = Number.isFinite(Number(data.wordApiSourceTotal)) ? Number(data.wordApiSourceTotal) : null;
     const sourceSuffix = sourceIndex && sourceTotal ? ` (API ${sourceIndex}/${sourceTotal})` : '';
-    wordApiIndicator.textContent = `Auto-fill source: ${sourceLabel}${sourceSuffix}`;
+    const activePack = resolveActivePackMeta(data && data.packMeta);
+    wordApiIndicator.textContent = `Auto-fill source: ${sourceLabel}${sourceSuffix} | Pack: ${activePack.label}`;
   }
 
   const myTeamList = document.getElementById('myTeam');
@@ -2957,6 +3088,7 @@ function buildRoundWinnerHTML(data, isFinalRound = false) {
 socket.on('roundResults', (data) => {
   resetVoteTallyLoadingState();
   clearTimers();
+  gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   playWinSound();
   document.getElementById('resultRound').textContent = data.round;
 
@@ -3063,7 +3195,7 @@ socket.on('roundResults', (data) => {
 
   const scoringMeta = document.getElementById('roundScoringMeta');
   if (scoringMeta) {
-    scoringMeta.innerHTML = '<strong>Scoring:</strong> Community votes + contextual intel fit + other rule-based modifiers';
+    scoringMeta.innerHTML = buildRoundScoringMetaText(data && data.packMeta);
   }
 
   const intelSummaryContainer = document.getElementById('resultsIntelSummary');
@@ -3115,6 +3247,7 @@ function readyForNextRound() {
 
 socket.on('finalRoundResults', (data) => {
   clearTimers();
+  gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   playWinSound();
   const tie = data && data.isTie === true;
   showToast(tie ? '🤝 Final round locked with a tie.' : '🏁 Final round tally locked.', 'info', 2200);
@@ -3125,8 +3258,10 @@ socket.on('finalRoundResults', (data) => {
 // ========================
 socket.on('gameEnded', (data) => {
   clearTimers();
+  gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   playWinSound();
   setTimeout(() => createConfetti(), 300);
+  setFinalPackMetaLine(data && data.packMeta);
   const finalStandings = Array.isArray(data && data.finalLeaderboard) ? data.finalLeaderboard : [];
 
   const placeholderImage = buildMissingWinnerImage();

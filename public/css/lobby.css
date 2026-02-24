@@ -1728,3 +1728,11 @@
     display: none;
   }
 }
+
+.setting-help-text {
+  display: block;
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}

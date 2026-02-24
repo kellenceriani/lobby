@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "office-disaster",
+  "label": "Office Disaster",
+  "description": "Corporate chaos, PR meltdowns, broken systems, and absurd workplace crisis scenarios.",
+  "themeTags": ["office", "corporate", "disaster", "comedy"],
+  "visuals": {
+    "chipLabel": "OFFICE",
+    "accentColor": "#2a9d8f",
+    "tone": "paper-trail-chaos"
+  },
+  "availability": {
+    "tier": "free",
+    "featuredEligible": true,
+    "unlockedByDefault": true
+  },
+  "gameplay": {
+    "allowedThemes": ["social", "building", "mystery", "performance"],
+    "scenarioCards": [
+      { "text": "SAVE A PRODUCT LAUNCH AFTER A TOTAL SERVER OUTAGE", "category": "building" },
+      { "text": "CONTAIN A COMPANYWIDE GROUP CHAT MELTDOWN", "category": "social" },
+      { "text": "NEGOTIATE A MERGER DURING A LIVE PR SCANDAL", "category": "social" },
+      { "text": "REBUILD A DEADLINE CRITICAL WORKFLOW OVERNIGHT", "category": "building" },
+      { "text": "SOLVE A MISSING CONTRACT MYSTERY BEFORE BOARD REVIEW", "category": "mystery" },
+      { "text": "RUN A TOWN HALL AFTER MASSIVE LAYOFF RUMORS", "category": "performance" },
+      { "text": "STOP A BOTCHED REBRAND FROM GOING PUBLIC", "category": "mystery" },
+      { "text": "RESCUE A TRADE SHOW BOOTH AFTER SHIPPING FAILS", "category": "building" },
+      { "text": "TURN A HOSTILE CLIENT CALL INTO A LONG-TERM DEAL", "category": "social" },
+      { "text": "RECOVER A CFO DASHBOARD BEFORE MARKET OPEN", "category": "building" },
+      { "text": "EXPOSE A SABOTEUR IN THE COMPLIANCE TEAM", "category": "mystery" },
+      { "text": "STABILIZE A REMOTE TEAM AFTER A POLICY REVOLT", "category": "social" }
+    ],
+    "twistAdds": {
+      "easy": [
+        "WITHOUT USING SLIDES",
+        "WITH HR IN THE ROOM",
+        "WHILE THE WIFI CUTS OUT TWICE"
+      ],
+      "normal": [
+        "UNDER A LIVE EARNINGS CALL",
+        "WITH EXECUTIVES GIVING CONFLICTING ORDERS",
+        "WHILE LEGAL APPROVALS LAG",
+        "AND THE PRESS IS WAITING OUTSIDE"
+      ],
+      "hard": [
+        "WITH A LEAKED MEMO CHANGING THE RULES",
+        "UNDER A REGULATORY CLOCK",
+        "WHILE KEY DATA CANNOT BE TRUSTED"
+      ]
+    },
+    "final": {
+      "scenarioPool": [
+        "STABILIZE A MULTINATIONAL OPERATIONS CRISIS BEFORE MARKET OPEN",
+        "REBUILD PUBLIC TRUST AFTER A GLOBAL PRODUCT FAILURE",
+        "COORDINATE A COMPANY SAVE PLAN ACROSS FRACTURED TEAMS"
+      ],
+      "twistPool": {
+        "easy": [
+          "WITH A FULL STAFF ALL-HANDS READY"
+        ],
+        "normal": [
+          "WHILE AUDIT FLAGS ARRIVE LIVE",
+          "WITH APPROVAL CHAINS CHANGING EACH PHASE"
+        ],
+        "hard": [
+          "UNDER SIMULTANEOUS PR AND LEGAL ATTACKS",
+          "WHILE A RIVAL FIRM COPIES EVERY MOVE"
+        ]
+      }
+    }
+  }
+}

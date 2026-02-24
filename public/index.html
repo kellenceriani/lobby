@@ -280,6 +280,15 @@
             </label>
           </div>
           <div class="setting-item">
+            <label for="contentPack">
+              <strong>Content Pack</strong>
+              <select id="contentPack" onchange="updateSetting('contentPackId', this.value)" aria-label="Content pack selection">
+                <option value="default" selected>Core Pack (Default)</option>
+              </select>
+              <small id="contentPackDescription" class="setting-help-text">Curated pack themes for scenarios, twists, and finals.</small>
+            </label>
+          </div>
+          <div class="setting-item">
             <label class="checkbox-label">
               <input type="checkbox" id="plotTwists" checked onchange="updateSetting('plotTwists', this.checked)">
               <span>Enable Plot Twists</span>
@@ -740,6 +749,7 @@
   <div id="finalScreen" class="screen">
     <div class="final-container-modern">
       <h1 class="final-title">🎉 FINAL RESULTS 🎉</h1>
+      <div id="finalPackMeta" class="pack-meta-line" hidden aria-live="polite"></div>
       <div id="finalWinnerCharacters" class="winner-char-gallery" aria-live="polite"></div>
       <ol id="finalLeaderboard" class="leaderboard-modern"></ol>
       <div class="final-actions-modern">

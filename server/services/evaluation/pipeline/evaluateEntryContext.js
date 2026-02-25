@@ -732,6 +732,9 @@ function computeBaseAbilityScore(relevance, resolution, scoringInfo) {
   else if (imageSynthetic && source === 'local-index' && !trustedLocalFiction) raw -= 6;
   if (riskFlags.has('high_candidate_ambiguity')) raw -= 6;
   if (riskFlags.has('title_differs_from_input') && titleCompact && inputCompact && titleCompact !== inputCompact) raw -= 5;
+  if (riskFlags.has('dangerous_title_diff_suspected')) raw -= 14;
+  if (riskFlags.has('dangerous_title_diff_suspected') && source.includes('wikipedia-search')) raw -= 4;
+  if (riskFlags.has('dangerous_title_diff_suspected') && imageSynthetic) raw -= 4;
   if (source.includes('search') && confidence < 0.62) raw -= 4;
   if (source === 'wikidata' && imageSynthetic) raw -= 5;
   if (entityKind === 'unknown' && confidence < 0.5) raw -= 8;
@@ -1083,12 +1086,15 @@ function buildConfidencePacket({ resolution, relevance }) {
   if (riskFlags.has('fast_round_timeout_fallback')) contextFit -= 0.1;
   if (riskFlags.has('high_candidate_ambiguity')) contextFit -= 0.05;
   if (riskFlags.has('title_differs_from_input')) contextFit -= 0.04;
+  if (riskFlags.has('dangerous_title_diff_suspected')) contextFit -= 0.12;
+  if (riskFlags.has('dangerous_title_diff_suspected') && riskFlags.has('synthetic_image')) contextFit -= 0.03;
   contextFit = clamp(Number(contextFit.toFixed(3)), 0, 1);
 
   let adjustedNameResolution = nameResolution;
   if (riskFlags.has('synthetic_image')) adjustedNameResolution -= 0.05;
   if (riskFlags.has('fast_round_timeout_fallback')) adjustedNameResolution -= 0.18;
   if (riskFlags.has('high_candidate_ambiguity')) adjustedNameResolution -= 0.08;
+  if (riskFlags.has('dangerous_title_diff_suspected')) adjustedNameResolution -= 0.18;
   adjustedNameResolution = clamp(Number(adjustedNameResolution.toFixed(3)), 0, 1);
 
   const overall = clamp(Number(((adjustedNameResolution * 0.58) + (contextFit * 0.42)).toFixed(3)), 0, 1);
@@ -1467,6 +1473,7 @@ function computeContextOvrModel({
     ? heuristicEntityKind
     : inferredEntityKind;
   const desc = String(scoringInfo && scoringInfo.description || '').toLowerCase();
+  const infoSource = String(scoringInfo && scoringInfo.source || '').toLowerCase();
   const titleText = String(scoringInfo && (scoringInfo.title || scoringInfo.name) || character || '').toLowerCase();
   const isBruceBannerIdentity = /bruce banner/.test(titleText);
   const confidenceOverall = clamp(Number(confidence && confidence.overall) || 0, 0, 1);
@@ -1844,10 +1851,37 @@ function computeContextOvrModel({
     parsedContext && parsedContext.evaluationMode === 'final' ? chemistry : 50
   ], 50);
   const restraintDelta = Math.round((restraintComposite - 50) * 0.05);
+  const severeRiskFlags = [
+    'dangerous_title_diff_suspected',
+    'fast_round_timeout_fallback',
+    'high_candidate_ambiguity',
+    'synthetic_image'
+  ];
+  const moderateRiskFlags = [
+    'title_differs_from_input',
+    'no_scenario_keyword_overlap',
+    'no_twist_keyword_overlap'
+  ];
+  const severeRiskCount = severeRiskFlags.reduce((count, flag) => count + (resolutionRiskFlags.has(flag) ? 1 : 0), 0);
+  const moderateRiskCount = moderateRiskFlags.reduce((count, flag) => count + (resolutionRiskFlags.has(flag) ? 1 : 0), 0);
+  const riskySearchMismatch =
+    infoSource.includes('wikipedia-search')
+    && resolutionRiskFlags.has('title_differs_from_input')
+    && (resolutionRiskFlags.has('synthetic_image') || confidenceName < 0.72);
+  const lowTrustRiskStack =
+    confidenceName < 0.72
+    && (severeRiskCount >= 2 || (severeRiskCount >= 1 && moderateRiskCount >= 2));
   if (confidenceOverall < 0.45) fitDelta -= 3;
   if (confidenceOverall < 0.3) fitDelta -= 4;
   if (confidenceName < 0.72 && resolutionRiskFlags.has('title_differs_from_input')) fitDelta -= 5;
   if (confidenceName < 0.6 && resolutionRiskFlags.has('high_candidate_ambiguity')) fitDelta -= 6;
+  if (resolutionRiskFlags.has('dangerous_title_diff_suspected')) fitDelta -= 12;
+  if (confidenceName < 0.75 && resolutionRiskFlags.has('dangerous_title_diff_suspected')) fitDelta -= 8;
+  if (resolutionRiskFlags.has('dangerous_title_diff_suspected') && resolutionRiskFlags.has('synthetic_image')) fitDelta -= 4;
+  if (severeRiskCount >= 2 && moderateRiskCount >= 1) fitDelta -= 6;
+  if (lowTrustRiskStack) fitDelta -= 7;
+  if (riskySearchMismatch) fitDelta -= 6;
+  if (riskySearchMismatch && moderateRiskCount >= 2) fitDelta -= 4;
 
   let finalOVR = neutralBaseOVR + fitDelta + restraintDelta;
   const weightedTarget = clamp(Number(weighted && weighted.ovr99) || finalOVR, 0, 99);
@@ -1879,6 +1913,11 @@ function computeContextOvrModel({
   if (confidenceName < 0.65 && resolutionRiskFlags.has('title_differs_from_input')) confidenceCappedFinalCap -= 6;
   if (resolutionRiskFlags.has('fast_round_timeout_fallback')) confidenceCappedFinalCap -= 10;
   if (resolutionRiskFlags.has('high_candidate_ambiguity') && confidenceName < 0.75) confidenceCappedFinalCap -= 5;
+  if (resolutionRiskFlags.has('dangerous_title_diff_suspected')) confidenceCappedFinalCap -= 18;
+  if (resolutionRiskFlags.has('dangerous_title_diff_suspected') && resolutionRiskFlags.has('synthetic_image')) confidenceCappedFinalCap -= 6;
+  if (severeRiskCount >= 2 && moderateRiskCount >= 1) confidenceCappedFinalCap -= 6;
+  if (lowTrustRiskStack) confidenceCappedFinalCap -= 6;
+  if (riskySearchMismatch) confidenceCappedFinalCap -= 6;
   confidenceCappedFinalCap = clamp(confidenceCappedFinalCap, 0, 99);
   const finalFloorByClass = {
     mythic: 34,
@@ -1943,7 +1982,10 @@ function computeContextOvrModel({
       neutralCap: powerBand.neutralCap,
       finalCap: confidenceCappedFinalCap,
       uncappedFinalCap: finalCap,
-      confidenceName
+      confidenceName,
+      severeRiskCount,
+      moderateRiskCount,
+      riskySearchMismatch: riskySearchMismatch ? 1 : 0
       ,
       carryoverAssistDampenScenario: Number(carryoverScenarioAssistDampen.toFixed(2)),
       carryoverAssistDampenTwist: Number(carryoverTwistAssistDampen.toFixed(2)),
@@ -2177,7 +2219,12 @@ function buildContextPublicResult({
     fetchDurationMs: Number(resolution.fetchDurationMs) || 0,
     resolvedTitle: scoringInfo && (scoringInfo.title || scoringInfo.name) ? String(scoringInfo.title || scoringInfo.name) : null,
     resolvedSource: scoringInfo && scoringInfo.source ? String(scoringInfo.source) : null,
+    aliases: Array.isArray(scoringInfo && scoringInfo.aliases) ? scoringInfo.aliases.slice(0, 16) : [],
+    resolvedDescriptionSnippet: scoringInfo && scoringInfo.description
+      ? String(scoringInfo.description).replace(/\s+/g, ' ').trim().slice(0, 420)
+      : null,
     imageSynthetic: Boolean(scoringInfo && scoringInfo.imageSynthetic),
+    imageBackfilled: Boolean(scoringInfo && scoringInfo.imageBackfilled),
     evaluationEngine: 'rules-context-v1',
     evaluationEngineMode: 'context',
     resolverConfidence: confidence.nameResolution,

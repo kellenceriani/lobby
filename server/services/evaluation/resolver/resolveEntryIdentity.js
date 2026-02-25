@@ -1,6 +1,6 @@
 const { fetchCharacterInfo } = require('../../../evaluator');
-const { normalizeName, canonicalizeName } = require('../../../evaluator/core/textUtils');
-const { MIN_INFO_CONFIDENCE } = require('../../../evaluator/core/constants');
+const { normalizeName, canonicalizeName, resolveLikelyTypo } = require('../../../evaluator/core/textUtils');
+const { MIN_INFO_CONFIDENCE, CHARACTER_NAME_ALIASES } = require('../../../evaluator/core/constants');
 const {
   fetchFromWikipediaEnhanced,
   fetchFromWikipediaSearchEnhanced,
@@ -76,10 +76,13 @@ const RESOLVER_MONIKER_OVERRIDES = {
   thebat: ['Batman'],
   thebatfamily: ['Batman Family'],
   thebatsymbol: ['Bat-Signal'],
-  thebatsignal: ['Bat-Signal']
+  thebatsignal: ['Bat-Signal'],
+  girlfromhungergameswithbow: ['Katniss Everdeen', 'The Hunger Games'],
+  theofficebossguy: ['Michael Scott', 'The Office (American TV series)']
 };
 const RESOLVER_OBJECT_TERMS = new Set([
   'sword', 'shield', 'trident', 'hammer', 'axe', 'helmet', 'ring', 'gauntlet', 'throne', 'crown', 'castle',
+  'wand', 'ball', 'orb', 'device', 'watch', 'omnitrix', 'pokeball',
   'express', 'bus', 'car', 'truck', 'knife', 'rice', 'roll', 'sandwich', 'bowl', 'shop', 'planet', 'room', 'map'
 ]);
 const RESOLVER_FOOD_TERMS = new Set([
@@ -108,6 +111,13 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   peach: ['Princess Peach', 'Peach'],
   princesspeach: ['Princess Peach', 'Princess Peach (character)', 'Mario'],
   robin: ['Nico Robin (One Piece)', 'Nico Robin', 'Robin (DC Comics)', 'Robin'],
+  clarkkent: ['Superman', 'Clark Kent'],
+  elderwand: ['Elder Wand', 'The Elder Wand'],
+  mjolnir: ['Mjölnir', 'Mjolnir'],
+  omnitrix: ['Omnitrix', 'Ben 10'],
+  pokeball: ['Poké Ball', 'Poke Ball'],
+  momoavatar: ['Momo (Avatar: The Last Airbender)', 'Momo (Avatar)'],
+  ldeathnote: ['L (Death Note)', 'L'],
   nicorobin: ['Nico Robin (One Piece)', 'Nico Robin', 'One Piece'],
   hulk: ['Hulk (Marvel Comics)', 'Hulk', 'Bruce Banner'],
   thehulk: ['Hulk (Marvel Comics)', 'Hulk', 'The Incredible Hulk'],
@@ -121,6 +131,7 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   dexter: ['Dexter (TV series)', "Dexter's Laboratory", 'Dexter Morgan'],
   jesuschrist: ['Jesus', 'Christ', 'Jesus Christ'],
   shaggy: ['Shaggy Rogers', 'Scooby-Doo', 'Norville Rogers'],
+  scooby: ['Scooby-Doo', 'Scooby-Doo (character)', 'Scooby'],
   sanji: ['Sanji (One Piece)', 'Vinsmoke Sanji', 'One Piece'],
   daffyduck: ['Daffy Duck', 'Looney Tunes'],
   deadspoetssociety: ['Dead Poets Society'],
@@ -182,6 +193,7 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   barbrastreisand: ['Barbra Streisand'],
   johndimaggio: ['John DiMaggio'],
   frozone: ['Frozone', 'Lucius Best'],
+  ben10: ['Ben Tennyson', 'Ben 10'],
   dash: ['Dash Parr', 'The Incredibles'],
   flash: ['The Flash (Barry Allen)', 'The Flash'],
   mrbeast: ['MrBeast', 'Jimmy Donaldson'],
@@ -276,6 +288,11 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   medivaltimes: ['Medieval Times'],
   mochaccino: ['Mocha cappuccino', 'Cappuccino'],
   mountrainier: ['Mount Rainier'],
+  poseidon: ['Poseidon', 'Poseidon (mythology)', 'Poseidon (god)'],
+  posedion: ['Poseidon', 'Poseidon (mythology)', 'Poseidon (god)'],
+  megantrainor: ['Meghan Trainor'],
+  megantrainer: ['Meghan Trainor'],
+  bobripley: ['Robert Ripley', "Ripley's Believe It or Not!"],
   n64: ['Nintendo 64'],
   poseidonstrident: ["Poseidon's trident", 'Poseidon'],
   quinoa: ['Quinoa'],
@@ -284,6 +301,7 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   baymax: ['Baymax', 'Big Hero 6'],
   jeangrey: ['Jean Grey', 'Phoenix (Marvel Comics)'],
   johnwick: ['John Wick'],
+  ishigamisenky: ['Senku Ishigami', 'Dr. Stone'],
   krakenmyth: ['Kraken'],
   sherlockh: ['Sherlock Holmes'],
   simbajr: ['Simba'],
@@ -303,6 +321,7 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   capncrunch: ["Cap'n Crunch", 'Captain Crunch'],
   dobby: ['Dobby (Harry Potter)', 'Dobby'],
   drax: ['Drax (character)', 'Drax the Destroyer'],
+  pewdiepie: ['PewDiePie', 'Felix Kjellberg'],
   erenyeager: ['Eren Yeager', 'Eren Jaeger', 'Attack on Titan'],
   grootjr: ['Groot', 'Baby Groot'],
   hotfudge: ['Hot fudge', 'Chocolate syrup'],
@@ -354,6 +373,51 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     queries: ['Pink Panther (character)', 'The Pink Panther', 'Pink Panther'],
     rejectTitles: ['Pink Panther (disambiguation)'],
     allowTitles: ['Pink Panther (character)', 'The Pink Panther', 'Pink Panther']
+  },
+  scooby: {
+    queries: ['Scooby-Doo', 'Scooby-Doo (character)', 'Scooby'],
+    rejectTitles: ['Scooby-Doo (franchise)', 'Scooby-Doo (disambiguation)'],
+    allowTitles: ['Scooby-Doo', 'Scooby-Doo (character)']
+  },
+  ben10: {
+    queries: ['Ben 10', 'Ben Tennyson'],
+    rejectTitles: ['Ben (disambiguation)'],
+    allowTitles: ['Ben 10', 'Ben Tennyson']
+  },
+  poseidon: {
+    queries: ['Poseidon', 'Poseidon (mythology)'],
+    rejectTitles: ['The Poseidon Adventure', 'Poseidon (disambiguation)', 'Poseidon (film)'],
+    allowTitles: ['Poseidon']
+  },
+  posedion: {
+    queries: ['Poseidon', 'Poseidon (mythology)'],
+    rejectTitles: ['The Poseidon Adventure', 'Poseidon (disambiguation)', 'Poseidon (film)'],
+    allowTitles: ['Poseidon']
+  },
+  megantrainor: {
+    queries: ['Meghan Trainor'],
+    rejectTitles: ['Megan', 'Megan (disambiguation)'],
+    allowTitles: ['Meghan Trainor']
+  },
+  megantrainer: {
+    queries: ['Meghan Trainor'],
+    rejectTitles: ['Megan', 'Megan (disambiguation)'],
+    allowTitles: ['Meghan Trainor']
+  },
+  bobripley: {
+    queries: ['Robert Ripley', "Ripley's Believe It or Not!"],
+    rejectTitles: ['Pink Panther (character)', 'Pink Panther'],
+    allowTitles: ['Robert Ripley', "Ripley's Believe It or Not!"]
+  },
+  pewdiepie: {
+    queries: ['PewDiePie', 'Felix Kjellberg'],
+    rejectTitles: ['PewDiePie (disambiguation)'],
+    allowTitles: ['PewDiePie', 'Felix Kjellberg']
+  },
+  ishigamisenky: {
+    queries: ['Senku Ishigami', 'Dr. Stone'],
+    rejectTitles: ['Senku', 'Ishigami'],
+    allowTitles: ['Senku Ishigami', 'Dr. Stone']
   },
   shangchi: {
     queries: ['Shang-Chi', 'Shang-Chi (Marvel Cinematic Universe)'],
@@ -1534,11 +1598,13 @@ function buildImageBackfillQueries({ character, info, fetchOptions = {} }) {
   const resolution = lookupMeta && lookupMeta.resolution && typeof lookupMeta.resolution === 'object'
     ? lookupMeta.resolution
     : null;
+  const infoAliases = Array.isArray(info && info.aliases) ? info.aliases.slice(0, 10) : [];
   const rawQueries = [
     character,
     info && info.title,
     resolution && resolution.matchedAlias,
-    resolution && resolution.canonical
+    resolution && resolution.canonical,
+    ...infoAliases
   ];
 
   const queries = [];
@@ -1588,6 +1654,13 @@ function buildImageBackfillQueries({ character, info, fetchOptions = {} }) {
       queries.push(`${titleSeed} (film)`);
     }
   }
+  if (/fictional character|superhero|villain|anime|manga|comic/.test(description)) {
+    const preferred = normalizeName((resolution && resolution.canonical) || (infoAliases[0]) || titleSeed || character);
+    if (preferred) {
+      queries.push(`${preferred} (character)`);
+      queries.push(`${preferred} (comics)`);
+    }
+  }
 
   const out = [];
   const seen = new Set();
@@ -1600,7 +1673,11 @@ function buildImageBackfillQueries({ character, info, fetchOptions = {} }) {
   const mode = String((fetchOptions && fetchOptions.mode) || (info && info.lookupMeta && info.lookupMeta.mode) || '').toLowerCase();
   const maxQueries = Math.max(
     1,
-    Math.min(8, Number(fetchOptions && fetchOptions.maxImageBackfillQueries) || (mode === 'round' ? 4 : 6))
+    Math.min(
+      10,
+      Number(fetchOptions && fetchOptions.maxImageBackfillQueries)
+      || (mode === 'round' ? 4 : mode === 'context' ? 7 : 8)
+    )
   );
   return out.slice(0, maxQueries);
 }
@@ -1718,11 +1795,13 @@ async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
     || (inputCompact && IMAGE_BACKFILL_ALIAS_HINTS[inputCompact])
   );
   const source = String(info && info.source || '').toLowerCase();
-  const trustedSpecificWiki = mode === 'final'
+  const trustedSpecificWiki = (mode === 'final' || mode === 'context')
     && titleWordCount >= 2
-    && confidence >= 0.72
+    && confidence >= (mode === 'final' ? 0.72 : 0.76)
     && (source.includes('wikipedia') || source.includes('wiki'));
-  const preferQualityUpgrade = mode === 'final'
+  const prefersAliasIdentity = hasAliasHints
+    && confidence >= (mode === 'final' ? 0.52 : 0.6);
+  const preferQualityUpgrade = (mode === 'final' || mode === 'context')
     && (hasAliasHints || trustedSpecificWiki)
     && !((inputCompact && FAST_ROUND_GENERIC_NAME_SKIP_ALIAS.has(inputCompact)) || (compact && FAST_ROUND_GENERIC_NAME_SKIP_ALIAS.has(compact)))
     && !(titleWordCount <= 1 && !hasAliasHints);
@@ -1736,11 +1815,13 @@ async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
     skipImageBackfill: false,
     imageBackfillTimeoutMs: mode === 'final'
       ? (preferQualityUpgrade ? Math.max(900, Math.min(1200, IMAGE_BACKFILL_TIMEOUT_MS + 250)) : Math.min(650, Math.max(550, IMAGE_BACKFILL_TIMEOUT_MS)))
-      : IMAGE_BACKFILL_TIMEOUT_MS,
-    maxImageBackfillQueries: mode === 'final' ? (preferQualityUpgrade ? 3 : 2) : 4,
+      : (preferQualityUpgrade || prefersAliasIdentity ? Math.max(700, IMAGE_BACKFILL_TIMEOUT_MS) : IMAGE_BACKFILL_TIMEOUT_MS),
+    maxImageBackfillQueries: mode === 'final'
+      ? (preferQualityUpgrade ? 4 : 2)
+      : (preferQualityUpgrade || prefersAliasIdentity ? 5 : 4),
     imageBackfillBudgetMs: mode === 'final'
       ? (preferQualityUpgrade ? Math.max(1100, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS + 350) : Math.min(700, Math.max(550, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)))
-      : 0,
+      : (preferQualityUpgrade || prefersAliasIdentity ? Math.max(800, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS) : 0),
     preferSummaryFirst: Boolean(preferQualityUpgrade)
   };
   const upgraded = await withTimeout(
@@ -2031,6 +2112,196 @@ function scoreGenericIdentityUpgradeCandidate(character, candidate, currentInfo)
     if (allowed.some((v) => v && (titleCompact.includes(v) || desc.includes(v.replace(/[^a-z0-9]/g, ' '))))) score += 22;
   }
   return score;
+}
+
+function estimateDangerousTitleDiffRisk(character, info) {
+  if (!info || typeof info !== 'object') return 0;
+  const title = String(info.title || '').trim();
+  if (!title) return 0;
+
+  const inputCompact = canonicalizeName(character);
+  const titleCompact = canonicalizeName(title);
+  if (!inputCompact || !titleCompact || inputCompact === titleCompact) return 0;
+  const inputCompactNoParens = canonicalizeName(String(character || '').replace(/\s*\([^)]*\)\s*/g, ' ').trim());
+
+  const source = String(info.source || '').toLowerCase();
+  if (!source.includes('wiki')) return 0;
+  if (info.timeoutFallback || source.includes('fast-fallback')) return 0;
+
+  const titleCompactNoParens = canonicalizeName(String(title).replace(/\s*\([^)]*\)\s*/g, ' ').trim());
+  const infoAliases = Array.isArray(info.aliases) ? info.aliases : [];
+  const normalizedLower = normalizeName(character).toLowerCase();
+  const typoFixed = resolveLikelyTypo(character);
+  const typoCompact = canonicalizeName(typoFixed || '');
+  const aliasTargets = []
+    .concat(CHARACTER_NAME_ALIASES[normalizedLower] || [])
+    .concat(CHARACTER_NAME_ALIASES[inputCompact] || [])
+    .concat(RESOLVER_MONIKER_OVERRIDES[inputCompact] || [])
+    .concat(RESOLVER_QUOTE_ALIAS_OVERRIDES[inputCompact] || [])
+    .map((value) => normalizeName(value))
+    .filter(Boolean);
+  const aliasTargetCompacts = new Set(aliasTargets.map((value) => canonicalizeName(value)).filter(Boolean));
+  const infoAliasCompacts = new Set(infoAliases.map((value) => canonicalizeName(value)).filter(Boolean));
+  if (titleCompactNoParens && (titleCompactNoParens === inputCompact || (inputCompactNoParens && titleCompactNoParens === inputCompactNoParens))) return 0;
+  if (inputCompactNoParens && (titleCompact === inputCompactNoParens || titleCompactNoParens === inputCompactNoParens)) return 0;
+  if (typoCompact && (typoCompact === titleCompact || typoCompact === titleCompactNoParens || infoAliasCompacts.has(typoCompact))) return 0;
+  if (aliasTargetCompacts.has(titleCompact) || (titleCompactNoParens && aliasTargetCompacts.has(titleCompactNoParens))) return 0;
+  for (const aliasCompact of aliasTargetCompacts) {
+    if (!aliasCompact) continue;
+    if (infoAliasCompacts.has(aliasCompact)) return 0;
+    if (aliasCompact === inputCompact) continue;
+    if (titleCompact.includes(aliasCompact) || aliasCompact.includes(titleCompact)) return 0;
+  }
+
+  const normalizePersonTokens = (value) => String(value || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const personTokenDistance = (a = '', b = '') => {
+    const s = String(a || '');
+    const t = String(b || '');
+    if (!s || !t) return 99;
+    const dp = Array.from({ length: s.length + 1 }, () => Array(t.length + 1).fill(0));
+    for (let i = 0; i <= s.length; i += 1) dp[i][0] = i;
+    for (let j = 0; j <= t.length; j += 1) dp[0][j] = j;
+    for (let i = 1; i <= s.length; i += 1) {
+      for (let j = 1; j <= t.length; j += 1) {
+        const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      }
+    }
+    return dp[s.length][t.length];
+  };
+  const nicknamePairs = {
+    bob: ['robert', 'bobby', 'rob'],
+    rob: ['robert', 'bob'],
+    bill: ['william', 'will', 'billy'],
+    will: ['william', 'bill'],
+    jim: ['james', 'jimmy'],
+    jimmy: ['james', 'jim'],
+    joe: ['joseph', 'joey'],
+    mike: ['michael', 'mikey'],
+    meg: ['megan', 'meghan'],
+    megan: ['meghan', 'meg'],
+    meghan: ['megan', 'meg']
+  };
+  const areNameVariantTokens = (a = '', b = '') => {
+    const left = String(a || '').toLowerCase();
+    const right = String(b || '').toLowerCase();
+    if (!left || !right) return false;
+    if (left === right) return true;
+    if ((nicknamePairs[left] || []).includes(right)) return true;
+    if ((nicknamePairs[right] || []).includes(left)) return true;
+    if (left.length >= 4 && right.length >= 4 && personTokenDistance(left, right) <= 2) return true;
+    return false;
+  };
+  const inputPersonTokens = normalizePersonTokens(character);
+  const titlePersonTokens = normalizePersonTokens(title);
+  if (inputPersonTokens.length >= 2 && titlePersonTokens.length >= 2) {
+    const inputFirst = inputPersonTokens[0];
+    const inputLast = inputPersonTokens[inputPersonTokens.length - 1];
+    const titleFirst = titlePersonTokens[0];
+    const titleLast = titlePersonTokens[titlePersonTokens.length - 1];
+    if (areNameVariantTokens(inputLast, titleLast) && areNameVariantTokens(inputFirst, titleFirst)) {
+      return 0;
+    }
+  }
+
+  const profile = buildResolverInputProfile(character);
+  const inputTokens = (Array.isArray(profile.tokens) ? profile.tokens : []).filter((t) => String(t || '').length >= 3);
+  if (!inputTokens.length) return 0;
+
+  const titleTokens = new Set(tokenizeResolverPhrase(title));
+  const descTokens = new Set(tokenizeResolverPhrase(String(info.description || '')));
+  const overlap = tokenOverlapScoreLoose(character, title);
+  const matchCount = inputTokens.filter((t) => titleTokens.has(t) || descTokens.has(t)).length;
+  const personLike = /person|actor|athlete|singer|rapper|politician|wrestler|philosopher|scientist|historian|composer|author|businessman/.test(String(info.description || '').toLowerCase());
+
+  let risk = 0;
+  if (matchCount === 0) risk += 6;
+  if (matchCount > 0 && matchCount < inputTokens.length) risk += 3;
+  if (inputTokens.length >= 2 && matchCount <= 1) risk += 2;
+  if (overlap < 0.34) risk += 5;
+  else if (overlap < 0.5) risk += 3;
+  if (source.includes('wikipedia-search')) risk += 2;
+  if (personLike && inputTokens.length >= 2 && matchCount <= 1) risk += 2;
+  if (Number(info.confidence) >= 0.7 && inputTokens.length >= 2 && matchCount <= 1) risk += 1; // overconfident mismatch suspicion
+
+  return risk;
+}
+
+function shouldAttemptDangerousTitleDiffRescue(character, info, fetchOptions = {}) {
+  if (!info || typeof info !== 'object') return false;
+  const mode = String((fetchOptions && fetchOptions.mode) || '').toLowerCase();
+  if (mode !== 'final') return false;
+  const source = String(info.source || '').toLowerCase();
+  if (!source.includes('wiki')) return false;
+  if (!String(info.title || '').trim()) return false;
+  if (canonicalizeName(info.title) === canonicalizeName(character)) return false;
+  if (info.timeoutFallback || source.includes('fast-fallback')) return false;
+  if (Number(info.confidence) > 0 && Number(info.confidence) < 0.4) return false;
+  return estimateDangerousTitleDiffRisk(character, info) >= 6;
+}
+
+async function tryRescueDangerousTitleDiffIdentity(character, info, fetchOptions = {}) {
+  if (!shouldAttemptDangerousTitleDiffRescue(character, info, fetchOptions)) return info;
+
+  const currentRisk = estimateDangerousTitleDiffRisk(character, info);
+  let candidate = info;
+
+  const aliasAttempt = await withTimeout(
+    tryAliasResolutionOverride(character, info, {
+      ...fetchOptions,
+      fastRoundMode: false,
+      fastAliasOverride: true,
+      aliasOverrideBudgetMs: Math.min(500, FINAL_IDENTITY_UPGRADE_TIMEOUT_MS)
+    }),
+    Math.min(550, FINAL_IDENTITY_UPGRADE_TIMEOUT_MS + 50)
+  );
+  if (aliasAttempt && aliasAttempt !== info) {
+    const aliasRisk = estimateDangerousTitleDiffRisk(character, aliasAttempt);
+    if (aliasRisk + 1 < currentRisk || canonicalizeName(aliasAttempt.title) === canonicalizeName(character)) {
+      candidate = {
+        ...aliasAttempt,
+        dangerousTitleDiffRescued: true,
+        dangerousTitleDiffRiskBefore: currentRisk,
+        dangerousTitleDiffRiskAfter: aliasRisk
+      };
+    }
+  }
+
+  const upgraded = await withTimeout(
+    tryGenericIdentityUpgrade(character, candidate, {
+      ...fetchOptions,
+      identityUpgradeBudgetMs: Math.min(700, FINAL_IDENTITY_UPGRADE_TIMEOUT_MS)
+    }),
+    Math.min(760, FINAL_IDENTITY_UPGRADE_TIMEOUT_MS + 120)
+  );
+
+  if (!upgraded || upgraded === candidate) return candidate;
+
+  const upgradedRisk = estimateDangerousTitleDiffRisk(character, upgraded);
+  const currentConfidence = Number(candidate.confidence) || 0;
+  const upgradedConfidence = Number(upgraded.confidence) || 0;
+  const exactNow = canonicalizeName(upgraded.title) === canonicalizeName(character);
+  const improvedImage = Boolean(upgraded.imageUrl) && !candidate.imageUrl;
+
+  const markRescue = (value) => ({
+    ...value,
+    dangerousTitleDiffRescued: true,
+    dangerousTitleDiffRiskBefore: currentRisk,
+    dangerousTitleDiffRiskAfter: upgradedRisk
+  });
+
+  if (exactNow) return markRescue(upgraded);
+  if (upgradedRisk + 1 < estimateDangerousTitleDiffRisk(character, candidate)) return markRescue(upgraded);
+  if (improvedImage && upgradedConfidence >= currentConfidence) return markRescue(upgraded);
+  if (upgradedConfidence >= currentConfidence + 0.08 && upgradedRisk <= currentRisk) return markRescue(upgraded);
+
+  return candidate;
 }
 
 function tokenOverlapScoreLoose(a, b) {
@@ -3282,14 +3553,34 @@ function buildRiskFlags({ info, confidence, trustedInfo, character }) {
   if (info.imageSynthetic) flags.push('synthetic_image');
   if (info.genericAmbiguityFallback) flags.push('generic_name_ambiguity');
   if (info.timeoutFallback) flags.push('fast_round_timeout_fallback');
+  if (info.dangerousTitleDiffRescued) flags.push('dangerous_title_diff_rescued');
   if (info.source && String(info.source).toLowerCase().includes('fandom')) flags.push('secondary_source');
+  const lookupMeta = info.lookupMeta && typeof info.lookupMeta === 'object' ? info.lookupMeta : null;
 
   const title = String(info.title || '').trim();
   if (title && canonicalizeName(title) !== canonicalizeName(character || '')) {
     flags.push('title_differs_from_input');
+    const titleCompactNoParens = canonicalizeName(String(title).replace(/\s*\([^)]*\)\s*/g, ' ').trim());
+    const lookupMetaResolution = lookupMeta && lookupMeta.resolution && typeof lookupMeta.resolution === 'object'
+      ? lookupMeta.resolution
+      : null;
+    const seededCanonical = lookupMetaResolution && lookupMetaResolution.canonical
+      ? canonicalizeName(lookupMetaResolution.canonical)
+      : '';
+    const proxyOrAliasSeeded = lookupMetaResolution
+      && ['alias-index', 'proxy-pattern', 'proxy-token-overlap'].includes(String(lookupMetaResolution.source || '').toLowerCase());
+    const skipDangerousFlagForSeed = proxyOrAliasSeeded && seededCanonical && (
+      seededCanonical === canonicalizeName(title)
+      || (titleCompactNoParens && seededCanonical === titleCompactNoParens)
+    );
+    const dangerRisk = Number.isFinite(Number(info.dangerousTitleDiffRiskAfter))
+      ? Number(info.dangerousTitleDiffRiskAfter)
+      : estimateDangerousTitleDiffRisk(character, info);
+    if (!skipDangerousFlagForSeed && !info.dangerousTitleDiffRescued && dangerRisk >= 6) {
+      flags.push('dangerous_title_diff_suspected');
+    }
   }
 
-  const lookupMeta = info.lookupMeta && typeof info.lookupMeta === 'object' ? info.lookupMeta : null;
   if (lookupMeta && Number.isFinite(Number(lookupMeta.candidateCount)) && Number(lookupMeta.candidateCount) >= 10) {
     flags.push('high_candidate_ambiguity');
   }
@@ -3366,9 +3657,12 @@ async function resolveEntryIdentity(input) {
       const upgradedSeedInfo = fetchOptions.skipSyntheticImageUpgrade
         ? syntheticReadySeedInfo
         : await tryUpgradeSyntheticImage(character, syntheticReadySeedInfo, fetchOptions);
-      const finalSeedInfo = fetchOptions.skipImageBackfill
+      const backfilledSeedInfo = fetchOptions.skipImageBackfill
         ? upgradedSeedInfo
         : await tryBackfillImage(character, upgradedSeedInfo, fetchOptions);
+      const finalSeedInfo = fetchOptions.skipIdentityUpgrade
+        ? backfilledSeedInfo
+        : await tryRescueDangerousTitleDiffIdentity(character, backfilledSeedInfo, fetchOptions);
       if (finalSeedInfo && finalSeedInfo !== seeded.scoringInfo) {
         const confidence = Number(seeded.infoConfidence) || 0;
         const trustedInfo = confidence >= MIN_INFO_CONFIDENCE ? finalSeedInfo : null;
@@ -3417,7 +3711,10 @@ async function resolveEntryIdentity(input) {
     : await tryUpgradeLowFidelityIdentity(character, aliasCorrectedInfo, fetchOptions);
   const ambiguitySafeInfo = applyGenericNameAmbiguityFallback(character, upgradedIdentityInfo, fetchOptions);
   const patchedInfo = applyKnownResolutionPatches(character, ambiguitySafeInfo);
-  const syntheticReadyInfo = attachSyntheticImageIfNeeded(character, patchedInfo, fetchOptions);
+  const dangerousDiffRescuedInfo = fetchOptions.skipIdentityUpgrade
+    ? patchedInfo
+    : await tryRescueDangerousTitleDiffIdentity(character, patchedInfo, fetchOptions);
+  const syntheticReadyInfo = attachSyntheticImageIfNeeded(character, dangerousDiffRescuedInfo, fetchOptions);
   const syntheticUpgradedInfo = fetchOptions.skipSyntheticImageUpgrade
     ? syntheticReadyInfo
     : await tryUpgradeSyntheticImage(character, syntheticReadyInfo, fetchOptions);

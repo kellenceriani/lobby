@@ -699,17 +699,24 @@ function registerSocketHandlers(io) {
       }
 
       if (game.round4Results && game.round4Results.payload) {
-        socket.emit('round4Evaluated', game.round4Results.payload);
+        const cachedPayload = game.round4Results.payload;
+        console.log(
+          `[Round4 socket] Sending cached round4Evaluated to ${name} room ${room} ` +
+          `evalId=${cachedPayload && cachedPayload.evaluationId ? cachedPayload.evaluationId : 'n/a'}`
+        );
+        socket.emit('round4Evaluated', cachedPayload);
         return;
       }
 
       if (game.round4InProgress) {
+        console.log(`[Round4 socket] Ignoring duplicate evaluateRound4 from ${name} in room ${room} (already in progress)`);
         return;
       }
 
       console.log(`🎮 Server-authoritative Round 4 evaluation requested by ${name} in room ${room}`);
 
       try {
+        const evalStartedAt = Date.now();
         game.round4InProgress = true;
         const evaluationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const precomputeStore = game && game.evalPrecompute && typeof game.evalPrecompute === 'object'
@@ -823,6 +830,15 @@ function registerSocketHandlers(io) {
           leaderboardData
         };
 
+        const totalTeams = Object.keys(scored.teamEvaluations || {}).length;
+        const totalEntries = Object.values(scored.teamEvaluations || {}).reduce((sum, team) => (
+          sum + (Array.isArray(team && team.evaluations) ? team.evaluations.length : 0)
+        ), 0);
+        console.log(
+          `[Round4 socket] Emitting round4Evaluated to room ${room} evalId=${evaluationId}` +
+          ` teams=${totalTeams} entries=${totalEntries} tie=${isTie ? 'yes' : 'no'}` +
+          ` in ${Math.max(0, Date.now() - evalStartedAt)}ms`
+        );
         io.to(room).emit('round4Evaluated', payload);
       } catch (error) {
         console.error('❌ Round 4 evaluation error:', error);

@@ -43,6 +43,11 @@ async function scoreCharacter(character, scenario, twist, options = {}) {
         ovrData: fallbackOVRData
       }),
       scoreMeta: {
+        validation: {
+          valid: false,
+          reason: validation.reason || 'invalid',
+          tier: validation.tier || 'invalid'
+        },
         relevancePoints: 0,
         draftedFitTotal: 0,
         draftedScenarioBonus: 0,

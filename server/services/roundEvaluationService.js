@@ -1,6 +1,15 @@
 ﻿const { evaluateCharacter, evaluateCharactersBatch } = require('./entryEvaluationService');
 
-const { summarizeContextDiagnostics } = require('./evaluation/diagnostics/telemetry');
+const {
+  summarizeContextDiagnostics,
+  formatTopCounts,
+  formatSourceDiagnostics,
+  formatOwnerDiagnostics,
+  formatTitleDiffDiagnostics,
+  formatQualityGates,
+  formatValidationDiagnostics,
+  formatScalingDiagnostics
+} = require('./evaluation/diagnostics/telemetry');
 
 const INTEL_TELEMETRY_VERBOSE = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.INTEL_TELEMETRY_VERBOSE || '').toLowerCase()
@@ -261,6 +270,7 @@ async function evaluateRoundFromGame(game, roundIndex, options = {}) {
   console.log(
     `Round ${roundIndex + 1} Intel Telemetry avgConfidence=${Math.round(avgConfidence * 100)}% avgFetchMs=${avgFetchDurationMs} trusted=${trustedTotal}/${evalTotal}`
   );
+  console.log(`Round ${roundIndex + 1} Prompt scenario="${scenario}" twist="${twist}"`);
 
   if (INTEL_TELEMETRY_VERBOSE) {
     const playerRows = safeRows
@@ -269,8 +279,10 @@ async function evaluateRoundFromGame(game, roundIndex, options = {}) {
     console.log(`Round ${roundIndex + 1} Intel Telemetry Verbose ${playerRows}`);
   }
 
-  const allEvaluations = Object.values(playerEvaluations).flatMap((playerData) => (
-    Array.isArray(playerData && playerData.evaluations) ? playerData.evaluations : []
+  const allEvaluations = Object.entries(playerEvaluations).flatMap(([playerName, playerData]) => (
+    Array.isArray(playerData && playerData.evaluations)
+      ? playerData.evaluations.map((entry) => ({ ...(entry || {}), __ownerName: playerName }))
+      : []
   ));
   if (allEvaluations.length) {
     const ctxDiag = summarizeContextDiagnostics(allEvaluations, { suspiciousLimit: 6 });
@@ -294,6 +306,40 @@ async function evaluateRoundFromGame(game, roundIndex, options = {}) {
       ` avgTFit=${ctxDiag.averages.twistFit}` +
       ` avgFitDelta=${ctxDiag.averages.fitDelta}`
     );
+    const topRiskFlags = formatTopCounts(ctxDiag.flags, 6);
+    const topResolveSources = formatTopCounts(ctxDiag.resolutionSources, 4);
+    const trippedGates = formatQualityGates(ctxDiag.qualityGates);
+    console.log(
+      `Round ${roundIndex + 1} Context Risk Rates syn=${ctxDiag.rates.syntheticImagePct}%` +
+      ` titleDiff=${ctxDiag.rates.titleDiffPct}%` +
+      ` titleDiffDanger=${ctxDiag.rates.titleDiffDangerousPct}%` +
+      ` lowConf=${ctxDiag.rates.lowConfidencePct}%` +
+      ` lowResolve=${ctxDiag.rates.lowResolvePct}%` +
+      ` fastFallback=${ctxDiag.rates.fastFallbackPct}%` +
+      ` flags=[${topRiskFlags}]` +
+      ` resolveSources=[${topResolveSources}]` +
+      `${trippedGates ? ` gates=[${trippedGates}]` : ''}`
+    );
+    const titleDiffAudit = formatTitleDiffDiagnostics(ctxDiag.titleDiffDiagnostics, { exampleLimit: 4 });
+    if (titleDiffAudit) {
+      console.log(`Round ${roundIndex + 1} Context TitleDiff Audit ${titleDiffAudit}`);
+    }
+    const sourceQuality = formatSourceDiagnostics(ctxDiag.sourceDiagnostics, 4, { includeAvgOvr: false });
+    if (sourceQuality) {
+      console.log(`Round ${roundIndex + 1} Context Sources Detail ${sourceQuality}`);
+    }
+    const ownerQuality = formatOwnerDiagnostics(ctxDiag.ownerDiagnostics, 6, { includeAvgScenarioFit: false });
+    if (ownerQuality) {
+      console.log(`Round ${roundIndex + 1} Context Player Quality ${ownerQuality}`);
+    }
+    const validationSummary = formatValidationDiagnostics(ctxDiag.validation, { reasonLimit: 4, exampleLimit: 3 });
+    if (validationSummary) {
+      console.log(`Round ${roundIndex + 1} Context Validation ${validationSummary}`);
+    }
+    const scalingAudit = formatScalingDiagnostics(ctxDiag.scaling, { exampleLimit: 3 });
+    if (scalingAudit) {
+      console.log(`Round ${roundIndex + 1} Context Scaling Audit ${scalingAudit}`);
+    }
     if (INTEL_TELEMETRY_VERBOSE && ctxDiag.suspicious.length) {
       console.log(
         `Round ${roundIndex + 1} Context Suspects ${ctxDiag.suspicious.map((row) => (

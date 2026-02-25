@@ -18,6 +18,7 @@ const round4State = {
   sequenceComplete: false,
   evalLookup: Object.create(null),
   revealTimer: null,
+  revealStartTimer: null,
   revealConfig: null,
   pendingFinalResultsTimer: null,
   preloadPromise: null,
@@ -48,6 +49,58 @@ const round4State = {
 };
 
 const IMAGE_PRELOAD_CACHE = new Map();
+
+function getSharedAudioBridge() {
+  try {
+    return (typeof window !== 'undefined' && window.__lobbyAudio && typeof window.__lobbyAudio === 'object')
+      ? window.__lobbyAudio
+      : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function ensureSharedAudioReady() {
+  const bridge = getSharedAudioBridge();
+  if (!bridge) return false;
+  try {
+    if (typeof bridge.ensureUnlocked === 'function') bridge.ensureUnlocked();
+    if (typeof bridge.ensureRunning === 'function') bridge.ensureRunning();
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function playSharedCharacterCardBlurb(entry, options = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.playCharacterCardBlurb !== 'function') return false;
+  try {
+    return bridge.playCharacterCardBlurb(entry, options);
+  } catch (error) {
+    return false;
+  }
+}
+
+function playSharedHighestOVRCardBlurb(entries, options = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.playHighestOVRCardBlurb !== 'function') return false;
+  try {
+    return bridge.playHighestOVRCardBlurb(entries, options);
+  } catch (error) {
+    return false;
+  }
+}
+
+function prefetchSharedCharacterCardBlurbs(entries, options = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.prefetchCharacterCardBlurbs !== 'function') return false;
+  try {
+    return bridge.prefetchCharacterCardBlurbs(entries, options);
+  } catch (error) {
+    return false;
+  }
+}
 
 function detectRevealPerfMode() {
   try {
@@ -419,6 +472,10 @@ function prepareRevealSequenceProfiles() {
 }
 
 function ensureRevealAudioReady() {
+  if (ensureSharedAudioReady()) {
+    round4State.revealAudioReady = true;
+    return;
+  }
   if (round4State.revealAudioReady) return;
   if (typeof window === 'undefined') return;
 
@@ -438,6 +495,14 @@ function ensureRevealAudioReady() {
 
 function playEliteRevealAudio(profile, stage) {
   if (!profile || !profile.audioMode || profile.audioMode === 'none') return;
+  const bridge = getSharedAudioBridge();
+  if (bridge && typeof bridge.playRound4RevealAccent === 'function') {
+    try {
+      bridge.playRound4RevealAccent(profile, stage);
+      return;
+    } catch (error) {
+    }
+  }
   const context = round4State.revealAudioContext;
   if (!context) return;
 
@@ -651,27 +716,46 @@ function setHeaderContextPhase(phase) {
 }
 
 function startRound4Reveal() {
-  if (!round4State.preloadDone || !round4State.revealPrepared || !round4State.animationPrimed || !round4State.loadingReadyToStart || round4State.rendered) return;
+  if (!round4State.preloadDone || !round4State.revealPrepared || !round4State.animationPrimed || !round4State.loadingReadyToStart || round4State.rendered || round4State.revealStartTimer) return;
 
   ensureRevealAudioReady();
+  const bridge = getSharedAudioBridge();
+  if (bridge && typeof bridge.setMusicScene === 'function') {
+    try {
+      bridge.setMusicScene('round4Reveal', { force: true, transition: 'crescendo', exclusive: true });
+    } catch (error) {
+    }
+  }
 
   const loading = document.getElementById('evalLoading');
   const status = document.getElementById('evalFinalStatus');
-  if (loading) loading.style.display = 'none';
-  setRound4LoadingPhase(false);
-  setHeaderContextPhase('reveal');
-  refreshRound4PageUi();
-  if (status) status.textContent = 'Final showdown starting...';
+  if (status) status.textContent = 'Cueing ceremony... spotlights are building with the soundtrack.';
+  setRevealCeremonyProgress(100, 'Spotlights warming up');
 
-  setLoadingBotContext(null, null, '');
-  const kickoffConfig = getRevealConfig();
-  round4State.revealConfig = {
-    ...(round4State.revealConfig || {}),
-    startAtMs: Date.now() + Math.max(700, Number(kickoffConfig.initialDelayMs) || 0)
-  };
-  scheduleNextAutoReveal();
-  round4State.isEvaluating = false;
-  round4State.rendered = true;
+  if (round4State.revealStartTimer) {
+    window.clearTimeout(round4State.revealStartTimer);
+    round4State.revealStartTimer = null;
+  }
+
+  const ceremonyPreludeMs = 2200;
+  round4State.revealStartTimer = window.setTimeout(() => {
+    round4State.revealStartTimer = null;
+    if (loading) loading.style.display = 'none';
+    setRound4LoadingPhase(false);
+    setHeaderContextPhase('reveal');
+    refreshRound4PageUi();
+    if (status) status.textContent = 'Final showdown starting...';
+
+    setLoadingBotContext(null, null, '');
+    const kickoffConfig = getRevealConfig();
+    round4State.revealConfig = {
+      ...(round4State.revealConfig || {}),
+      startAtMs: Date.now() + Math.max(1100, Number(kickoffConfig.initialDelayMs) || 0)
+    };
+    scheduleNextAutoReveal();
+    round4State.isEvaluating = false;
+    round4State.rendered = true;
+  }, ceremonyPreludeMs);
 }
 
 function signed(value) {
@@ -733,6 +817,10 @@ function updateEvalProgress(current, total) {
 }
 
 function clearEvalSurface() {
+  if (round4State.revealStartTimer) {
+    window.clearTimeout(round4State.revealStartTimer);
+    round4State.revealStartTimer = null;
+  }
   teardownRound4PageUi();
   teardownRound4FinaleUi();
   const boards = document.getElementById('evalTeamBoards');
@@ -1348,6 +1436,14 @@ function finishSequenceIfComplete() {
     continueBtn.hidden = false;
     continueBtn.disabled = false;
     continueBtn.textContent = 'LOCK IN & CONTINUE';
+  }
+
+  const bridge = getSharedAudioBridge();
+  if (bridge && typeof bridge.setMusicScene === 'function') {
+    try {
+      bridge.setMusicScene('round4Bg', { force: true, transition: 'ceremony-to-round4', exclusive: true });
+    } catch (error) {
+    }
   }
 
   renderFinalLeaderboard();
@@ -2253,7 +2349,7 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
       : '';
     const isChampionMember = entry && entry.isChampionMember === true;
     return `
-      <div class="eval-finale-elite-slot ${isChampionMember ? 'is-champion-member' : ''}" title="${safeName}${ownerName ? ` | ${escapeHtml(ownerName)}` : ''}">
+      <div class="eval-finale-elite-slot ${isChampionMember ? 'is-champion-member' : ''}" data-elite-index="${index}" aria-label="${safeName} profile" title="${safeName}${ownerName ? ` | ${escapeHtml(ownerName)}` : ''}">
         <img src="${escapeHtml(imageUrl)}" alt="${safeName}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
         <span class="eval-finale-elite-ovr" aria-hidden="true"><small>OVR</small><strong>${eliteOVR}</strong></span>
         <span class="eval-finale-elite-rank">#${eliteRank}</span>
@@ -2389,6 +2485,14 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
 
   const panel = container.querySelector('.eval-finale-ceremony');
   if (panel) {
+    const bridge = getSharedAudioBridge();
+    if (bridge && typeof bridge.setMusicScene === 'function') {
+      try {
+        bridge.setMusicScene('finale', { force: true, transition: 'crescendo', exclusive: true });
+      } catch (error) {
+      }
+    }
+
     setRound4PageSectionCollapsed('cards', true);
     setRound4PageSectionCollapsed('results', true);
     setRound4PageSectionCollapsed('finale', false);
@@ -2401,6 +2505,7 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
       panel.scrollIntoView(reduceMotion ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
     } catch (error) {
     }
+
   }
 
   return true;
@@ -2802,6 +2907,92 @@ function openOVRBreakdown(evalData) {
     const summaryEl = document.getElementById('modalCharacterSummary');
     if (summaryEl) summaryEl.textContent = evalData.breakdown && evalData.breakdown.characterSummary ? evalData.breakdown.characterSummary : 'No information available.';
 
+    const audioStatusEl = document.getElementById('modalCardAudioStatus');
+    if (audioStatusEl) {
+      audioStatusEl.textContent = '';
+      audioStatusEl.classList.remove('is-warning', 'is-ready');
+    }
+
+    const playCardAudioBtn = document.getElementById('modalPlayCardAudio');
+    if (playCardAudioBtn) {
+      playCardAudioBtn.textContent = 'Play Card Audio';
+      playCardAudioBtn.onclick = () => {
+        ensureSharedAudioReady();
+        const status = document.getElementById('modalCardAudioStatus');
+        const requestLabel = 'Play Card Audio';
+        playCardAudioBtn.textContent = 'Searching Clip...';
+        playCardAudioBtn.disabled = true;
+        if (status) {
+          status.textContent = 'Resolving quote clip (prefetched when available)...';
+          status.classList.remove('is-warning', 'is-ready');
+        }
+        const clearStatusLater = (expectedText) => {
+          if (!status || !expectedText) return;
+          window.setTimeout(() => {
+            if (status.textContent === expectedText) {
+              status.textContent = '';
+              status.classList.remove('is-warning', 'is-ready');
+            }
+          }, 2400);
+        };
+        const restoreLabel = (label = requestLabel) => {
+          window.setTimeout(() => {
+            playCardAudioBtn.textContent = label;
+            playCardAudioBtn.disabled = false;
+          }, 900);
+        };
+
+        Promise.resolve(playSharedCharacterCardBlurb(evalData, {
+          context: 'ovr-breakdown',
+          throttleMs: 90
+        })).then((audioResult) => {
+          if (audioResult === false || audioResult == null) {
+            playCardAudioBtn.textContent = 'Audio Unavailable';
+            if (status) {
+              status.textContent = 'Audio system unavailable for this clip.';
+              status.classList.add('is-warning');
+              status.classList.remove('is-ready');
+            }
+            clearStatusLater('Audio system unavailable for this clip.');
+            restoreLabel(requestLabel);
+            return;
+          }
+
+          if (audioResult && (audioResult.mode === 'no-audio-fallback' || audioResult.mode === 'no-audio-library-empty')) {
+            const prompt = String(audioResult.prompt || '').trim() || `No quote clip found for ${evalData.character} yet.`;
+            playCardAudioBtn.textContent = 'No Clip Found :(';
+            if (status) {
+              status.textContent = prompt;
+              status.classList.add('is-warning');
+              status.classList.remove('is-ready');
+            }
+            clearStatusLater(prompt);
+            restoreLabel(requestLabel);
+            return;
+          }
+
+          const isSpeechMode = typeof audioResult.mode === 'string' && audioResult.mode.startsWith('speech');
+          playCardAudioBtn.textContent = isSpeechMode ? 'Playing Quote' : 'Playing Clip';
+          if (status) {
+            status.textContent = isSpeechMode ? 'Quote voice playing' : 'Quote clip playing';
+            status.classList.add('is-ready');
+            status.classList.remove('is-warning');
+          }
+          clearStatusLater(isSpeechMode ? 'Quote voice playing' : 'Quote clip playing');
+          restoreLabel(requestLabel);
+        }).catch(() => {
+          playCardAudioBtn.textContent = 'Audio Error';
+          if (status) {
+            status.textContent = 'Audio search failed. Try again.';
+            status.classList.add('is-warning');
+            status.classList.remove('is-ready');
+          }
+          clearStatusLater('Audio search failed. Try again.');
+          restoreLabel(requestLabel);
+        });
+      };
+    }
+
     const scenarioEl = document.getElementById('modalScenarioRelevance');
     if (scenarioEl) scenarioEl.textContent = evalData.breakdown && evalData.breakdown.scenarioRelevance ? evalData.breakdown.scenarioRelevance : 'No scenario analysis available.';
 
@@ -2968,6 +3159,19 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       round4State.allTeamEvaluations = data.allTeamEvaluations || data.teamEvaluations || {};
       round4State.finalLeaderboard = Array.isArray(data.finalLeaderboard) ? data.finalLeaderboard : [];
       round4State.revealConfig = data.revealTimeline || null;
+      try {
+        const prefetchEntries = Object.values(round4State.allTeamEvaluations || {}).flatMap((team) => (
+          Array.isArray(team && team.evaluations) ? team.evaluations : []
+        ));
+        if (prefetchEntries.length) {
+          prefetchSharedCharacterCardBlurbs(prefetchEntries, {
+            context: 'round4-evaluated',
+            maxEntries: 24,
+            warmTop: 6
+          });
+        }
+      } catch (prefetchError) {
+      }
 
       const loading = document.getElementById('evalLoading');
       const title = document.getElementById('evalLoadingTitle');

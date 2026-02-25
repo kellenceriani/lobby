@@ -12,8 +12,8 @@
   <meta name="description" content="LobbyWARS - Real-time multiplayer party game for 3-6 players">
   <title>LobbyWARS - Party Game</title>
   <link rel="manifest" href="manifest.webmanifest?v=20260223-livefix1">
-  <link rel="stylesheet" href="css/base.css?v=20260223-livefix1">
-  <link rel="stylesheet" href="css/lobby.css?v=20260223-livefix1">
+  <link rel="stylesheet" href="css/base.css?v=20260224-audiomix1">
+  <link rel="stylesheet" href="css/lobby.css?v=20260224-audiomix1">
   <link rel="stylesheet" href="css/game.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/results.css?v=20260223-livefix1">
 </head>
@@ -47,6 +47,17 @@
       <p class="subtitle">The Ultimate Chaos • 3-6 Players</p>
       <p class="tagline">Build Teams • Vote + intel • Win Glory</p>
       
+      <div id="startupBootstrapPanel" class="startup-bootstrap-panel" aria-live="polite" hidden>
+        <div class="startup-bootstrap-head">
+          <strong>Startup Preflight</strong>
+          <span id="startupBootstrapCount">0/0</span>
+        </div>
+        <p id="startupBootstrapStatus">Preparing local services...</p>
+        <div class="startup-bootstrap-bar" role="progressbar" aria-label="Startup preflight progress" aria-valuemin="0" aria-valuemax="100">
+          <span id="startupBootstrapFill" class="startup-bootstrap-fill" style="width: 0%;"></span>
+        </div>
+      </div>
+
       <div class="input-group">
         <label for="name"><svg class="icon-inline" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/></svg> Your Name:</label>
         <input id="name" placeholder="Enter your name" maxlength="20" autocomplete="off" aria-label="Player name">
@@ -80,44 +91,6 @@
       </p>
       <p class="hint" style="font-size: 0.85em; color: #999;">Need 3-6 players to start a game</p>
     </div>
-    <aside class="creator-credit-shell creator-credit-shell-join" aria-label="Project credits and creator links">
-      <div class="creator-credit-head">
-        <span class="creator-credit-kicker">Built by</span>
-        <strong>Kellen Ceriani</strong>
-      </div>
-      <div class="creator-credit-links" role="list" aria-label="Creator links">
-        <a class="creator-credit-link" role="listitem" href="https://kellenceriani.github.io/" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani portfolio" title="Portfolio">
-          <span class="creator-credit-icon is-portfolio" aria-hidden="true">WEB</span>
-          <span>Portfolio</span>
-        </a>
-        <a class="creator-credit-link" role="listitem" href="https://github.com/kellenceriani" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani GitHub profile" title="GitHub">
-          <span class="creator-credit-icon is-github" aria-hidden="true">GH</span>
-          <span>GitHub</span>
-        </a>
-        <a class="creator-credit-link" role="listitem" href="https://www.linkedin.com/in/kellen-ceriani-435974210/" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani LinkedIn profile" title="LinkedIn">
-          <span class="creator-credit-icon is-linkedin" aria-hidden="true">in</span>
-          <span>LinkedIn</span>
-        </a>
-        <a class="creator-credit-link" role="listitem" href="mailto:kmceriani@cox.net" aria-label="Email Kellen Ceriani" title="Email">
-          <span class="creator-credit-icon is-email" aria-hidden="true">@</span>
-          <span>Email</span>
-        </a>
-      </div>
-      <p class="creator-credit-note">Branding / credit / contact</p>
-      <details class="project-credits-drawer project-credits-drawer-compact">
-        <summary>
-          <span class="project-credits-summary-title"><span aria-hidden="true">&#x1F4DC;</span> Credits & Licensing</span>
-          <span class="project-credits-summary-meta">assets + rights</span>
-        </summary>
-        <div class="project-credits-body">
-          <ul class="project-credits-list">
-            <li><span aria-hidden="true">&#x1F3AE;</span> LobbyWARS design / implementation branding by Kellen Ceriani.</li>
-            <li><span aria-hidden="true">&#x1F5BC;</span> Round 4 emotion PNGs are local assets in <code>public/img/emotions</code> (source attribution file not currently documented).</li>
-            <li><span aria-hidden="true">&#x2696;</span> Character names/images shown during gameplay may belong to their respective owners.</li>
-          </ul>
-        </div>
-      </details>
-    </aside>
   </div>
 
   <!-- ==================== TUTORIAL SCREEN (REDESIGNED) ==================== -->
@@ -172,6 +145,32 @@
           </div>
         </div>
       </div>
+
+      <section class="creator-credit-shell tutorial-creator-panel" aria-label="Project creator links">
+        <div class="creator-credit-head">
+          <span class="creator-credit-kicker">Built by</span>
+          <strong>Kellen Ceriani</strong>
+        </div>
+        <div class="creator-credit-links" role="list" aria-label="Creator links">
+          <a class="creator-credit-link" role="listitem" href="https://kellenceriani.github.io/" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani portfolio" title="Portfolio">
+            <span class="creator-credit-icon is-portfolio" aria-hidden="true">WEB</span>
+            <span>Portfolio</span>
+          </a>
+          <a class="creator-credit-link" role="listitem" href="https://github.com/kellenceriani" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani GitHub profile" title="GitHub">
+            <span class="creator-credit-icon is-github" aria-hidden="true">GH</span>
+            <span>GitHub</span>
+          </a>
+          <a class="creator-credit-link" role="listitem" href="https://www.linkedin.com/in/kellen-ceriani-435974210/" target="_blank" rel="noopener noreferrer" aria-label="Open Kellen Ceriani LinkedIn profile" title="LinkedIn">
+            <span class="creator-credit-icon is-linkedin" aria-hidden="true">in</span>
+            <span>LinkedIn</span>
+          </a>
+          <a class="creator-credit-link" role="listitem" href="mailto:kmceriani@cox.net" aria-label="Email Kellen Ceriani" title="Email">
+            <span class="creator-credit-icon is-email" aria-hidden="true">@</span>
+            <span>Email</span>
+          </a>
+        </div>
+        <p class="creator-credit-note">Creator / contact / branding | Full soundtrack + licensing details in Settings > Credits & Licensing</p>
+      </section>
 
       <button class="btn btn-primary btn-tutorial-close" onclick="closeHelp()">
         Got it! Let's Play
@@ -373,9 +372,88 @@
         <div id="hostNote" class="host-note-modern" style="display: none;">
           <p><strong>Host:</strong> <span id="hostNameDisplay">Loading...</span></p>
         </div>
-        <div class="audio-settings-row">
-          <button id="audioToggleMute" class="btn btn-secondary audio-settings-btn" type="button" aria-pressed="false" aria-label="Mute sound effects">Audio: On</button>
-        </div>
+        <section class="audio-control-deck" aria-labelledby="audioDeckTitle">
+          <div class="audio-control-deck-head">
+            <div class="audio-control-deck-titlewrap">
+              <h4 id="audioDeckTitle">Audio Control</h4>
+              <p id="audioUnlockStatus" class="audio-unlock-status" role="status" aria-live="polite">Audio initializing...</p>
+            </div>
+            <div class="audio-control-deck-actions">
+              <button id="audioMasterMuteBtn" class="btn btn-secondary audio-compact-btn" type="button" aria-pressed="false">All Audio: On</button>
+              <button id="audioDeckToggleBtn" class="btn btn-secondary audio-compact-btn ghost audio-deck-toggle" type="button" aria-expanded="false" aria-controls="audioControlDeckBody" aria-label="Expand audio controls">&gt;</button>
+            </div>
+          </div>
+
+          <div id="audioControlDeckBody" class="audio-control-deck-body" hidden>
+          <div class="audio-control-deck-grid" role="group" aria-label="Audio categories and levels">
+            <div class="audio-control-row master">
+              <div class="audio-control-copy">
+                <span class="audio-control-label">Master</span>
+                <small>Global output level</small>
+              </div>
+              <input id="audioMasterVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="90" aria-label="Master volume">
+              <span id="audioMasterVolumeValue" class="audio-control-value">90%</span>
+            </div>
+
+            <div class="audio-control-row">
+              <div class="audio-control-copy">
+                <span class="audio-control-label">Music</span>
+                <small>Background soundtrack loops</small>
+              </div>
+              <button id="audioMusicToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+              <input id="audioMusicVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="42" aria-label="Music volume">
+              <span id="audioMusicVolumeValue" class="audio-control-value">42%</span>
+            </div>
+
+            <div class="audio-control-row">
+              <div class="audio-control-copy">
+                <span class="audio-control-label">UI / SFX</span>
+                <small>Clicks, chat, ready, countdown</small>
+              </div>
+              <button id="audioUiToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+              <input id="audioUiVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="90" aria-label="UI and sound effects volume">
+              <span id="audioUiVolumeValue" class="audio-control-value">90%</span>
+            </div>
+
+            <div class="audio-control-row">
+              <div class="audio-control-copy">
+                <span class="audio-control-label">Reveal FX</span>
+                <small>Round 4 cinematic impacts and transitions</small>
+              </div>
+              <button id="audioRevealToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+              <input id="audioRevealVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="88" aria-label="Reveal effects volume">
+              <span id="audioRevealVolumeValue" class="audio-control-value">88%</span>
+            </div>
+
+            <div class="audio-control-row">
+              <div class="audio-control-copy">
+                <span class="audio-control-label">Card Blurbs</span>
+                <small>Character reveal signatures + OVR replay</small>
+              </div>
+              <button id="audioCardToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+              <input id="audioCardVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="92" aria-label="Character card audio blurb volume">
+              <span id="audioCardVolumeValue" class="audio-control-value">92%</span>
+            </div>
+          </div>
+
+          <div class="audio-control-deck-footer">
+            <label class="audio-scene-preview">
+              <span>Music Scene Preview</span>
+              <select id="audioPreviewSceneSelect">
+                <option value="join">Join</option>
+                <option value="lobby">Lobby</option>
+                <option value="entry">Entry Phase</option>
+                <option value="voting">Voting</option>
+                <option value="ceremony">Final Animation Ceremony</option>
+                <option value="round4Bg">Round 4 Background</option>
+              </select>
+            </label>
+            <button id="audioPreviewSceneBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview (6s)</button>
+            <button id="audioTestSoundscapeBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Test Mix</button>
+          </div>
+          <p id="audioPreviewSceneStatus" class="audio-preview-scene-status" role="status" aria-live="polite">Preview mode temporarily overrides live music, then restores the active scene.</p>
+          </div>
+        </section>
         <details class="project-credits-drawer project-credits-drawer-settings">
           <summary>
             <span class="project-credits-summary-title"><span aria-hidden="true">&#x1F4DC;</span> Credits & Licensing</span>
@@ -394,6 +472,58 @@
               <section class="project-credits-card">
                 <h4><span aria-hidden="true">&#x1F5BC;</span> Asset Notes</h4>
                 <p>Round 4 emotion PNGs are stored in <code>public/img/emotions</code>. Local README documents filenames/usage, but no source artist/license attribution is currently recorded in-repo.</p>
+              </section>
+              <section class="project-credits-card project-credits-card-audio">
+                <h4><span aria-hidden="true">&#x1F3B5;</span> Soundtrack Credits</h4>
+                <p class="project-credits-audio-intro">Background music is loaded locally from <code>audio/</code>. Scene mapping + Mixkit attribution:</p>
+                <div class="audio-credit-cluster" role="list" aria-label="Soundtrack scene credits">
+                  <div class="audio-credit-row" role="listitem">
+                    <span class="audio-credit-scene">Join</span>
+                    <div class="audio-credit-main">
+                      <code>DeepUrbanHouse - Join.mp3</code>
+                      <small>Very quiet base level • by Lily J</small>
+                    </div>
+                  </div>
+                  <div class="audio-credit-row" role="listitem">
+                    <span class="audio-credit-scene">Lobby</span>
+                    <div class="audio-credit-main">
+                      <code>HipHop - Lobby.mp3</code>
+                      <small>Normal base level • by Eugenio Mininni</small>
+                    </div>
+                  </div>
+                  <div class="audio-credit-row" role="listitem">
+                    <span class="audio-credit-scene">Entry</span>
+                    <div class="audio-credit-main">
+                      <code>Can't Get You Off My Mind - Entry.mp3</code>
+                      <small>Quiet base level • by Michael Ramir C.</small>
+                    </div>
+                  </div>
+                  <div class="audio-credit-row" role="listitem">
+                    <span class="audio-credit-scene">Voting</span>
+                    <div class="audio-credit-main">
+                      <code>Can't Get You Off My Mind - Entry.mp3</code>
+                      <small>Quiet/slightly louder + faster (1.5-2x) • by Michael Ramir C.</small>
+                    </div>
+                  </div>
+                  <div class="audio-credit-row" role="listitem">
+                    <span class="audio-credit-scene">Ceremony</span>
+                    <div class="audio-credit-main">
+                      <code>Complicated - Ceremony.mp3</code>
+                      <small>Normal w/ crescendo + decrescendo handoff • by Arulo</small>
+                    </div>
+                  </div>
+                  <div class="audio-credit-row" role="listitem">
+                    <span class="audio-credit-scene">Round 4 BG</span>
+                    <div class="audio-credit-main">
+                      <code>GamesWorldbeat - Round4BG.mp3</code>
+                      <small>Quiet base level • by Bernardo R.</small>
+                    </div>
+                  </div>
+                </div>
+                <div class="audio-credit-links">
+                  <a href="https://mixkit.co/free-stock-music/" target="_blank" rel="noopener noreferrer">Mixkit Free Stock Music</a>
+                  <a href="https://mixkit.co/license/" target="_blank" rel="noopener noreferrer">Mixkit License</a>
+                </div>
               </section>
               <section class="project-credits-card">
                 <h4><span aria-hidden="true">&#x2696;</span> Licensing / Rights</h4>
@@ -780,6 +910,10 @@
               <img id="modalCharacterImage" class="ovr-character-image" src="" alt="Character portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer">
             </div>
             <p id="modalCharacterSummary" class="ovr-section-text"></p>
+            <div class="ovr-character-tools">
+              <button id="modalPlayCardAudio" class="ovr-audio-preview-btn" type="button" aria-label="Play character card audio blurb">Play Card Audio</button>
+            </div>
+            <p id="modalCardAudioStatus" class="ovr-audio-preview-status" role="status" aria-live="polite"></p>
           </div>
         </section>
         <!-- Scenario Relevance -->
@@ -816,10 +950,31 @@
     </div>
   </div>
 
+  <button id="audioQuickFab" class="audio-quick-fab" type="button" aria-haspopup="dialog" aria-controls="audioQuickPanel" aria-expanded="false" aria-label="Open quick music controls">
+    <span class="audio-quick-fab-icon" aria-hidden="true">&#9835;</span>
+  </button>
+
+  <div id="audioQuickPanel" class="audio-quick-panel" role="dialog" aria-modal="false" aria-label="Quick music controls" hidden>
+    <div class="audio-quick-panel-head">
+      <div>
+        <strong>Music</strong>
+        <small id="audioQuickPanelStatus">Ready</small>
+      </div>
+      <button id="audioQuickCloseBtn" class="audio-quick-close" type="button" aria-label="Close audio quick controls">&#10006;</button>
+    </div>
+    <div class="audio-quick-panel-actions">
+      <button id="audioQuickMusicToggleBtn" class="audio-quick-action" type="button" aria-pressed="true">Music On</button>
+    </div>
+    <label class="audio-quick-volume">
+      <span>Music Volume</span>
+      <input id="audioQuickMusicVolume" type="range" min="0" max="100" step="1" value="42" aria-label="Quick music volume">
+    </label>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
-  <script src="js/round4Eval.js?v=20260223-livefix1"></script>
-  <script type="module" src="js/app.js?v=20260223-livefix1"></script>
-  <link rel="stylesheet" href="css/round4Eval.css?v=20260223-livefix1">
-  <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260223-livefix1">
+  <script src="js/round4Eval.js?v=20260224-audiomix1"></script>
+  <script type="module" src="js/app.js?v=20260224-audiomix1"></script>
+  <link rel="stylesheet" href="css/round4Eval.css?v=20260224-audiomix1">
+  <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260224-audiomix1">
 </body>
 </html>

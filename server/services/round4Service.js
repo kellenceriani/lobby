@@ -3,7 +3,16 @@ const { getRandomPhrase } = require('../evaluator/presentation/phraseGenerator')
 const { calculateChemistryDetails } = require('../evaluator/team/chemistryCalculator');
 const { calculateRound4Points, describeRound4PointFormula } = require('./scoreScaling');
 const { canonicalizeName } = require('../evaluator/core/textUtils');
-const { summarizeContextDiagnostics } = require('./evaluation/diagnostics/telemetry');
+const {
+  summarizeContextDiagnostics,
+  formatTopCounts,
+  formatSourceDiagnostics,
+  formatOwnerDiagnostics,
+  formatTitleDiffDiagnostics,
+  formatQualityGates,
+  formatValidationDiagnostics,
+  formatScalingDiagnostics
+} = require('./evaluation/diagnostics/telemetry');
 
 const FINAL_REFINE_CONFIDENCE_THRESHOLD = 0.68;
 const MAX_REFINE_PER_TEAM = 1;
@@ -409,8 +418,10 @@ async function evaluateRound4FromGame(game) {
       return String(a.playerName || '').localeCompare(String(b.playerName || ''));
     });
 
-  const allEvaluations = Object.values(teamEvaluations).flatMap((team) => (
-    Array.isArray(team && team.evaluations) ? team.evaluations : []
+  const allEvaluations = Object.entries(teamEvaluations).flatMap(([playerName, team]) => (
+    Array.isArray(team && team.evaluations)
+      ? team.evaluations.map((entry) => ({ ...(entry || {}), __ownerName: playerName }))
+      : []
   ));
   if (allEvaluations.length) {
     const seededResolverCount = allEvaluations.filter((entry) =>
@@ -423,6 +434,7 @@ async function evaluateRound4FromGame(game) {
     console.log(`Round 4 Context Telemetry seededResolver=${seededResolverCount}/${allEvaluations.length} zeroFetch=${zeroFetchCount}/${allEvaluations.length} avgFetchMs=${avgFetchMs}`);
 
     const ctxDiag = summarizeContextDiagnostics(allEvaluations, { suspiciousLimit: 8 });
+    console.log(`Round 4 Context Prompt scenario="${scenario}" twist="${twist}"`);
     const topSources = Object.entries(ctxDiag.sources)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4)
@@ -444,6 +456,40 @@ async function evaluateRound4FromGame(game) {
       ` avgFitDelta=${ctxDiag.averages.fitDelta}` +
       ` conf(resolve/context/info)=${Math.round(ctxDiag.averages.resolverConfidence * 100)}%/${Math.round(ctxDiag.averages.contextFitConfidence * 100)}%/${Math.round(ctxDiag.averages.infoConfidence * 100)}%`
     );
+    const topRiskFlags = formatTopCounts(ctxDiag.flags, 8);
+    const topResolveSources = formatTopCounts(ctxDiag.resolutionSources, 4);
+    const trippedGates = formatQualityGates(ctxDiag.qualityGates);
+    console.log(
+      `Round 4 Context Risk Rates syn=${ctxDiag.rates.syntheticImagePct}%` +
+      ` titleDiff=${ctxDiag.rates.titleDiffPct}%` +
+      ` titleDiffDanger=${ctxDiag.rates.titleDiffDangerousPct}%` +
+      ` lowConf=${ctxDiag.rates.lowConfidencePct}%` +
+      ` lowResolve=${ctxDiag.rates.lowResolvePct}%` +
+      ` fastFallback=${ctxDiag.rates.fastFallbackPct}%` +
+      ` flags=[${topRiskFlags}]` +
+      ` resolveSources=[${topResolveSources}]` +
+      `${trippedGates ? ` gates=[${trippedGates}]` : ''}`
+    );
+    const titleDiffAudit = formatTitleDiffDiagnostics(ctxDiag.titleDiffDiagnostics, { exampleLimit: 6 });
+    if (titleDiffAudit) {
+      console.log(`Round 4 Context TitleDiff Audit ${titleDiffAudit}`);
+    }
+    const sourceQuality = formatSourceDiagnostics(ctxDiag.sourceDiagnostics, 4, { includeAvgOvr: true });
+    if (sourceQuality) {
+      console.log(`Round 4 Context Sources Detail ${sourceQuality}`);
+    }
+    const ownerQuality = formatOwnerDiagnostics(ctxDiag.ownerDiagnostics, 6, { includeAvgScenarioFit: true });
+    if (ownerQuality) {
+      console.log(`Round 4 Context Player Quality ${ownerQuality}`);
+    }
+    const validationSummary = formatValidationDiagnostics(ctxDiag.validation, { reasonLimit: 4, exampleLimit: 4 });
+    if (validationSummary) {
+      console.log(`Round 4 Context Validation ${validationSummary}`);
+    }
+    const scalingAudit = formatScalingDiagnostics(ctxDiag.scaling, { exampleLimit: 4 });
+    if (scalingAudit) {
+      console.log(`Round 4 Context Scaling Audit ${scalingAudit}`);
+    }
     if (ctxDiag.suspicious.length) {
       console.log(
         `Round 4 Context Suspects ${ctxDiag.suspicious.map((row) => (

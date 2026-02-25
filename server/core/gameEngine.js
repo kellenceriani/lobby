@@ -2009,6 +2009,11 @@ function startFinalRound(io, roomCode) {
   // Emit Round 4 start event with all data needed for AI evaluation
   setTimeout(() => {
     console.log(`📡 Emitting round4Start event to room ${roomCode}`);
+    console.log(
+      `Round 4 Start Payload teams=${Object.keys(finalTeams).length}` +
+      ` chars=${Object.values(finalTeams).reduce((sum, roster) => sum + (Array.isArray(roster) ? roster.length : 0), 0)}` +
+      ` scenario="${game.currentScenario}" twist="${game.currentTwist}"`
+    );
     io.to(roomCode).emit('round4Start', {
       scenario: game.currentScenario,
       twist: game.currentTwist,

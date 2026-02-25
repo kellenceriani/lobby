@@ -1,4 +1,4 @@
-const { MIN_INFO_CONFIDENCE } = require('./constants');
+const { MIN_INFO_CONFIDENCE, CHARACTER_NAME_ALIASES } = require('./constants');
 const { normalizeName, canonicalizeName, calculateNameSimilarity, parseCharacterQuery, resolveLikelyTypo } = require('./textUtils');
 
 function normalizeInfoCandidate(candidate) {
@@ -89,7 +89,21 @@ function scoreInfoCandidate(characterInput, candidate) {
   const queryProfile = parseCharacterQuery(characterInput || '');
   const query = normalizeName(queryProfile.baseName || characterInput || '');
   const typoFixed = resolveLikelyTypo(query);
-  const queryVariants = Array.from(new Set([query, typoFixed].map(v => normalizeName(v)).filter(Boolean)));
+  const aliasVariantSeeds = [
+    queryProfile.baseName || '',
+    queryProfile.original || '',
+    canonicalizeName(queryProfile.baseName || ''),
+    normalizeName(queryProfile.baseName || '').toLowerCase()
+  ].filter(Boolean);
+  const aliasVariants = aliasVariantSeeds.flatMap((seed) => {
+    const direct = CHARACTER_NAME_ALIASES[seed];
+    return Array.isArray(direct) ? direct : [];
+  });
+  const queryVariants = Array.from(new Set(
+    [query, typoFixed, ...aliasVariants]
+      .map(v => normalizeName(v))
+      .filter(Boolean)
+  ));
   const entityHints = Array.isArray(queryProfile.entityHints) ? queryProfile.entityHints.map(h => String(h || '').toLowerCase()) : [];
 
   const title = normalizeName(normalized.title || '');
@@ -99,9 +113,25 @@ function scoreInfoCandidate(characterInput, candidate) {
   const categories = normalized.categories.map(c => String(c || '').toLowerCase());
   const categoryText = categories.join(' ');
   const snippet = String(normalized.searchSnippet || '').toLowerCase();
+  const aliasText = normalized.aliases.map((a) => String(a || '').toLowerCase()).join(' ');
+  const combinedCorpusText = `${title} ${aliasText} ${description} ${categoryText} ${snippet}`.toLowerCase();
   const contextHints = queryProfile.contextHints.map(h => h.toLowerCase());
   const isSingleTokenQuery = queryVariants.some(queryVariant => queryVariant.split(/\s+/).filter(Boolean).length === 1);
+  const likelyProperNameTokens = String(queryProfile.baseName || query || '')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const likelyProperNameQuery =
+    likelyProperNameTokens.length >= 2 &&
+    likelyProperNameTokens.length <= 3 &&
+    contextHints.length === 0 &&
+    entityHints.length === 0 &&
+    likelyProperNameTokens.every((token) => token.length >= 3)
+    && !/\b(of|the|and|with|from|for|vs|in|on|at|to)\b/i.test(likelyProperNameTokens.join(' '));
   const entityPriority = classifyEntityPriority(normalized);
+  const likelyProperSurname = likelyProperNameQuery && likelyProperNameTokens.length >= 2
+    ? canonicalizeName(likelyProperNameTokens[likelyProperNameTokens.length - 1])
+    : '';
 
   let score = 0;
   const confidenceSignals = {
@@ -128,11 +158,27 @@ function scoreInfoCandidate(characterInput, candidate) {
 
   let bestNameMatch = 0;
   let bestAliasMatch = 0;
+  let bestTitleTokenCoverage = 0;
+  let bestCorpusTokenCoverage = 0;
+  let bestVariantTokenCount = 0;
   queryVariants.forEach(queryVariant => {
     const queryCompact = canonicalizeName(queryVariant);
     const queryTokens = queryVariant.toLowerCase().split(/\s+/).filter(Boolean);
     const titleTokens = title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const corpusTokens = new Set(
+      `${title} ${description} ${categoryText} ${snippet}`
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+    );
     const isSingleToken = queryTokens.length === 1;
+    if (queryTokens.length >= 2) {
+      const titleTokenOverlap = queryTokens.filter(token => titleTokens.includes(token)).length;
+      const corpusTokenOverlap = queryTokens.filter(token => corpusTokens.has(token)).length;
+      bestTitleTokenCoverage = Math.max(bestTitleTokenCoverage, titleTokenOverlap / Math.max(1, queryTokens.length));
+      bestCorpusTokenCoverage = Math.max(bestCorpusTokenCoverage, corpusTokenOverlap / Math.max(1, queryTokens.length));
+      bestVariantTokenCount = Math.max(bestVariantTokenCount, queryTokens.length);
+    }
 
     let variantNameMatch = 0;
     if (queryCompact && titleCompact && queryCompact === titleCompact) {
@@ -251,19 +297,59 @@ function scoreInfoCandidate(characterInput, candidate) {
     if (/\((?:character|mythology|folklore|cryptid|legend|animal|species)\)/i.test(String(normalized.title || ''))) {
       confidenceSignals.quality += 0.06;
     }
+    if (/\((?:character|comics?)\)/i.test(String(normalized.title || ''))) {
+      confidenceSignals.quality += 0.08;
+    }
   }
 
   const titleLower = String(normalized.title || '').toLowerCase();
-  const mediaLikeTitle = /\((?:\d{4} film|film|album|song|tv series|television series|video game)\)/.test(titleLower);
-  const mediaLikeDescription = /\bis a (?:\d{4}\s+)?(?:american|british|japanese|french|indian)?\s*(film|album|song|television series|video game)\b/.test(description);
+  const mediaLikeTitle = /\((?:\d{4} film|film|album|song|tv series|television series|video game|show)\)/.test(titleLower);
+  const mediaLikeDescription = /\bis a (?:\d{4}\s+)?(?:american|british|japanese|french|indian)?\s*(film|album|song|television series|tv series|video game)\b/.test(description);
+  const titleLooksSeriesShow = /\b(show|series)\b/.test(titleLower);
   const queryLooksMedia = queryVariants.some(queryVariant => /film|movie|album|song|series|show/.test(queryVariant.toLowerCase()));
   const queryLooksEntitySpecific = entityHints.some(hint => ['object', 'legend', 'name', 'person', 'nickname', 'species'].includes(hint));
   if (isSingleTokenQuery && !queryLooksMedia && !queryLooksEntitySpecific && (mediaLikeTitle || mediaLikeDescription)) {
     confidenceSignals.penalties -= 0.2;
   }
+  if (isSingleTokenQuery && !queryLooksMedia && titleLooksSeriesShow && !/\bcharacter\b/.test(`${categoryText} ${description}`)) {
+    confidenceSignals.penalties -= 0.22;
+  }
 
   if ((mediaLikeTitle || mediaLikeDescription) && entityPriority !== 'fictional') {
     confidenceSignals.penalties -= 0.12;
+  }
+
+  const titleTokenCount = title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).length;
+  if (bestVariantTokenCount >= 2) {
+    if (bestTitleTokenCoverage === 0 && bestCorpusTokenCoverage < 0.5) {
+      confidenceSignals.penalties -= 0.36;
+    } else if (bestTitleTokenCoverage < 0.5 && bestCorpusTokenCoverage < 0.75) {
+      confidenceSignals.penalties -= 0.18;
+    } else if (bestTitleTokenCoverage < 0.5) {
+      confidenceSignals.penalties -= 0.08;
+    }
+
+    if (normalized.source === 'wikipedia-search' && titleTokenCount <= 2 && bestTitleTokenCoverage < 0.5 && bestAliasMatch < 0.12) {
+      confidenceSignals.penalties -= 0.12;
+    }
+
+    if (normalized.source === 'wikipedia-search' && titleTokenCount >= (bestVariantTokenCount + 3) && bestTitleTokenCoverage < 0.5) {
+      confidenceSignals.penalties -= 0.08;
+    }
+  }
+  if (likelyProperNameQuery && normalized.source === 'wikipedia-search') {
+    if (bestTitleTokenCoverage < 0.66 && bestCorpusTokenCoverage < 0.9) {
+      confidenceSignals.penalties -= 0.22;
+    }
+    if (entityPriority === 'fictional' && bestTitleTokenCoverage < 1 && bestAliasMatch < 0.18) {
+      confidenceSignals.penalties -= 0.16;
+    }
+  }
+  if (likelyProperSurname) {
+    const surnamePattern = new RegExp(`\\b${String(likelyProperSurname).replace(/[.*+?^${}()|[\]\\\\]/g, '\\$&')}\\b`, 'i');
+    if (!surnamePattern.test(combinedCorpusText)) {
+      confidenceSignals.penalties -= normalized.source === 'wikipedia-search' ? 0.46 : 0.28;
+    }
   }
 
   const isCharacterListLike = /list of/i.test(String(normalized.title || '')) && /character|fictional/i.test(categoryText);
@@ -297,6 +383,25 @@ function scoreInfoCandidate(characterInput, candidate) {
     confidence = Math.min(confidence, 0.36);
   } else if (linkageScore < 0.16) {
     confidence = Math.min(confidence, 0.48);
+  }
+  if (bestVariantTokenCount >= 2) {
+    if (bestTitleTokenCoverage === 0 && bestCorpusTokenCoverage < 0.5) {
+      confidence = Math.min(confidence, 0.4);
+    } else if (bestTitleTokenCoverage < 0.5 && bestCorpusTokenCoverage < 0.75 && normalized.source === 'wikipedia-search') {
+      confidence = Math.min(confidence, 0.54);
+    }
+  }
+  if (likelyProperNameQuery && normalized.source === 'wikipedia-search' && bestTitleTokenCoverage < 0.66 && bestCorpusTokenCoverage < 0.9) {
+    confidence = Math.min(confidence, entityPriority === 'fictional' ? 0.48 : 0.58);
+  }
+  if (likelyProperSurname) {
+    const surnamePattern = new RegExp(`\\b${String(likelyProperSurname).replace(/[.*+?^${}()|[\]\\\\]/g, '\\$&')}\\b`, 'i');
+    if (!surnamePattern.test(combinedCorpusText)) {
+      confidence = Math.min(confidence, normalized.source === 'wikipedia-search' ? 0.42 : 0.5);
+    }
+  }
+  if (isSingleTokenQuery && normalized.source === 'wikipedia-search' && titleLooksSeriesShow && !queryLooksMedia) {
+    confidence = Math.min(confidence, 0.56);
   }
 
   return {

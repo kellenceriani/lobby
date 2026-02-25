@@ -386,14 +386,81 @@ function deriveContextProfile(options = {}) {
   };
 }
 
+function pickPreferredAliasCanonicalName(rawCanonical, aliases = []) {
+  const canonicalName = normalizeName(rawCanonical);
+  const aliasList = (Array.isArray(aliases) ? aliases : [])
+    .map((alias) => normalizeName(alias))
+    .filter(Boolean);
+  if (!canonicalName || !aliasList.length) return canonicalName;
+
+  const canonicalCompact = canonicalizeName(canonicalName);
+  const typoFixed = resolveLikelyTypo(canonicalName);
+  const typoCompact = canonicalizeName(typoFixed || '');
+
+  const formattingUpgrade = aliasList.find((alias) => (
+    canonicalizeName(alias) === canonicalCompact
+    && alias.toLowerCase() !== canonicalName.toLowerCase()
+    && (/\s|-|'|\./.test(alias) || alias !== alias.toLowerCase())
+  ));
+  if (formattingUpgrade) return formattingUpgrade;
+
+  const typoUpgrade = aliasList.find((alias) => (
+    typoCompact
+    && canonicalizeName(alias) === typoCompact
+    && typoCompact !== canonicalCompact
+  ));
+  if (typoUpgrade) return typoUpgrade;
+
+  const compactDistance = (a, b) => {
+    const s = canonicalizeName(a);
+    const t = canonicalizeName(b);
+    if (!s || !t) return 99;
+    const dp = Array.from({ length: s.length + 1 }, () => Array(t.length + 1).fill(0));
+    for (let i = 0; i <= s.length; i += 1) dp[i][0] = i;
+    for (let j = 0; j <= t.length; j += 1) dp[0][j] = j;
+    for (let i = 1; i <= s.length; i += 1) {
+      for (let j = 1; j <= t.length; j += 1) {
+        const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+        dp[i][j] = Math.min(
+          dp[i - 1][j] + 1,
+          dp[i][j - 1] + 1,
+          dp[i - 1][j - 1] + cost
+        );
+      }
+    }
+    return dp[s.length][t.length];
+  };
+  const typoLikeAlias = aliasList.find((alias) => {
+    const aliasCompact = canonicalizeName(alias);
+    if (!aliasCompact || aliasCompact === canonicalCompact) return false;
+    if (Math.abs(aliasCompact.length - canonicalCompact.length) > 2) return false;
+    if ((canonicalCompact.length >= 7 || aliasCompact.length >= 7) && compactDistance(canonicalName, alias) <= 2) {
+      return true;
+    }
+    return false;
+  });
+  if (typoLikeAlias) return typoLikeAlias;
+
+  const shorthandExpansion = aliasList.find((alias) => {
+    const aliasCompact = canonicalizeName(alias);
+    if (!aliasCompact || aliasCompact === canonicalCompact) return false;
+    return canonicalName.split(/\s+/).filter(Boolean).length === 1
+      && (aliasCompact.startsWith(canonicalCompact) || canonicalCompact.startsWith(aliasCompact))
+      && aliasCompact.length >= canonicalCompact.length + 2;
+  });
+  if (shorthandExpansion) return shorthandExpansion;
+
+  return canonicalName;
+}
+
 function resolveCanonicalAlias(name) {
   const normalized = normalizeName(name);
   const compact = canonicalizeName(normalized);
   if (!normalized || !compact) return null;
 
   for (const [canonical, aliases] of Object.entries(CHARACTER_NAME_ALIASES)) {
-    const canonicalName = normalizeName(canonical);
-    const aliasList = [canonicalName, ...(Array.isArray(aliases) ? aliases : [])].map(normalizeName).filter(Boolean);
+    const canonicalName = pickPreferredAliasCanonicalName(canonical, aliases);
+    const aliasList = dedupeStrings([canonical, ...(Array.isArray(aliases) ? aliases : []), canonicalName], 20);
     const compactAliases = aliasList.map(alias => canonicalizeName(alias));
     if (!compactAliases.includes(compact)) continue;
 
@@ -584,11 +651,12 @@ function fallbackFromAliasIndex(character) {
   const variants = getCharacterNameVariants(character).map(name => canonicalizeName(name));
 
   for (const [canonical, aliases] of Object.entries(CHARACTER_NAME_ALIASES)) {
-    const all = [canonical, ...(Array.isArray(aliases) ? aliases : [])].map(normalizeName).filter(Boolean);
+    const preferredCanonical = pickPreferredAliasCanonicalName(canonical, aliases);
+    const all = dedupeStrings([preferredCanonical, canonical, ...(Array.isArray(aliases) ? aliases : [])], 20);
     const allCanonical = all.map(name => canonicalizeName(name));
     if (!allCanonical.some(alias => variants.includes(alias))) continue;
 
-    const title = all.find(name => name.includes(' ')) || all[0] || character;
+    const title = preferredCanonical || all.find(name => name.includes(' ')) || all[0] || character;
     const directMatch = all.find(name => canonicalizeName(name) === canonicalizeName(character));
     return {
       source: 'local-index',
@@ -777,6 +845,7 @@ function pickBestCandidate(character, candidates) {
 }
 
 function pickLooseSearchCandidate(character, candidates) {
+  const queryTokens = tokensFromText(character);
   const scored = (Array.isArray(candidates) ? candidates : [])
     .map(candidate => scoreInfoCandidate(character, candidate))
     .filter(entry => entry && entry.candidate)
@@ -790,8 +859,13 @@ function pickLooseSearchCandidate(character, candidates) {
     const description = String(candidate.description || '').toLowerCase();
     const categories = Array.isArray(candidate.categories) ? candidate.categories.join(' ').toLowerCase() : '';
     const titleLinked = isStrongTitleLink(character, candidate.title || '');
+    const titleTokens = tokensFromText(candidate.title || '');
+    const titleTokenOverlap = queryTokens.length
+      ? queryTokens.filter((token) => titleTokens.includes(token)).length / Math.max(1, queryTokens.length)
+      : 0;
     const entityLike = /(fictional|character|person|historical|animal|species|surname|family name|given name|mythology|deity|folklore|artifact|object|vehicle|nickname|epithet)/.test(`${description} ${categories}`);
 
+    if (queryTokens.length >= 2 && titleTokenOverlap < 0.5) return false;
     return titleLinked && entityLike && !/(may refer to|disambiguation)/.test(description);
   });
 
@@ -1047,6 +1121,70 @@ async function searchWikipediaTitlesWithIntitle(queryText, limit = 8) {
     .filter(Boolean);
 }
 
+function preScoreWikipediaSearchRow(character, row, contextHints = [], entityHints = []) {
+  if (!row || !row.title) return -999;
+  const profile = parseCharacterQuery(character);
+  const baseName = normalizeName(profile.baseName || character);
+  const baseCompact = canonicalizeName(baseName);
+  const typoFixed = resolveLikelyTypo(baseName);
+  const aliasVariants = []
+    .concat(CHARACTER_NAME_ALIASES[String(baseName || '').toLowerCase()] || [])
+    .concat(CHARACTER_NAME_ALIASES[baseCompact] || []);
+  const rowTitle = normalizeName(row.title);
+  const rowTitleLower = rowTitle.toLowerCase();
+  const rowCompact = canonicalizeName(rowTitle);
+  const rowTitleTokens = tokensFromText(rowTitle);
+  const rowSnippetTokens = tokensFromText(row && row.snippet ? row.snippet : '');
+  const queryVariants = dedupeStrings([
+    baseName,
+    typoFixed,
+    ...aliasVariants,
+    ...getCharacterNameVariants(baseName).slice(0, 6)
+  ], 14);
+
+  let score = 0;
+  let bestTitleOverlap = 0;
+  let bestQueryTokenCount = 0;
+
+  queryVariants.forEach((variant) => {
+    const variantName = normalizeName(variant);
+    const variantCompact = canonicalizeName(variantName);
+    if (!variantCompact) return;
+    const qTokens = tokensFromText(variantName);
+    if (qTokens.length >= 2) bestQueryTokenCount = Math.max(bestQueryTokenCount, qTokens.length);
+
+    if (variantCompact === rowCompact) score += 180;
+    if (rowCompact.startsWith(`${variantCompact}`) || rowCompact.includes(variantCompact)) score += 42;
+
+    if (qTokens.length) {
+      const titleOverlap = qTokens.filter((token) => rowTitleTokens.includes(token)).length;
+      const snippetOverlap = qTokens.filter((token) => rowSnippetTokens.includes(token)).length;
+      bestTitleOverlap = Math.max(bestTitleOverlap, titleOverlap / Math.max(1, qTokens.length));
+      score += titleOverlap * 18;
+      score += snippetOverlap * 5;
+      if (qTokens.length >= 2 && titleOverlap === 0 && snippetOverlap === 0) score -= 34;
+      else if (qTokens.length >= 2 && titleOverlap === 0) score -= 18;
+    }
+  });
+
+  const mergedEntityHints = dedupeStrings([...(contextHints || []), ...(entityHints || [])], 8)
+    .map((hint) => String(hint || '').toLowerCase());
+  const queryLooksMedia = /(movie|film|show|tv|series|album|song|episode|game)/.test(`${baseName} ${mergedEntityHints.join(' ')}`.toLowerCase());
+  const rowLooksMedia = /\((?:\d{4}\s+film|film|movie|album|song|tv series|television series|video game)\)/.test(rowTitleLower)
+    || /\b(film|movie|album|song|television series|tv series|video game)\b/.test(String(row.snippet || '').toLowerCase());
+  if (rowLooksMedia && !queryLooksMedia) score -= 18;
+  if (/\((?:character|comics|mythology|folklore|surname|given name|nickname)\)/.test(rowTitleLower)) score += 12;
+  if (/\bcharacter\b/.test(String(row.snippet || '').toLowerCase())) score += 8;
+  if (bestQueryTokenCount >= 2 && bestTitleOverlap < 0.5 && rowTitleTokens.length <= 2) score -= 10;
+  if ((/[:/]/.test(rowTitle) || /\s[-–]\s/.test(rowTitle)) && bestTitleOverlap < 0.5) score -= 16;
+  if (bestQueryTokenCount >= 2 && rowTitleTokens.length >= (bestQueryTokenCount + 4) && bestTitleOverlap < 0.5) score -= 14;
+  if (bestQueryTokenCount >= 2 && bestTitleOverlap === 0 && /\b(character|film|series|episode|album|song|book|novel)\b/.test(rowTitleLower)) {
+    score -= 20;
+  }
+
+  return score;
+}
+
 async function fetchFromWikipediaOpenSearch(character, contextHints = []) {
   const normalized = normalizeName(character);
   if (!normalized) return null;
@@ -1156,9 +1294,28 @@ async function fetchFromWikipediaSearchEnhanced(character, contextHints = [], en
   const searchRows = dedupeByKey(
     [...resultLists.flat(), ...intitleResults.flat()].filter(Boolean),
     row => normalizeName(row.title).toLowerCase()
-  ).slice(0, 18);
+  );
+  const rankedSearchRows = searchRows
+    .map((row) => ({
+      ...row,
+      _preScore: preScoreWikipediaSearchRow(normalized, row, contextHints, mergedEntityHints)
+    }))
+    .sort((a, b) => (
+      (Number(b._preScore) || 0) - (Number(a._preScore) || 0)
+      || String(a.title || '').localeCompare(String(b.title || ''))
+    ));
+  const baseTokenCount = normalized.split(/\s+/).filter(Boolean).length;
+  const topPreScore = Number(rankedSearchRows[0] && rankedSearchRows[0]._preScore) || 0;
+  const dynamicCutoff = topPreScore - (baseTokenCount <= 1 ? 72 : 56);
+  const selectedSearchRows = rankedSearchRows
+    .filter((row, idx) => {
+      if (idx < 4) return true;
+      const pre = Number(row && row._preScore) || 0;
+      return pre >= Math.max(-8, dynamicCutoff);
+    })
+    .slice(0, baseTokenCount <= 1 ? 12 : 10);
 
-  const candidates = await Promise.all(searchRows.map(async (row) => {
+  const candidates = await Promise.all(selectedSearchRows.map(async (row) => {
     const candidate = await fetchFromWikipediaEnhanced(row.title).catch(() => null);
     if (!candidate) return null;
     return {
@@ -1173,7 +1330,7 @@ async function fetchFromWikipediaSearchEnhanced(character, contextHints = [], en
   const looseBest = pickLooseSearchCandidate(character, candidates);
   if (looseBest) return looseBest;
 
-  const topTitle = searchRows[0] && searchRows[0].title ? searchRows[0].title : normalized;
+  const topTitle = selectedSearchRows[0] && selectedSearchRows[0].title ? selectedSearchRows[0].title : normalized;
   const disambiguationTitles = await fetchWikipediaDisambiguationLinks(topTitle, 10);
   if (!disambiguationTitles.length) return null;
 

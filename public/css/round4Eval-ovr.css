@@ -268,6 +268,47 @@
   margin: 0.3rem 0 0;
 }
 
+.ovr-character-tools {
+  margin-top: 0.35rem;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.ovr-audio-preview-btn {
+  border: 1px solid rgba(30, 69, 118, 0.18);
+  background: linear-gradient(135deg, rgba(30, 69, 118, 0.06), rgba(70, 129, 255, 0.1));
+  color: #203a64;
+  border-radius: 999px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.69rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ovr-audio-preview-btn:hover {
+  background: linear-gradient(135deg, rgba(30, 69, 118, 0.1), rgba(70, 129, 255, 0.14));
+}
+
+.ovr-audio-preview-status {
+  min-height: 1.1rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.66rem;
+  line-height: 1.2;
+  color: #54718f;
+  letter-spacing: 0.01em;
+}
+
+.ovr-audio-preview-status.is-warning {
+  color: #8a5b00;
+}
+
+.ovr-audio-preview-status.is-ready {
+  color: #2b6d50;
+}
+
 .ovr-char-summary-rich {
   margin-top: 0;
   display: grid;

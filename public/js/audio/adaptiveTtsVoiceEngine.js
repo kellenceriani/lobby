@@ -258,16 +258,28 @@ export class AdaptiveTtsVoiceEngine {
   }
 
   _assignBrowserFallbackVoices(voices = [], requestedVoiceIds = []) {
-    // Deterministic, robust assignment for cross-platform consistency
+    // Strict, deterministic narrator/archetype mapping for cross-platform consistency
     const source = Array.isArray(voices) ? voices.filter(Boolean) : [];
     if (!source.length) {
       this.browserFallbackVoiceAssignments.clear();
       this.browserFallbackVoiceAssignmentsSig = '';
       return { assigned: 0, available: 0 };
     }
-    // Always prefer English voices, fallback to all if not enough
-    const englishPool = source.filter((voice) => String(voice && voice.lang || '').toLowerCase().startsWith('en'));
-    const pool = englishPool.length ? englishPool : source;
+    // Only use English voices, prefer neural/natural, never use default/robotic
+    const englishPool = source.filter((voice) => {
+      const lang = String(voice && voice.lang || '').toLowerCase();
+      return lang.startsWith('en');
+    });
+    // Filter for neural/natural/enhanced, never use 'default', 'siri', 'robot', or 'compact'
+    const qualityPool = englishPool.filter((voice) => {
+      const name = String(voice && voice.name || '').toLowerCase();
+      const uri = String(voice && voice.voiceURI || '').toLowerCase();
+      return (
+        /(neural|natural|enhanced|premium)/.test(name + uri)
+        && !/(default|siri|robot|compact|espeak|festival)/.test(name + uri)
+      );
+    });
+    const pool = qualityPool.length ? qualityPool : englishPool;
     // Deterministic order: narrator/archetype IDs, then requested
     const voiceIds = [];
     const seenIds = new Set();
@@ -280,7 +292,6 @@ export class AdaptiveTtsVoiceEngine {
 
     const nextAssignments = new Map();
     const usedVoiceSigs = new Set();
-    // Always assign the same voice for the same ID if available
     voiceIds.forEach((voiceId) => {
       const hints = BROWSER_FALLBACK_HINTS[voiceId] || BROWSER_FALLBACK_HINTS.af_heart || { hints: [] };
       // Sort by score, then by name for determinism
@@ -293,14 +304,55 @@ export class AdaptiveTtsVoiceEngine {
         const candidate = ranked[i] && ranked[i].voice;
         const sig = getSpeechVoiceStableId(candidate);
         if (!candidate) continue;
+        // Never use a voice that is 'default', 'siri', 'robot', or 'compact'
+        const name = String(candidate && candidate.name || '').toLowerCase();
+        if (/(default|siri|robot|compact|espeak|festival)/.test(name)) continue;
         if (!sig || !usedVoiceSigs.has(sig)) {
           picked = candidate;
           if (sig) usedVoiceSigs.add(sig);
           break;
         }
       }
-      if (!picked && ranked[0]) picked = ranked[0].voice;
-      if (!picked) return;
+      if (!picked) {
+        // Visual warning if no good match is found
+        if (typeof window !== 'undefined') {
+          const msg = `[TTS] No good browser fallback voice for narrator/archetype '${voiceId}' on this platform. Skipping.`;
+          if (window.console && window.console.warn) window.console.warn(msg);
+          if (typeof window.showTtsWarningToast === 'function') {
+            window.showTtsWarningToast(msg);
+          } else {
+            // Fallback: create a toast
+            let toast = document.getElementById('tts-toast');
+            if (!toast) {
+              toast = document.createElement('div');
+              toast.id = 'tts-toast';
+              toast.style.position = 'fixed';
+              toast.style.bottom = '24px';
+              toast.style.left = '50%';
+              toast.style.transform = 'translateX(-50%)';
+              toast.style.background = 'rgba(30,30,30,0.96)';
+              toast.style.color = '#fff';
+              toast.style.padding = '12px 24px';
+              toast.style.borderRadius = '8px';
+              toast.style.fontSize = '1.1em';
+              toast.style.zIndex = '99999';
+              toast.style.boxShadow = '0 2px 12px rgba(0,0,0,0.18)';
+              toast.style.maxWidth = '90vw';
+              toast.style.textAlign = 'center';
+              document.body.appendChild(toast);
+            }
+            toast.textContent = msg;
+            toast.style.opacity = '1';
+            toast.style.pointerEvents = 'auto';
+            clearTimeout(window.__ttsToastTimeout);
+            window.__ttsToastTimeout = setTimeout(() => {
+              toast.style.opacity = '0';
+              toast.style.pointerEvents = 'none';
+            }, 4200);
+          }
+        }
+        return;
+      }
       const pickedSig = getSpeechVoiceStableId(picked);
       nextAssignments.set(voiceId, pickedSig || picked);
       if (pickedSig) usedVoiceSigs.add(pickedSig);

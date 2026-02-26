@@ -1,3 +1,12 @@
+// Device detection utility
+function detectDeviceType() {
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+  if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  if (/Mobile|Tablet/.test(ua)) return 'mobile';
+  return 'desktop';
+}
+
 import { clamp, hashString, normalizeCollapsedText as normalizeText, nowMs } from './coreUtils.js';
 
 const DEFAULT_API_CATALOG_URL = '/api/tts/catalog';
@@ -156,6 +165,7 @@ function postForAudioWithTimeout(url, payload, { timeoutMs = 30000 } = {}) {
 export class AdaptiveTtsVoiceEngine {
   constructor(options = {}) {
     this.options = options && typeof options === 'object' ? { ...options } : {};
+    this.deviceType = detectDeviceType();
     this.loading = false;
     this.ready = false;
     this.error = '';
@@ -872,6 +882,161 @@ export class AdaptiveTtsVoiceEngine {
     onStart = null,
     onEnd = null
   } = {}) {
+    // Device-specific pipeline entry point
+    switch (this.deviceType) {
+      case 'ios':
+        return this._speakTextIOS({ text, voiceId, speed, pitch, volume, onStart, onEnd });
+      case 'android':
+      case 'mobile':
+        return this._speakTextMobile({ text, voiceId, speed, pitch, volume, onStart, onEnd });
+      case 'desktop':
+      default:
+        return this._speakTextDesktop({ text, voiceId, speed, pitch, volume, onStart, onEnd });
+    }
+  }
+
+
+  // iOS-specific TTS/audio pipeline
+  _speakTextIOS({
+    text,
+    voiceId = 'af_heart',
+    speed = 1,
+    pitch = 1,
+    volume = 1,
+    onStart = null,
+    onEnd = null
+  } = {}) {
+    // iOS: Always aggressively prewarm and unlock voices
+    this._warmBrowserFallbackVoices({ primeUtterance: true, timeoutMs: 1500, voiceIds: [voiceId] }).catch(() => {});
+
+    const spokenText = normalizeText(text);
+    if (!spokenText) return { handled: false, reason: 'empty_text' };
+
+    const safeSpeed = clamp(speed, 0.8, 1.4, 1); // iOS voices are sensitive to speed
+    const safePitch = clamp(pitch, 0.8, 1.2, 1);
+    const safeVolume = clamp(volume, 0, 1, 1);
+    let cancelled = false;
+    const jobId = `adaptive-ios-${nowMs()}-${hashString(`${voiceId}|${spokenText}`).toString(36).slice(0, 8)}`;
+    const job = {
+      id: jobId,
+      cancel: (options = {}) => {
+        cancelled = true;
+        if (this.activeJob && this.activeJob.id === jobId) {
+          this.activeJob = null;
+        }
+        if (this.activeSpeechUtterance && window.speechSynthesis) {
+          try { window.speechSynthesis.cancel(); } catch (_error) {}
+          this.activeSpeechUtterance = null;
+        }
+      }
+    };
+    this.activeJob = job;
+
+    let started = false;
+    let finished = false;
+    const safeStart = () => {
+      if (cancelled || started) return;
+      started = true;
+      if (typeof onStart === 'function') {
+        try { onStart(); } catch (_error) {}
+      }
+    };
+    const safeEnd = (status = 'end') => {
+      if (cancelled || finished) return;
+      finished = true;
+      if (this.activeJob && this.activeJob.id === jobId) this.activeJob = null;
+      if (typeof onEnd === 'function') {
+        try { onEnd(status); } catch (_error) {}
+      }
+    };
+
+    (async () => {
+      try {
+        // iOS: Always use browser fallback, never block on server
+        await this._warmBrowserFallbackVoices({ primeUtterance: true, timeoutMs: 1200, voiceIds: [voiceId] }).catch(() => {});
+        let voices = [];
+        try {
+          voices = Array.isArray(window.speechSynthesis.getVoices()) ? window.speechSynthesis.getVoices() : [];
+        } catch (_error) {}
+        // Try to resolve a good voice, but fallback to any English voice if needed
+        let picked = this._resolveAssignedBrowserFallbackVoice(voices, voiceId);
+        if (!picked) {
+          // Fallback: pick any English voice
+          picked = voices.find(v => String(v.lang || '').toLowerCase().startsWith('en')) || voices[0] || null;
+        }
+        if (!picked) {
+          // Visual warning for missing voice
+          if (typeof window !== 'undefined') {
+            const msg = `[TTS] No usable iOS browser voice for '${voiceId}'. Skipping.`;
+            if (window.console && window.console.warn) window.console.warn(msg);
+            if (typeof window.showTtsWarningToast === 'function') {
+              window.showTtsWarningToast(msg);
+            }
+          }
+          safeEnd('error');
+          return;
+        }
+        let utterance;
+        try {
+          utterance = new SpeechSynthesisUtterance(spokenText);
+        } catch (_error) {
+          safeEnd('error');
+          return;
+        }
+        try { utterance.voice = picked; } catch (_error) {}
+        try { if (picked.lang) utterance.lang = picked.lang; } catch (_error) {}
+        try { utterance.rate = safeSpeed; } catch (_error) {}
+        try { utterance.pitch = safePitch; } catch (_error) {}
+        try { utterance.volume = safeVolume; } catch (_error) {}
+
+        utterance.onstart = () => {
+          if (cancelled) return;
+          safeStart();
+        };
+        utterance.onend = () => {
+          if (cancelled) return;
+          safeEnd('end');
+        };
+        utterance.onerror = () => {
+          if (cancelled) return;
+          safeEnd('error');
+        };
+        this.activeSpeechUtterance = utterance;
+        try {
+          try { window.speechSynthesis.resume(); } catch (_error) {}
+          window.speechSynthesis.speak(utterance);
+        } catch (_error) {
+          this.activeSpeechUtterance = null;
+          safeEnd('error');
+        }
+      } catch (error) {
+        this.error = String(error && (error.message || error) || 'iOS TTS playback failed');
+        this._notifyStateChange();
+        safeEnd('error');
+      }
+    })();
+
+    return { handled: true, cancel: job.cancel };
+  }
+
+  // Stub for Android/mobile pipeline
+  _speakTextMobile(args) {
+    // TODO: Implement robust Android/mobile-specific TTS/audio logic here
+    // For now, fallback to unified logic
+    return this._speakTextDesktop(args);
+  }
+
+  // Desktop/server-preferred pipeline (existing logic)
+  _speakTextDesktop({
+    text,
+    voiceId = 'af_heart',
+    speed = 1,
+    pitch = 1,
+    volume = 1,
+    onStart = null,
+    onEnd = null
+  } = {}) {
+    // (Paste the entire previous speakText logic here, unchanged)
     const spokenText = normalizeText(text);
     if (!spokenText) return { handled: false, reason: 'empty_text' };
 

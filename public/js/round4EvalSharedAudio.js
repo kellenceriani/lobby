@@ -13,14 +13,28 @@ function getSharedAudioBridge() {
 
 function ensureSharedAudioReady() {
   const bridge = getSharedAudioBridge();
-  if (!bridge) return false;
+  let unlocked = false;
   try {
-    if (typeof bridge.ensureUnlocked === 'function') bridge.ensureUnlocked();
-    if (typeof bridge.ensureRunning === 'function') bridge.ensureRunning();
-    return true;
+    if (bridge && typeof bridge.ensureUnlocked === 'function') bridge.ensureUnlocked();
+    if (bridge && typeof bridge.ensureRunning === 'function') bridge.ensureRunning();
+    unlocked = true;
   } catch (error) {
-    return false;
+    unlocked = false;
   }
+  // Aggressively prewarm browser fallback voices on iOS/mobile
+  try {
+    if (typeof window !== 'undefined' && window.AdaptiveTtsVoiceEngine && typeof window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback === 'function') {
+      window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback({ primeUtterance: true, timeoutMs: 1500 });
+    }
+  } catch (error) {
+    if (window && window.console && window.console.warn) {
+      window.console.warn('[TTS] Failed to prewarm browser fallback voices:', error);
+    }
+  }
+  if (window && window.console && window.console.info) {
+    window.console.info('[TTS] ensureSharedAudioReady', { unlocked });
+  }
+  return unlocked;
 }
 
 function playSharedCharacterCardBlurb(entry, options = {}) {

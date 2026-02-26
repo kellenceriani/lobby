@@ -258,14 +258,17 @@ export class AdaptiveTtsVoiceEngine {
   }
 
   _assignBrowserFallbackVoices(voices = [], requestedVoiceIds = []) {
+    // Deterministic, robust assignment for cross-platform consistency
     const source = Array.isArray(voices) ? voices.filter(Boolean) : [];
     if (!source.length) {
       this.browserFallbackVoiceAssignments.clear();
       this.browserFallbackVoiceAssignmentsSig = '';
       return { assigned: 0, available: 0 };
     }
+    // Always prefer English voices, fallback to all if not enough
     const englishPool = source.filter((voice) => String(voice && voice.lang || '').toLowerCase().startsWith('en'));
     const pool = englishPool.length ? englishPool : source;
+    // Deterministic order: narrator/archetype IDs, then requested
     const voiceIds = [];
     const seenIds = new Set();
     [...DEFAULT_NARRATOR_VOICE_IDS, ...(Array.isArray(requestedVoiceIds) ? requestedVoiceIds : [])].forEach((rawId) => {
@@ -277,9 +280,14 @@ export class AdaptiveTtsVoiceEngine {
 
     const nextAssignments = new Map();
     const usedVoiceSigs = new Set();
+    // Always assign the same voice for the same ID if available
     voiceIds.forEach((voiceId) => {
       const hints = BROWSER_FALLBACK_HINTS[voiceId] || BROWSER_FALLBACK_HINTS.af_heart || { hints: [] };
-      const ranked = rankSpeechSynthesisVoices(pool, hints.hints);
+      // Sort by score, then by name for determinism
+      const ranked = rankSpeechSynthesisVoices(pool, hints.hints).sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return String(a.voice.name).localeCompare(String(b.voice.name));
+      });
       let picked = null;
       for (let i = 0; i < ranked.length; i += 1) {
         const candidate = ranked[i] && ranked[i].voice;
@@ -301,6 +309,13 @@ export class AdaptiveTtsVoiceEngine {
     const allVoiceSig = source.map((voice) => getSpeechVoiceStableId(voice)).filter(Boolean).join('||');
     this.browserFallbackVoiceAssignments = nextAssignments;
     this.browserFallbackVoiceAssignmentsSig = allVoiceSig;
+    // Log assignments for debugging cross-platform issues
+    if (typeof window !== 'undefined') {
+      window.__lobbyVoiceAssignments = Array.from(nextAssignments.entries());
+      if (window.console && window.console.info) {
+        window.console.info('[TTS] Browser fallback voice assignments:', window.__lobbyVoiceAssignments);
+      }
+    }
     return { assigned: nextAssignments.size, available: source.length };
   }
 
@@ -357,8 +372,9 @@ export class AdaptiveTtsVoiceEngine {
         });
       }
 
-      const shouldPrime = primeUtterance === true
-        && (!this.browserFallbackPrimed || ((nowMs() - this.browserFallbackPrimeAt) > 3000));
+      // Aggressively prime on iOS/mobile (user gesture required)
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const shouldPrime = primeUtterance === true || isIOS;
       if (shouldPrime) {
         try {
           await new Promise((resolve) => {
@@ -397,6 +413,10 @@ export class AdaptiveTtsVoiceEngine {
       }
 
       const assignmentInfo = this._assignBrowserFallbackVoices(voices, voiceIds);
+      // Log for debugging
+      if (typeof window !== 'undefined' && window.console && window.console.info) {
+        window.console.info('[TTS] Warmed browser fallback voices:', assignmentInfo, voices);
+      }
       return {
         ok: true,
         voicesLoaded: Array.isArray(voices) ? voices.length : 0,

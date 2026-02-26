@@ -280,8 +280,12 @@ function prepareRevealSequenceProfiles() {
 }
 
 function ensureRevealAudioReady() {
-  if (ensureSharedAudioReady()) {
+  const unlocked = ensureSharedAudioReady();
+  if (unlocked) {
     round4State.revealAudioReady = true;
+    if (window && window.console && window.console.info) {
+      window.console.info('[TTS] Reveal audio unlocked and ready (shared audio)');
+    }
     return;
   }
   if (round4State.revealAudioReady) return;
@@ -298,7 +302,20 @@ function ensureRevealAudioReady() {
   if (context && context.state === 'suspended') {
     context.resume().catch(() => null);
   }
+  // Prewarm browser fallback voices for iOS/mobile
+  try {
+    if (typeof window !== 'undefined' && window.AdaptiveTtsVoiceEngine && typeof window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback === 'function') {
+      window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback({ primeUtterance: true, timeoutMs: 1500 });
+    }
+  } catch (error) {
+    if (window && window.console && window.console.warn) {
+      window.console.warn('[TTS] Failed to prewarm browser fallback voices (reveal):', error);
+    }
+  }
   round4State.revealAudioReady = true;
+  if (window && window.console && window.console.info) {
+    window.console.info('[TTS] Reveal audio context ready (manual fallback)');
+  }
 }
 
 function playEliteRevealAudio(profile, stage) {

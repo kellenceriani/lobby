@@ -14,8 +14,9 @@
     "bench:tts:entry": "node server/benchmarks/ttsEntryQuality/entryVoiceQualityHarness.js",
     "bench:tts:callouts": "node server/benchmarks/ttsEntryQuality/audioCalloutBatchHarness.js",
     "bench:tts:sources": "node server/benchmarks/ttsEntryQuality/externalSourceReliabilityHarness.js",
-    "bench:tts:blurbs": "node server/benchmarks/ttsEntryQuality/audioCalloutBatchHarness.js",
-    "bench:tts:all": "node server/benchmarks/ttsEntryQuality/runAll.js"
+    "bench:tts:blurbs": "node server/benchmarks/ttsEntryQuality/audioBlurbFetchHarness.js",
+    "bench:tts:all": "node server/benchmarks/ttsEntryQuality/runAll.js",
+    "tts:cache:prune": "node server/tools/pruneAdaptiveTtsCache.js"
   },
   "keywords": [],
   "author": "",

@@ -1,10 +1,5 @@
 import { ARCHETYPES } from './archetypes.js';
-
-function clamp(value, min, max, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
+import { clamp } from './coreUtils.js';
 
 const BASE = Object.freeze({
   voiceHints: [],

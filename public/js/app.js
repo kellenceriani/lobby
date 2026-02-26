@@ -26,6 +26,23 @@ import {
 import { VoiceManager } from './audio/voiceManager.js';
 import { classifyEntryArchetype, mapSpeechStyleToArchetype } from './audio/classifyArchetype.js';
 import { ARCHETYPES } from './audio/archetypes.js';
+import { buildPhaseVoiceCuesWithState } from './audio/phaseVoiceCueBuilder.js';
+import {
+  clampAudioLevel,
+  clampAudioPan,
+  clampAudioRate,
+  hashString as hashAudioSeed
+} from './audio/coreUtils.js';
+import {
+  buildKokoroCatalogSignature,
+  buildKokoroFallbackCatalogEntry,
+  buildKokoroFallbackCatalog,
+  buildKokoroCuratedCatalog,
+  formatKokoroCatalogLabel,
+  buildVoiceCatalogSignature,
+  sortVoiceCatalogEntries
+} from './audio/catalogUtils.js';
+import { buildSilentWavDataUri, encodeAudioPathSegment, getAudioCategoryMeta } from './audio/mediaUtils.js';
 import {
   AdaptiveTtsVoiceEngine as KokoroVoiceEngine,
   ADAPTIVE_NARRATOR_VOICE_IDS as KOKORO_VOICE_FALLBACKS
@@ -714,34 +731,6 @@ const draftWaitIntelPreviewState = {
   requestRound: null
 };
 
-function clampAudioLevel(value, fallback = 1) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.max(0, Math.min(1, numeric));
-}
-
-function clampAudioPan(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.max(-1, Math.min(1, numeric));
-}
-
-function clampAudioRate(value, fallback = 1) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.max(0.5, Math.min(2.5, numeric));
-}
-
-function hashAudioSeed(input = '') {
-  const text = String(input || '');
-  let hash = 0;
-  for (let idx = 0; idx < text.length; idx += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(idx);
-    hash |= 0;
-  }
-  return Math.abs(hash >>> 0);
-}
-
 let voiceManagerInstance = null;
 let voiceStatusResetTimer = null;
 const voiceCuePrefetchState = {
@@ -1006,26 +995,6 @@ function setKokoroStatus(text = '', tone = '') {
   syncAudioControlUI();
 }
 
-function buildKokoroCatalogSignature(entries = []) {
-  if (!Array.isArray(entries) || !entries.length) return '';
-  return entries
-    .map((entry) => `${String(entry && entry.id || '')}|${String(entry && entry.name || '')}|${String(entry && entry.overallGrade || '')}`)
-    .join('||');
-}
-
-function buildKokoroFallbackCatalogEntry(id = '') {
-  const voiceId = String(id || '').trim();
-  const meta = KOKORO_VOICE_PRESET_META[voiceId] || null;
-  const isUk = voiceId.startsWith('bf_') || voiceId.startsWith('bm_');
-  return {
-    id: voiceId,
-    name: meta && meta.shortName ? meta.shortName : (voiceId || 'Voice'),
-    language: isUk ? 'en-gb' : 'en-us',
-    overallGrade: '',
-    roleHint: meta && meta.roleHint ? meta.roleHint : ''
-  };
-}
-
 function getKokoroPreparedVoiceCount() {
   let count = 0;
   KOKORO_CURATED_VOICE_IDS.forEach((id) => {
@@ -1077,25 +1046,6 @@ function findKokoroCatalogEntryById(id = '') {
   return null;
 }
 
-function buildKokoroFallbackCatalog() {
-  return KOKORO_CURATED_VOICE_IDS.map((id) => buildKokoroFallbackCatalogEntry(id));
-}
-
-function formatKokoroCatalogLabel(entry = {}) {
-  const id = String(entry && entry.id || '').trim();
-  const preset = KOKORO_VOICE_PRESET_META[id];
-  if (preset && preset.menuLabel) return preset.menuLabel;
-  const name = String(entry && entry.name || id || 'Voice').trim();
-  const lang = String(entry && entry.language || '').trim();
-  const grade = String(entry && entry.overallGrade || '').trim();
-  const roleHint = String(entry && entry.roleHint || '').trim();
-  const parts = [name];
-  if (lang) parts.push(lang.toUpperCase());
-  if (grade) parts.push(grade);
-  if (roleHint) parts.push(roleHint);
-  return parts.join(' - ');
-}
-
 function normalizeKokoroVoiceId(value = '') {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -1115,20 +1065,7 @@ function refreshKokoroCatalogFromEngine(engine = null) {
       catalog = [];
     }
   }
-  if (!Array.isArray(catalog) || !catalog.length) {
-    catalog = buildKokoroFallbackCatalog();
-  } else {
-    const byId = new Map();
-    catalog.forEach((entry) => {
-      const id = String(entry && entry.id || '').trim();
-      if (!id) return;
-      byId.set(id, {
-        ...entry,
-        roleHint: (KOKORO_VOICE_PRESET_META[id] && KOKORO_VOICE_PRESET_META[id].roleHint) || ''
-      });
-    });
-    catalog = KOKORO_CURATED_VOICE_IDS.map((id) => byId.get(id) || buildKokoroFallbackCatalogEntry(id));
-  }
+  catalog = buildKokoroCuratedCatalog(catalog, KOKORO_CURATED_VOICE_IDS, KOKORO_VOICE_PRESET_META);
   const sig = buildKokoroCatalogSignature(catalog);
   const changed = sig !== audioState.kokoroCatalogSignature;
   audioState.kokoroCatalog = catalog;
@@ -2060,13 +1997,6 @@ function trySpeakVoiceCueWithKokoro({ cue, plan, volume, start, end } = {}) {
   return handle;
 }
 
-function buildVoiceCatalogSignature(entries = []) {
-  if (!Array.isArray(entries) || !entries.length) return '';
-  return entries
-    .map((entry) => `${entry && entry.id ? entry.id : ''}|${entry && entry.qualityScore != null ? entry.qualityScore : ''}`)
-    .join('||');
-}
-
 function getVoiceCatalogEntries() {
   return Array.isArray(audioState.voiceCatalog) ? audioState.voiceCatalog : [];
 }
@@ -2105,12 +2035,7 @@ function refreshVoiceCatalogFromManager(manager = null) {
   } catch (error) {
     catalog = [];
   }
-  if (!Array.isArray(catalog)) catalog = [];
-  const sorted = catalog.slice().sort((a, b) => {
-    const scoreDiff = Number(b && b.qualityScore || 0) - Number(a && a.qualityScore || 0);
-    if (scoreDiff) return scoreDiff;
-    return String(a && a.name || '').localeCompare(String(b && b.name || ''));
-  });
+  const sorted = sortVoiceCatalogEntries(catalog);
   const sig = buildVoiceCatalogSignature(sorted);
   const changed = sig !== audioState.voiceCatalogSignature;
   audioState.voiceCatalog = sorted;
@@ -2853,286 +2778,8 @@ function clearVoiceCues(reason = 'phase-change', { types = null, includeActive =
   });
 }
 
-function hashVoiceCueSeed(input = '') {
-  const text = String(input || '');
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash >>> 0);
-}
-
-function pickVoiceCueVariant(list = [], seed = '') {
-  const options = (Array.isArray(list) ? list : []).filter(Boolean);
-  if (!options.length) return '';
-  return String(options[hashVoiceCueSeed(seed) % options.length] || '');
-}
-
-function detectTwistConnectorPhrase(twist = '') {
-  const raw = String(twist || '').trim();
-  if (!raw) return { connector: '', remainder: '' };
-  const parts = raw.split(/\s+/).filter(Boolean);
-  const connector = String(parts[0] || '').toUpperCase();
-  const known = new Set(['WITH', 'UNDER', 'DURING', 'WHILE', 'USING', 'WITHOUT', 'AS', 'ON', 'IN', 'BY', 'THROUGH', 'AMID', 'AGAINST', 'AFTER', 'BEFORE', 'INSIDE', 'OUTSIDE', 'NO', 'ONLY', 'BUT']);
-  if (!known.has(connector)) return { connector: '', remainder: raw };
-  return { connector, remainder: parts.slice(1).join(' ').trim() };
-}
-
-function buildFallbackRoundStartLead(roundNumber, scenario = '', twist = '') {
-  return pickVoiceCueVariant([
-    `Round ${roundNumber}!`,
-    `Round ${roundNumber}... let's go!`,
-    `Round ${roundNumber}! Here we go!`,
-    `Round ${roundNumber} is live!`
-  ], `roundstart:${roundNumber}:${scenario}:${twist}`);
-}
-
-function buildFallbackScenarioLead(roundNumber, scenario = '') {
-  const variantsByRound = {
-    1: ['The scenario?', 'Your scenario?', 'Scenario check!'],
-    2: ["This round's scenario?", 'Your challenge?', 'Scenario drop!'],
-    3: ['Scenario time!', "Here's the scenario!", 'The setup?']
-  };
-  const pool = variantsByRound[roundNumber] || ['The scenario?', 'Scenario check!', "Here's the scenario!"];
-  return pickVoiceCueVariant(pool, `scenario:${roundNumber}:${scenario}`);
-}
-
-function buildFallbackTwistLine(twist = '', roundNumber = 0) {
-  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
-  const spokenTwist = String(safeTwist || '').split('|')[0].trim();
-  if (!spokenTwist) return '';
-  const { connector, remainder } = detectTwistConnectorPhrase(spokenTwist);
-  if (connector) {
-    if (remainder) {
-      if (connector === 'BUT') {
-        const flourish = pickVoiceCueVariant(['...', '!', '!!'], `twist-flourish:${roundNumber}:${spokenTwist}`);
-        return `${connector}${flourish} ${remainder}!`;
-      }
-      return `${connector} ${remainder}!`;
-    }
-    return `${connector}!`;
-  }
-  const prefix = pickVoiceCueVariant(['BUT...', 'AND...', 'NOW...'], `twist-prefix:${roundNumber}:${spokenTwist}`);
-  return `${prefix} ${spokenTwist}!`;
-}
-
-function buildFallbackRound4PreludeLine(scenario = '', twist = '') {
-  const safeScenario = String(scenario || '').trim().replace(/[.]+$/g, '');
-  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
-  if (!safeScenario && !safeTwist) {
-    return pickVoiceCueVariant([
-      'Round 4! Full team final check!',
-      'Round 4! Final team evaluation incoming!',
-      'Final check! The full team is up next!'
-    ], 'round4-prelude:fallback');
-  }
-  const twistLine = buildFallbackTwistLine(safeTwist, 4);
-  const mission = safeScenario || 'face the final evaluation';
-  return pickVoiceCueVariant([
-    `Round 4! Your full team has to ${mission}${twistLine ? `. ${twistLine}` : '!'}`,
-    `So... your full team now has to ${mission}${twistLine ? `. ${twistLine}` : '!'}`,
-    `Final brief! Full squad mission: ${mission}${twistLine ? `. ${twistLine}` : '!'}`,
-    `Here we go... full team task: ${mission}${twistLine ? `. ${twistLine}` : '!'}`
-  ], `round4-prelude:${safeScenario}:${safeTwist}`);
-}
-
-function buildFallbackRound4BriefLine(scenario = '', twist = '') {
-  const safeScenario = String(scenario || '').trim().replace(/[.]+$/g, '');
-  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
-  const parts = [];
-  if (safeScenario) {
-    const lead = pickVoiceCueVariant(['Scenario locked:', 'Mission:', 'Target objective:'], `round4-scenario-lead:${safeScenario}`);
-    parts.push(`${lead} ${safeScenario}.`);
-  }
-  if (safeTwist) {
-    parts.push(buildFallbackTwistLine(safeTwist, 4));
-  }
-  return parts.length ? parts.join(' ').replace(/\s+/g, ' ').trim() : 'Final brief incoming!';
-}
-
 function buildPhaseVoiceCues(kind = '', data = {}) {
-  const safe = data && typeof data === 'object' ? data : {};
-  const roundNumber = Number(safe.roundNumber) || Number(gameState.currentRound) || 0;
-  const scenario = String(safe.scenario || gameState.currentScenario || '').trim();
-  const twist = String(safe.twist || gameState.currentTwist || '').trim();
-  const kindKey = String(kind || '').toLowerCase();
-
-  if (kindKey === 'roundstart') {
-    if (safe.isFinalRound === true || roundNumber === 4) {
-      const finaleLead = buildFallbackRound4PreludeLine(scenario, twist);
-      return [{
-        type: 'round4',
-        text: finaleLead,
-        subtitleText: finaleLead,
-        archetype: ARCHETYPES.NARRATOR,
-        intensity: 0.62,
-        priority: 78,
-        dedupeKey: `phase:round4:start:${roundNumber}`
-      }];
-    }
-    return [{
-      type: 'narration',
-      text: buildFallbackRoundStartLead(roundNumber, scenario, twist),
-      subtitleText: `Round ${roundNumber}!`,
-      archetype: ARCHETYPES.ANNOUNCER,
-      intensity: 0.58,
-      priority: 62,
-      dedupeKey: `phase:round:start:${roundNumber}`
-    }];
-  }
-
-  if (kindKey === 'scenario') {
-    if (!scenario) return [];
-    return [{
-      type: 'narration',
-      text: `${buildFallbackScenarioLead(roundNumber, scenario)} ${scenario}${pickVoiceCueVariant(['.', '!', '...'], `scenario-punct:${roundNumber}:${scenario}`)}`,
-      subtitleText: `Scenario: ${scenario}`,
-      archetype: ARCHETYPES.NARRATOR,
-      intensity: 0.6,
-      priority: 70,
-      dedupeKey: `phase:scenario:${roundNumber}:${scenario.toLowerCase()}`
-    }];
-  }
-
-  if (kindKey === 'twist') {
-    if (!twist) return [];
-    return [{
-      type: 'twist',
-      text: buildFallbackTwistLine(twist, roundNumber),
-      subtitleText: `Twist: ${twist}`,
-      archetype: ARCHETYPES.ANNOUNCER,
-      intensity: 0.74,
-      priority: 76,
-      dedupeKey: `phase:twist:${roundNumber}:${twist.toLowerCase()}`
-    }];
-  }
-
-  if (kindKey === 'round4start') {
-    const cues = [];
-    if (scenario) {
-      cues.push({
-        type: 'round4',
-        text: `Scenario: ${scenario}.`,
-        subtitleText: `Scenario: ${scenario}`,
-        archetype: ARCHETYPES.NARRATOR,
-        intensity: 0.62,
-        priority: 84,
-        dedupeKey: `round4:start:scenario:${(scenario || '').toLowerCase()}`
-      });
-    }
-    if (twist) {
-      const spokenTwist = String(twist || '').split('|')[0].trim();
-      if (spokenTwist) {
-        cues.push({
-          type: 'round4',
-          text: `Twist: ${spokenTwist}.`,
-          subtitleText: `Twist: ${twist}`,
-          archetype: ARCHETYPES.NARRATOR,
-          intensity: 0.62,
-          priority: 84,
-          dedupeKey: `round4:start:twist:${String(twist || '').toLowerCase()}`
-        });
-      }
-    }
-    return cues;
-  }
-
-  if (kindKey === 'round4evaluated') {
-    return [{
-      type: 'round4',
-      text: 'Round four results are in.',
-      subtitleText: 'Round 4 complete - reveal starting',
-      archetype: ARCHETYPES.ANNOUNCER,
-      intensity: 0.62,
-      priority: 80,
-      dedupeKey: `round4:evaluated:${safe.isTie === true ? 'tie' : 'clear'}:${String(safe.evaluationId || '')}`
-    }];
-  }
-
-  if (kindKey === 'finalresults') {
-    return [{
-      type: 'round4',
-      text: safe && safe.isTie ? 'Final round tally locked. Tie result.' : 'Final round tally locked.',
-      subtitleText: safe && safe.isTie ? 'Final round tie locked' : 'Final round tally locked',
-      archetype: ARCHETYPES.ANNOUNCER,
-      intensity: 0.55,
-      priority: 60,
-      dedupeKey: `round4:finalresults:${safe && safe.isTie ? 'tie' : 'normal'}`
-    }];
-  }
-
-  if (kindKey === 'gameended') {
-    const winnerName = String(safe && safe.winner && safe.winner.name || '').trim();
-    return [{
-      type: 'round4',
-      text: winnerName ? `${winnerName} wins the match.` : 'Match complete. Final results are live.',
-      subtitleText: winnerName ? `${winnerName} wins the match` : 'Match complete',
-      archetype: ARCHETYPES.ANNOUNCER,
-      intensity: 0.66,
-      priority: 72,
-      dedupeKey: `game:end:${winnerName.toLowerCase()}`
-    }];
-  }
-
-  return [];
-}
-
-function writeAsciiToView(view, offset, text) {
-  for (let idx = 0; idx < text.length; idx += 1) {
-    view.setUint8(offset + idx, text.charCodeAt(idx));
-  }
-}
-
-function encodeAudioPathSegment(filename = '') {
-  return String(filename || '')
-    .split('/')
-    .map((part) => encodeURIComponent(part))
-    .join('/');
-}
-
-function buildSilentWavDataUri(durationMs = 90) {
-  try {
-    const sampleRate = 8000;
-    const sampleCount = Math.max(1, Math.round((Math.max(10, Number(durationMs) || 90) / 1000) * sampleRate));
-    const dataSize = sampleCount;
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
-
-    writeAsciiToView(view, 0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeAsciiToView(view, 8, 'WAVE');
-    writeAsciiToView(view, 12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate, true);
-    view.setUint16(32, 1, true);
-    view.setUint16(34, 8, true);
-    writeAsciiToView(view, 36, 'data');
-    view.setUint32(40, dataSize, true);
-    for (let idx = 0; idx < dataSize; idx += 1) {
-      view.setUint8(44 + idx, 128);
-    }
-
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let idx = 0; idx < bytes.length; idx += 1) {
-      binary += String.fromCharCode(bytes[idx]);
-    }
-    return `data:audio/wav;base64,${btoa(binary)}`;
-  } catch (error) {
-    return '';
-  }
-}
-
-function getAudioCategoryMeta(category = 'sfx') {
-  const key = String(category || 'sfx').toLowerCase();
-  if (key === 'music') return { enabledKey: 'musicEnabled', volumeKey: 'musicVolume', gainKey: 'musicGain', label: 'Music' };
-  if (key === 'reveal') return { enabledKey: 'revealEnabled', volumeKey: 'revealVolume', gainKey: 'revealGain', label: 'Reveal' };
-  if (key === 'card' || key === 'cards' || key === 'blurb' || key === 'voice') return { enabledKey: 'cardEnabled', volumeKey: 'cardVolume', gainKey: 'cardGain', label: 'Callouts' };
-  return { enabledKey: 'sfxEnabled', volumeKey: 'sfxVolume', gainKey: 'sfxGain', label: 'UI' };
+  return buildPhaseVoiceCuesWithState(kind, data, gameState);
 }
 
 function setAudioButtonPressed(button, pressed, labels = null) {

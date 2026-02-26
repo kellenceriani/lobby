@@ -9,9 +9,16 @@ const { spawn, spawnSync } = require('child_process');
 const MAX_TEXT_LEN = 320;
 const DEFAULT_TIMEOUT_MS = 30000;
 const CACHE_DIR = path.join(__dirname, '..', '..', 'audio', 'generated-tts');
+const CACHE_AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg']);
 
 const inFlightSynth = new Map();
 let cacheDirReady = false;
+const adaptiveTtsCachePruneState = {
+  running: false,
+  promise: null,
+  lastRunAt: 0,
+  lastScheduleAt: 0
+};
 let edgeNodeModulePromise = null;
 let edgeNodeModuleCache = null;
 let edgeNodeModulePath = '';
@@ -195,6 +202,31 @@ function buildCacheKey({ voiceId, speed, pitch, text, version = 'v3' }) {
 
 function buildCachePath(cacheKey, ext = 'mp3') {
   return path.join(CACHE_DIR, `${cacheKey}.${ext}`);
+}
+
+function parseBooleanFlag(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return text === '1' || text === 'true' || text === 'yes' || text === 'on';
+}
+
+function getAdaptiveTtsCachePruneConfig() {
+  const maxMb = clamp(process.env.LOBBY_TTS_CACHE_MAX_MB, 0, 102400, 0);
+  const maxClips = Math.floor(clamp(process.env.LOBBY_TTS_CACHE_MAX_CLIPS, 0, 1000000, 0));
+  const maxAgeDays = clamp(process.env.LOBBY_TTS_CACHE_MAX_AGE_DAYS, 0, 3650, 0);
+  const minIntervalMs = Math.floor(clamp(process.env.LOBBY_TTS_CACHE_PRUNE_MIN_INTERVAL_MS, 1000, 86400000, 120000));
+  const maxBytes = maxMb > 0 ? Math.round(maxMb * 1024 * 1024) : 0;
+  const maxAgeMs = maxAgeDays > 0 ? Math.round(maxAgeDays * 24 * 60 * 60 * 1000) : 0;
+  const autoPrune = parseBooleanFlag(process.env.LOBBY_TTS_CACHE_AUTO_PRUNE);
+  return {
+    autoPrune,
+    maxMb,
+    maxBytes,
+    maxClips,
+    maxAgeDays,
+    maxAgeMs,
+    minIntervalMs,
+    hasLimits: maxBytes > 0 || maxClips > 0 || maxAgeMs > 0
+  };
 }
 
 function edgeRateFromSpeed(speed = 1) {
@@ -493,6 +525,230 @@ async function readFileIfExists(filePath) {
     if (error && error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+function parseAdaptiveTtsCacheArtifactName(fileName = '') {
+  const raw = String(fileName || '').trim();
+  if (!raw) return null;
+  const metaMatch = raw.match(/^(.*)\.(mp3|wav|ogg)\.json$/i);
+  if (metaMatch && metaMatch[1]) {
+    return { key: metaMatch[1], kind: 'meta', ext: String(metaMatch[2] || '').toLowerCase() };
+  }
+  const audioMatch = raw.match(/^(.*)\.(mp3|wav|ogg)$/i);
+  if (audioMatch && audioMatch[1]) {
+    return { key: audioMatch[1], kind: 'audio', ext: String(audioMatch[2] || '').toLowerCase() };
+  }
+  return null;
+}
+
+async function collectAdaptiveTtsCacheRows() {
+  await ensureCacheDir();
+  let names = [];
+  try {
+    names = await fsp.readdir(CACHE_DIR);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return [];
+    throw error;
+  }
+  const rowsByKey = new Map();
+  for (const name of names) {
+    const parsed = parseAdaptiveTtsCacheArtifactName(name);
+    if (!parsed || !CACHE_AUDIO_EXTS.has(parsed.ext)) continue;
+    const filePath = path.join(CACHE_DIR, name);
+    let stat;
+    try {
+      stat = await fsp.stat(filePath);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (!stat || !stat.isFile()) continue;
+    if (!rowsByKey.has(parsed.key)) {
+      rowsByKey.set(parsed.key, {
+        key: parsed.key,
+        bytes: 0,
+        files: [],
+        audioCount: 0,
+        metaCount: 0,
+        lastModifiedMs: 0
+      });
+    }
+    const row = rowsByKey.get(parsed.key);
+    const bytes = Number(stat.size) || 0;
+    const mtimeMs = Math.max(0, Number(stat.mtimeMs) || Number(stat.mtime && stat.mtime.getTime && stat.mtime.getTime()) || 0);
+    row.bytes += bytes;
+    row.lastModifiedMs = Math.max(Number(row.lastModifiedMs) || 0, mtimeMs);
+    row.files.push({
+      name,
+      filePath,
+      bytes,
+      mtimeMs,
+      kind: parsed.kind
+    });
+    if (parsed.kind === 'audio') row.audioCount += 1;
+    if (parsed.kind === 'meta') row.metaCount += 1;
+  }
+  return Array.from(rowsByKey.values());
+}
+
+async function deleteAdaptiveTtsCacheRow(row, { dryRun = false } = {}) {
+  if (!row || !Array.isArray(row.files)) {
+    return { filesDeleted: 0, bytesDeleted: 0 };
+  }
+  let filesDeleted = 0;
+  let bytesDeleted = 0;
+  for (const file of row.files) {
+    if (!file || !file.filePath) continue;
+    if (!dryRun) {
+      try {
+        await fsp.unlink(file.filePath);
+      } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error;
+      }
+    }
+    filesDeleted += 1;
+    bytesDeleted += Number(file.bytes) || 0;
+  }
+  return { filesDeleted, bytesDeleted };
+}
+
+async function pruneAdaptiveTtsCache({ force = false, dryRun = false, reason = 'manual' } = {}) {
+  const config = getAdaptiveTtsCachePruneConfig();
+  if (!config.hasLimits && !force) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'no_limits_configured',
+      deletedClips: 0,
+      deletedFiles: 0,
+      deletedBytes: 0
+    };
+  }
+  if (adaptiveTtsCachePruneState.running) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'already_running',
+      deletedClips: 0,
+      deletedFiles: 0,
+      deletedBytes: 0
+    };
+  }
+
+  adaptiveTtsCachePruneState.running = true;
+  try {
+    const rows = await collectAdaptiveTtsCacheRows();
+    const removedKeys = new Set();
+    const victims = [];
+
+    const markVictim = (row, cause) => {
+      if (!row || !row.key || removedKeys.has(row.key)) return;
+      removedKeys.add(row.key);
+      victims.push({ row, cause: String(cause || 'unknown') });
+    };
+
+    rows.forEach((row) => {
+      if (row.audioCount < 1 || row.metaCount < 1) {
+        markVictim(row, 'orphan_pair');
+      }
+    });
+
+    const ageCutoff = config.maxAgeMs > 0 ? (Date.now() - config.maxAgeMs) : 0;
+    if (ageCutoff > 0) {
+      rows
+        .filter((row) => !removedKeys.has(row.key))
+        .forEach((row) => {
+          if ((Number(row.lastModifiedMs) || 0) > 0 && (Number(row.lastModifiedMs) || 0) < ageCutoff) {
+            markVictim(row, 'max_age');
+          }
+        });
+    }
+
+    let survivors = rows.filter((row) => !removedKeys.has(row.key));
+    let survivorBytes = survivors.reduce((sum, row) => sum + (Number(row.bytes) || 0), 0);
+    let survivorClips = survivors.length;
+
+    if (config.maxClips > 0 || config.maxBytes > 0) {
+      const oldestFirst = survivors
+        .slice()
+        .sort((a, b) => (Number(a.lastModifiedMs) || 0) - (Number(b.lastModifiedMs) || 0));
+      for (const row of oldestFirst) {
+        const overClipLimit = config.maxClips > 0 && survivorClips > config.maxClips;
+        const overByteLimit = config.maxBytes > 0 && survivorBytes > config.maxBytes;
+        if (!overClipLimit && !overByteLimit) break;
+        markVictim(row, overClipLimit ? 'max_clips' : 'max_bytes');
+        survivorClips -= 1;
+        survivorBytes -= (Number(row.bytes) || 0);
+      }
+    }
+
+    let deletedFiles = 0;
+    let deletedBytes = 0;
+    for (const victim of victims) {
+      const result = await deleteAdaptiveTtsCacheRow(victim.row, { dryRun });
+      deletedFiles += Number(result && result.filesDeleted) || 0;
+      deletedBytes += Number(result && result.bytesDeleted) || 0;
+    }
+
+    survivors = rows.filter((row) => !removedKeys.has(row.key));
+    const keptBytes = survivors.reduce((sum, row) => sum + (Number(row.bytes) || 0), 0);
+    const summary = {
+      ok: true,
+      skipped: false,
+      reason: String(reason || 'manual'),
+      dryRun: dryRun === true,
+      deletedClips: victims.length,
+      deletedFiles,
+      deletedBytes,
+      keptClips: survivors.length,
+      keptFiles: survivors.reduce((sum, row) => sum + (Array.isArray(row.files) ? row.files.length : 0), 0),
+      keptBytes,
+      causes: victims.reduce((acc, victim) => {
+        const key = String(victim && victim.cause || 'unknown');
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {}),
+      config: {
+        autoPrune: config.autoPrune,
+        maxMb: config.maxMb,
+        maxClips: config.maxClips,
+        maxAgeDays: config.maxAgeDays,
+        minIntervalMs: config.minIntervalMs
+      }
+    };
+    adaptiveTtsCachePruneState.lastRunAt = Date.now();
+    return summary;
+  } finally {
+    adaptiveTtsCachePruneState.running = false;
+  }
+}
+
+function scheduleAdaptiveTtsCachePrune(reason = 'cache_write') {
+  const config = getAdaptiveTtsCachePruneConfig();
+  if (!config.autoPrune || !config.hasLimits) return;
+  if (adaptiveTtsCachePruneState.promise) return;
+  const now = Date.now();
+  if ((now - Number(adaptiveTtsCachePruneState.lastScheduleAt || 0)) < config.minIntervalMs) {
+    return;
+  }
+  adaptiveTtsCachePruneState.lastScheduleAt = now;
+  adaptiveTtsCachePruneState.promise = pruneAdaptiveTtsCache({ reason })
+    .then((summary) => {
+      if (!summary || summary.skipped || !summary.deletedClips) return;
+      console.log(
+        `[TTS cache prune] reason=${summary.reason}` +
+        ` clips=${summary.deletedClips}` +
+        ` files=${summary.deletedFiles}` +
+        ` freedMB=${(Number(summary.deletedBytes || 0) / (1024 * 1024)).toFixed(2)}` +
+        ` keptClips=${summary.keptClips}`
+      );
+    })
+    .catch((error) => {
+      console.warn(`[TTS cache prune] failed: ${String(error && error.message || error || 'unknown')}`);
+    })
+    .finally(() => {
+      adaptiveTtsCachePruneState.promise = null;
+    });
 }
 
 function spawnProcess(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS, cwd = undefined, input = null } = {}) {
@@ -951,6 +1207,7 @@ async function writeCacheArtifact(cacheKey, ext, buffer, meta = {}) {
     bytes: Number(buffer && buffer.length) || 0,
     savedAt: Date.now()
   }, null, 2));
+  scheduleAdaptiveTtsCachePrune('cache_write');
   return { filePath, metaPath };
 }
 
@@ -1248,6 +1505,7 @@ async function prewarmAdaptiveNarratorVoiceCues({
 module.exports = {
   NARRATOR_VOICES,
   getAdaptiveTtsCatalogPayload,
+  pruneAdaptiveTtsCache,
   synthesizeAdaptiveTts,
   prewarmAdaptiveNarratorVoiceCues
 };

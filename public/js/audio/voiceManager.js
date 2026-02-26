@@ -1,30 +1,7 @@
 import { ARCHETYPES } from './archetypes.js';
 import { classifyVoiceCueArchetype } from './classifyArchetype.js';
 import { getSpeechPresetForArchetype, stylizeVoiceCueText } from './archetypePresets.js';
-
-function clamp(value, min, max, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
-
-function nowMs() {
-  return Date.now();
-}
-
-function normalizeText(value = '') {
-  return String(value || '').trim();
-}
-
-function hashString(input = '') {
-  const text = String(input || '');
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash >>> 0);
-}
+import { clamp, hashString, normalizeTrimmedText as normalizeText, nowMs } from './coreUtils.js';
 
 function normalizeCue(rawCue = {}) {
   if (!rawCue || typeof rawCue !== 'object') return null;

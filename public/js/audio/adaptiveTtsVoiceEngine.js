@@ -1,3 +1,5 @@
+import { clamp, hashString, normalizeCollapsedText as normalizeText, nowMs } from './coreUtils.js';
+
 const DEFAULT_API_CATALOG_URL = '/api/tts/catalog';
 const DEFAULT_API_SYNTH_URL = '/api/tts/synthesize';
 const DEFAULT_NARRATOR_VOICE_IDS = Object.freeze(['af_heart', 'af_bella', 'am_michael', 'bm_george']);
@@ -69,30 +71,6 @@ const BROWSER_FALLBACK_HINTS = Object.freeze({
   'arch:spooky': { hints: ['ryan', 'male'], pitch: 0.82 },
   'arch:chaotic': { hints: ['aria', 'female'], pitch: 1.14 }
 });
-
-function clamp(value, min, max, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
-
-function nowMs() {
-  return Date.now();
-}
-
-function normalizeText(value = '') {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function hashString(input = '') {
-  const text = String(input || '');
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash >>> 0);
-}
 
 function getSpeechVoiceStableId(voice = null) {
   if (!voice || typeof voice !== 'object') return '';
@@ -773,7 +751,16 @@ export class AdaptiveTtsVoiceEngine {
       try { utterance.voice = picked; } catch (_error) {}
       try { if (picked.lang) utterance.lang = picked.lang; } catch (_error) {}
     }
-    const targetPitch = clamp((((Number(hints.pitch) || 1) * 0.6) + ((Number(pitch) || 1) * 0.4)), 0.72, 1.35, (Number(hints.pitch) || 1));
+    const normalizedVoiceId = String(voiceId || '').trim();
+    const requestedPitch = clamp(pitch, 0.7, 1.35, 1);
+    // Keep curated narrator voices on the caller-requested pitch (neutral narrator cues use 1.0),
+    // so iOS browser fallback does not add extra hidden "archetype-like" coloration.
+    const shouldBlendHintPitch = normalizedVoiceId.startsWith('arch:');
+    const hintPitch = Number(hints.pitch) || 1;
+    const blendedPitch = shouldBlendHintPitch
+      ? ((hintPitch * 0.6) + (requestedPitch * 0.4))
+      : requestedPitch;
+    const targetPitch = clamp(blendedPitch, 0.72, 1.35, requestedPitch);
     try { utterance.rate = clamp(speed, 0.7, 1.6, 1); } catch (_error) {}
     try { utterance.pitch = targetPitch; } catch (_error) {}
     try { utterance.volume = clamp(volume, 0, 1, 1); } catch (_error) {}

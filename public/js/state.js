@@ -2,6 +2,8 @@ const createDefaultGameState = () => ({
   currentRound: 0,
   totalRounds: 4,
   myTeam: [],
+  myDraftSlots: [],
+  draftActiveSlotIndex: 0,
   draftEntryCount: 0,
   currentScenario: '',
   currentTwist: '',

@@ -50,21 +50,54 @@
 }
 
 .startup-bootstrap-panel {
-  margin: 0 0 var(--spacing-md);
-  padding: 10px 11px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 188, 212, 0.16);
-  background:
-    radial-gradient(circle at 100% 0%, rgba(255, 193, 7, 0.1), transparent 52%),
-    radial-gradient(circle at 0% 100%, rgba(0, 188, 212, 0.08), transparent 54%),
-    rgba(244, 250, 255, 0.96);
-  box-shadow: var(--shadow-sm);
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  padding: max(14px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
   display: grid;
-  gap: 6px;
+  place-items: center;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(255, 193, 7, 0.14), transparent 42%),
+    radial-gradient(circle at 85% 18%, rgba(93, 224, 255, 0.14), transparent 46%),
+    radial-gradient(circle at 50% 100%, rgba(76, 175, 80, 0.12), transparent 52%),
+    linear-gradient(180deg, rgba(8, 12, 19, 0.95), rgba(12, 18, 27, 0.97));
+  backdrop-filter: blur(12px);
 }
 
 .startup-bootstrap-panel[hidden] {
   display: none !important;
+}
+
+.startup-bootstrap-card {
+  width: min(560px, calc(100vw - 24px));
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(255, 193, 7, 0.09), transparent 52%),
+    radial-gradient(circle at 0% 100%, rgba(0, 188, 212, 0.09), transparent 54%),
+    linear-gradient(165deg, rgba(18, 24, 35, 0.94), rgba(11, 16, 26, 0.96));
+  box-shadow: 0 24px 44px rgba(0, 0, 0, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  padding: 16px 16px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.startup-bootstrap-brand {
+  font-size: 1.35rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow: 0 4px 14px rgba(0, 188, 212, 0.2);
+}
+
+.startup-bootstrap-kicker {
+  margin-top: -2px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(183, 214, 240, 0.86);
 }
 
 .startup-bootstrap-panel.is-done {
@@ -76,7 +109,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #1f456f;
+  color: #dff4ff;
 }
 
 .startup-bootstrap-head strong {
@@ -87,31 +120,136 @@
 
 .startup-bootstrap-head span {
   font-size: 0.68rem;
-  color: #5e7998;
+  color: rgba(183, 214, 240, 0.88);
   font-weight: 700;
 }
 
 .startup-bootstrap-panel p {
   margin: 0;
-  color: #57718f;
-  font-size: 0.72rem;
-  line-height: 1.25;
+  color: rgba(206, 226, 243, 0.88);
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .startup-bootstrap-bar {
-  height: 7px;
+  height: 10px;
   border-radius: 999px;
   overflow: hidden;
-  background: #e7f0fb;
-  border: 1px solid #dbe9fb;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .startup-bootstrap-fill {
   display: block;
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #2ac3d6, #4caf50);
-  transition: width 180ms ease;
+  background: linear-gradient(90deg, #2ac3d6, #5de0ff 45%, #4caf50);
+  box-shadow: 0 0 18px rgba(93, 224, 255, 0.28);
+  transition: width 160ms ease;
+}
+
+.startup-bootstrap-subhint {
+  margin-top: 1px;
+  font-size: 0.68rem !important;
+  color: rgba(173, 200, 226, 0.86) !important;
+}
+
+.startup-bootstrap-detail {
+  font-size: 0.72rem !important;
+  color: rgba(226, 239, 253, 0.9) !important;
+  min-height: 1.05rem;
+}
+
+.startup-bootstrap-steps {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: min(38vh, 180px);
+  overflow: auto;
+}
+
+.startup-bootstrap-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 8px;
+  align-items: center;
+  padding: 5px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.startup-bootstrap-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(224, 240, 255, 0.92);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.startup-bootstrap-step-label {
+  font-size: 0.72rem;
+  color: rgba(225, 238, 252, 0.92);
+}
+
+.startup-bootstrap-step-detail {
+  grid-column: 2;
+  font-size: 0.63rem;
+  color: rgba(181, 207, 231, 0.84);
+}
+
+.startup-bootstrap-step.is-active {
+  border-color: rgba(93, 224, 255, 0.25);
+  background: rgba(93, 224, 255, 0.06);
+}
+
+.startup-bootstrap-step.is-active .startup-bootstrap-step-badge {
+  color: #06131b;
+  background: linear-gradient(90deg, #2ac3d6, #5de0ff);
+}
+
+.startup-bootstrap-step.is-done .startup-bootstrap-step-badge {
+  color: #03170a;
+  background: linear-gradient(90deg, #73d978, #4caf50);
+}
+
+.startup-bootstrap-step.is-done .startup-bootstrap-step-label {
+  color: rgba(211, 238, 214, 0.94);
+}
+
+.startup-bootstrap-step.is-error {
+  border-color: rgba(255, 120, 120, 0.22);
+  background: rgba(255, 99, 99, 0.05);
+}
+
+.startup-bootstrap-step.is-error .startup-bootstrap-step-badge {
+  color: #210505;
+  background: linear-gradient(90deg, #ff8f8f, #ff6b6b);
+}
+
+body.startup-preflight-active #join .panel > *:not(#startupBootstrapPanel) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body.startup-preflight-active #join .panel {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+body.startup-preflight-active #installPrompt,
+body.startup-preflight-active #installPromptReopen {
+  display: none !important;
 }
 
 .input-group {

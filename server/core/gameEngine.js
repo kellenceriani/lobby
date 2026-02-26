@@ -49,11 +49,39 @@ const { evaluateRound4FromGame } = require('../services/round4Service');
 const { warmCharacterEvaluationCaches, getEvaluationEngineMode } = require('../services/entryEvaluationService');
 const { loadRoomsSnapshot, queueRoomsSnapshot } = require('../storage/statePersistence');
 const {
+  buildRoundStartVoiceCues,
+  buildScenarioVoiceCues,
+  buildTwistVoiceCues,
+  buildRound4StartVoiceCues,
+  buildGameEndedVoiceCues
+} = require('../services/voiceCueFactory');
+const { prewarmAdaptiveNarratorVoiceCues } = require('../services/adaptiveTtsService');
+const {
   resolveContentPack,
   getPublicPackMeta,
   recordPackMatchStart,
   recordPackMatchCompletion
 } = require('../content/packRegistry');
+
+const GAME_NARRATOR_VOICE_IDS = new Set(['af_heart', 'af_bella', 'am_michael', 'bm_george']);
+
+async function emitWithVoiceCuePrewarm(io, roomCode, eventName, payload, { timeoutMs = 1600 } = {}) {
+  const voiceCues = Array.isArray(payload && payload.voiceCues) ? payload.voiceCues : [];
+  if (voiceCues.length) {
+    const room = rooms[roomCode];
+    const narratorVoiceId = room && room.voiceConfig && GAME_NARRATOR_VOICE_IDS.has(String(room.voiceConfig.narratorVoiceId || ''))
+      ? String(room.voiceConfig.narratorVoiceId)
+      : 'bm_george';
+    try {
+      await prewarmAdaptiveNarratorVoiceCues({
+        cues: voiceCues,
+        narratorVoiceId,
+        timeoutMs
+      });
+    } catch (_error) {}
+  }
+  io.to(roomCode).emit(eventName, payload);
+}
 
 function normalizeWordCandidate(value) {
   if (typeof value !== 'string') return null;
@@ -1566,6 +1594,11 @@ function createRoom(roomCode) {
     gameState: null,
     isGameActive: false,
     host: null,
+    voiceConfig: {
+      narratorVoiceId: 'bm_george',
+      updatedBy: '',
+      updatedAt: 0
+    },
     settings: {
       difficulty: 'normal',
       scenarioTheme: 'all',
@@ -1607,6 +1640,7 @@ function createGameInstance(roomCode, players, settings) {
       isBot: false,
       team: [],
       teamAutoFilled: [],
+      teamEditLocks: [],
       finalTeam: [],
       finalTeamDraftMeta: [],
       votes: 0,
@@ -1798,7 +1832,7 @@ function startGame(io, roomCode) {
   setTimeout(() => startRound(io, roomCode), 3000);
 }
 
-function startRound(io, roomCode) {
+async function startRound(io, roomCode) {
   if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   if (!game || game.currentRound >= game.totalRounds) {
@@ -1809,16 +1843,21 @@ function startRound(io, roomCode) {
   game.activePhase = 'PRE_ROUND';
   game.phaseStartTime = Date.now();
 
-  io.to(roomCode).emit('roundStart', {
+  const roundStartPayload = {
     roundNumber: game.currentRound + 1,
-    totalRounds: game.totalRounds
-  });
+    totalRounds: game.totalRounds,
+    voiceCues: buildRoundStartVoiceCues({
+      roundNumber: game.currentRound + 1,
+      isFinalRound: false
+    })
+  };
+  await emitWithVoiceCuePrewarm(io, roomCode, 'roundStart', roundStartPayload, { timeoutMs: 1400 });
 
   markRoomsDirty();
   setTimeout(() => revealScenario(io, roomCode), 3000);
 }
 
-function revealScenario(io, roomCode) {
+async function revealScenario(io, roomCode) {
   const room = rooms[roomCode];
   if (!room || !room.gameState) return;
   const game = room.gameState;
@@ -1830,6 +1869,7 @@ function revealScenario(io, roomCode) {
   game.players.forEach(p => {
     p.team = [];
     p.teamAutoFilled = [];
+    p.teamEditLocks = [];
     p.draftLocked = false;
     p.draftLockTime = null;
     p.voteLocked = false;
@@ -1843,7 +1883,7 @@ function revealScenario(io, roomCode) {
   const draftSeconds = getDraftSeconds(game.settings);
 
   const wordSourceMeta = getActiveWordSourceMeta();
-  io.to(roomCode).emit('scenarioRevealed', {
+  const scenarioPayload = {
     scenario: scenario.scenario,
     draftTimeRemaining: draftSeconds,
     maxCharactersPerPlayer: 2,
@@ -1852,14 +1892,19 @@ function revealScenario(io, roomCode) {
     wordApiSource: wordSourceMeta.label,
     wordApiSourceKey: wordSourceMeta.key,
     wordApiSourceIndex: wordSourceMeta.index,
-    wordApiSourceTotal: wordSourceMeta.total
-  });
+    wordApiSourceTotal: wordSourceMeta.total,
+    voiceCues: buildScenarioVoiceCues({
+      roundNumber: game.currentRound + 1,
+      scenario: scenario.scenario
+    })
+  };
+  await emitWithVoiceCuePrewarm(io, roomCode, 'scenarioRevealed', scenarioPayload, { timeoutMs: 1800 });
 
   game.draftTimeout = setTimeout(() => revealPlotTwist(io, roomCode), draftSeconds * 1000);
   markRoomsDirty();
 }
 
-function revealPlotTwist(io, roomCode) {
+async function revealPlotTwist(io, roomCode) {
   if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   const scenario = game.scenarios[game.currentRound];
@@ -1889,19 +1934,39 @@ function revealPlotTwist(io, roomCode) {
       }
       p.team.push(randomWord);
       p.teamAutoFilled.push(true);
+      p.teamEditLocks.push(true);
       game.allCharactersDrafted.push(randomWord);
+      if (!Array.isArray(game.draftEntries[p.name])) {
+        game.draftEntries[p.name] = [];
+      }
+      game.draftEntries[p.name].push({
+        character: randomWord,
+        originalScenario: game.currentScenario || '',
+        originalTwist: game.currentTwist || '',
+        draftedRound: (game.currentRound || 0) + 1,
+        pickNumberInRound: p.team.length,
+        globalDraftOrder: game.allCharactersDrafted.length,
+        draftedAtMs: Math.max(0, Date.now() - (game.roundStartTime || Date.now())),
+        autoFilled: true,
+        editLocked: true
+      });
     }
   });
 
-  io.to(roomCode).emit('plotTwistRevealed', {
+  const twistPayload = {
     twist: game.currentTwist,
     scenario: game.currentScenario,
     packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     currentTeams: game.players.map(p => ({
       name: p.name,
       team: p.team
-    }))
-  });
+    })),
+    voiceCues: buildTwistVoiceCues({
+      roundNumber: game.currentRound + 1,
+      twist: game.currentTwist
+    })
+  };
+  await emitWithVoiceCuePrewarm(io, roomCode, 'plotTwistRevealed', twistPayload, { timeoutMs: 1900 });
 
   const preseedHeadStartMs = Math.max(0, Math.min(3000, Number(process.env.EVAL_PRESEED_HEADSTART_MS) || 900));
   const preseedPromise = preseedRoundContextCache(roomCode, game);
@@ -1968,7 +2033,7 @@ function startVoting(io, roomCode) {
   markRoomsDirty();
 }
 
-function startFinalRound(io, roomCode) {
+async function startFinalRound(io, roomCode) {
   console.log(`🏁 Starting Round 4 for room ${roomCode}`);
   if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
@@ -1994,11 +2059,18 @@ function startFinalRound(io, roomCode) {
 
   startRound4Precompute(roomCode, game);
 
-  io.to(roomCode).emit('roundStart', {
+  const round4PrePayload = {
     roundNumber: 4,
     totalRounds: 4,
-    isFinalRound: true
-  });
+    isFinalRound: true,
+    voiceCues: buildRoundStartVoiceCues({
+      roundNumber: 4,
+      isFinalRound: true,
+      scenario: game.currentScenario,
+      twist: game.currentTwist
+    })
+  };
+  await emitWithVoiceCuePrewarm(io, roomCode, 'roundStart', round4PrePayload, { timeoutMs: 1600 });
 
   // Create finalTeams object with all players' rosters
   const finalTeams = {};
@@ -2006,21 +2078,27 @@ function startFinalRound(io, roomCode) {
     finalTeams[p.name] = p.finalTeam;
   });
 
-  // Emit Round 4 start event with all data needed for AI evaluation
-  setTimeout(() => {
+  // Emit Round 4 start quickly so the Round 4 loading screen appears fast; evaluation/precompute continues in parallel.
+  const round4StartLeadDelayMs = 850;
+  setTimeout(async () => {
     console.log(`📡 Emitting round4Start event to room ${roomCode}`);
     console.log(
       `Round 4 Start Payload teams=${Object.keys(finalTeams).length}` +
       ` chars=${Object.values(finalTeams).reduce((sum, roster) => sum + (Array.isArray(roster) ? roster.length : 0), 0)}` +
       ` scenario="${game.currentScenario}" twist="${game.currentTwist}"`
     );
-    io.to(roomCode).emit('round4Start', {
+    const round4StartPayload = {
       scenario: game.currentScenario,
       twist: game.currentTwist,
       finalTeams,
-      packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId)
-    });
-  }, 3000);
+      packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
+      voiceCues: buildRound4StartVoiceCues({
+        scenario: game.currentScenario,
+        twist: game.currentTwist
+      })
+    };
+    await emitWithVoiceCuePrewarm(io, roomCode, 'round4Start', round4StartPayload, { timeoutMs: 2200 });
+  }, round4StartLeadDelayMs);
   markRoomsDirty();
 }
 
@@ -2244,7 +2322,8 @@ async function tallyResults(io, roomCode) {
         };
         return acc;
       }, {})
-      : {}
+      : {},
+    voiceCues: []
   });
 
   if (roundIndex === ((Number(game.totalRounds) || 3) - 1)) {
@@ -2263,7 +2342,7 @@ async function tallyResults(io, roomCode) {
 }
 
 
-function endGame(io, roomCode) {
+async function endGame(io, roomCode) {
   const room = rooms[roomCode];
   if (!room || !room.gameState) return;
   const game = room.gameState;
@@ -2505,7 +2584,7 @@ function endGame(io, roomCode) {
 
   recordPackMatchCompletion(packMeta && packMeta.id ? packMeta.id : 'default');
 
-  io.to(roomCode).emit('gameEnded', {
+  const gameEndedPayload = {
     finalLeaderboard,
     totalRounds: game.totalRounds,
     winner,
@@ -2514,8 +2593,10 @@ function endGame(io, roomCode) {
     winnerTeamCharacters,
     eliteFinalSix,
     eliteFinalSixMeta,
-    winnerTeamStats
-  });
+    winnerTeamStats,
+    voiceCues: buildGameEndedVoiceCues({ winner })
+  };
+  await emitWithVoiceCuePrewarm(io, roomCode, 'gameEnded', gameEndedPayload, { timeoutMs: 2200 });
 
   room.isGameActive = false;
   markRoomsDirty();

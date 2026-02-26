@@ -32,13 +32,39 @@ const {
   coercePackId,
   recordPackRematch
 } = require('../content/packRegistry');
+const {
+  buildRound4EvaluatedVoiceCues,
+  buildFinalRoundResultsVoiceCues
+} = require('../services/voiceCueFactory');
+const { prewarmAdaptiveNarratorVoiceCues } = require('../services/adaptiveTtsService');
 
 const allowRequest = createRateLimiter();
 const CHAT_MAX_MESSAGES = 10;
 const CHAT_PRUNE_BATCH = 1;
+const NARRATOR_VOICE_IDS = new Set(['af_heart', 'af_bella', 'am_michael', 'bm_george']);
 const EVAL_WARMUP_ON_DRAFT = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.EVAL_WARMUP_ON_DRAFT || 'true').toLowerCase()
 );
+const draftWarmupDedupe = new Map();
+const DRAFT_WARMUP_DEDUPE_WINDOW_MS = Math.max(3000, Number(process.env.DRAFT_WARMUP_DEDUPE_MS) || 45000);
+
+async function emitRoomEventWithVoiceCuePrewarm(io, roomCode, eventName, payload, { timeoutMs = 1800 } = {}) {
+  const voiceCues = Array.isArray(payload && payload.voiceCues) ? payload.voiceCues : [];
+  if (voiceCues.length) {
+    const roomData = rooms[roomCode];
+    const narratorVoiceId = roomData && roomData.voiceConfig && NARRATOR_VOICE_IDS.has(String(roomData.voiceConfig.narratorVoiceId || ''))
+      ? String(roomData.voiceConfig.narratorVoiceId)
+      : 'bm_george';
+    try {
+      await prewarmAdaptiveNarratorVoiceCues({
+        cues: voiceCues,
+        narratorVoiceId,
+        timeoutMs
+      });
+    } catch (_error) {}
+  }
+  io.to(roomCode).emit(eventName, payload);
+}
 
 function shouldRunDraftWarmup() {
   if (!EVAL_WARMUP_ON_DRAFT) return false;
@@ -57,6 +83,26 @@ function scheduleDraftWarmup(game, character) {
   if (!game || !character) return;
   const scenario = game.currentScenario || '';
   const twist = getDraftWarmupTwist(game);
+  const key = [
+    String(game.id || game.roomCode || ''),
+    String(game.currentRound || 0),
+    String(scenario || '').trim().toLowerCase(),
+    String(twist || '').trim().toLowerCase(),
+    String(character || '').trim().toLowerCase()
+  ].join('|');
+  const now = Date.now();
+  const lastAt = Number(draftWarmupDedupe.get(key) || 0);
+  if (lastAt > 0 && (now - lastAt) < DRAFT_WARMUP_DEDUPE_WINDOW_MS) {
+    return;
+  }
+  draftWarmupDedupe.set(key, now);
+  if (draftWarmupDedupe.size > 600) {
+    const cutoff = now - (DRAFT_WARMUP_DEDUPE_WINDOW_MS * 2);
+    for (const [k, ts] of draftWarmupDedupe.entries()) {
+      if (Number(ts) < cutoff) draftWarmupDedupe.delete(k);
+      if (draftWarmupDedupe.size <= 400) break;
+    }
+  }
   warmCharacterEvaluationCaches(character, scenario, twist, {
     evaluationMode: 'round',
     fetchContext: {
@@ -72,6 +118,135 @@ function scheduleDraftWarmup(game, character) {
       }
     })
     .catch(() => {});
+}
+
+function getFilledDraftSlotCount(player) {
+  return Array.isArray(player && player.team)
+    ? player.team.filter((entry) => String(entry || '').trim()).length
+    : 0;
+}
+
+function countDraftEntriesForPlayer(game, playerName) {
+  const rows = Array.isArray(game && game.draftEntries && game.draftEntries[playerName])
+    ? game.draftEntries[playerName]
+    : [];
+  return rows.filter((entry) => entry && String(entry.character || '').trim()).length;
+}
+
+function ensurePlayerDraftSlotArrays(game, player, playerName) {
+  if (!player || typeof player !== 'object') return;
+  if (!Array.isArray(player.team)) player.team = [];
+  if (!Array.isArray(player.teamAutoFilled)) player.teamAutoFilled = [];
+  if (!Array.isArray(player.teamEditLocks)) player.teamEditLocks = [];
+  if (!game.draftEntries || typeof game.draftEntries !== 'object') game.draftEntries = {};
+  if (!Array.isArray(game.draftEntries[playerName])) game.draftEntries[playerName] = [];
+}
+
+function replaceCharInAllCharactersDrafted(game, previousCharacter, nextCharacter) {
+  if (!game || !Array.isArray(game.allCharactersDrafted)) return;
+  const prev = String(previousCharacter || '').trim().toLowerCase();
+  const next = String(nextCharacter || '').trim();
+  if (!prev) {
+    if (next) game.allCharactersDrafted.push(next);
+    return;
+  }
+  const index = game.allCharactersDrafted.findIndex((entry) => String(entry || '').trim().toLowerCase() === prev);
+  if (index < 0) {
+    if (next) game.allCharactersDrafted.push(next);
+    return;
+  }
+  if (!next) {
+    game.allCharactersDrafted.splice(index, 1);
+    return;
+  }
+  game.allCharactersDrafted[index] = next;
+}
+
+function buildDraftSlotPayloadsForPlayer(game, player) {
+  const name = player && player.name ? String(player.name) : '';
+  const draftEntries = Array.isArray(game && game.draftEntries && game.draftEntries[name]) ? game.draftEntries[name] : [];
+  const team = Array.isArray(player && player.team) ? player.team : [];
+  const teamAutoFilled = Array.isArray(player && player.teamAutoFilled) ? player.teamAutoFilled : [];
+  const teamEditLocks = Array.isArray(player && player.teamEditLocks) ? player.teamEditLocks : [];
+  const slots = [];
+  for (let index = 0; index < 2; index += 1) {
+    const character = String(team[index] || '').trim();
+    const meta = draftEntries[index] && typeof draftEntries[index] === 'object' ? draftEntries[index] : null;
+    const autoFilled = teamAutoFilled[index] === true;
+    const editLocked = teamEditLocks[index] === true || autoFilled === true || (meta && meta.editLocked === true);
+    slots.push({
+      slotIndex: index,
+      character,
+      filled: Boolean(character),
+      autoFilled,
+      editable: Boolean(character) && !editLocked,
+      editLocked,
+      lockReason: editLocked ? (autoFilled ? 'auto_fill' : (meta && meta.lockReason ? String(meta.lockReason) : 'locked')) : '',
+      editedCount: Math.max(0, Number(meta && meta.editCount) || 0),
+      updatedAtMs: Number(meta && meta.updatedAtMs) || Number(meta && meta.draftedAtWallMs) || 0
+    });
+  }
+  return slots;
+}
+
+function buildDraftUpdatePayload(game) {
+  const allDraftsList = [];
+  const playerDraftSlots = {};
+  (Array.isArray(game && game.players) ? game.players : []).forEach((p) => {
+    if (!p || !p.name) return;
+    const slots = buildDraftSlotPayloadsForPlayer(game, p);
+    playerDraftSlots[p.name] = slots;
+    slots.forEach((slot) => {
+      if (!slot || !slot.filled) return;
+      allDraftsList.push({
+        name: p.name,
+        character: slot.character,
+        autoFilled: slot.autoFilled === true,
+        slotIndex: Number(slot.slotIndex) || 0,
+        editLocked: slot.editLocked === true,
+        updatedAtMs: Number(slot.updatedAtMs) || 0,
+        editedCount: Number(slot.editedCount) || 0
+      });
+    });
+  });
+
+  allDraftsList.sort((a, b) => {
+    const timeDelta = (Number(b.updatedAtMs) || 0) - (Number(a.updatedAtMs) || 0);
+    if (timeDelta !== 0) return timeDelta;
+    const slotDelta = (Number(a.slotIndex) || 0) - (Number(b.slotIndex) || 0);
+    if (slotDelta !== 0) return slotDelta;
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+
+  const playerEntryCounts = (Array.isArray(game && game.players) ? game.players : []).reduce((acc, p) => {
+    if (!p || !p.name) return acc;
+    acc[p.name] = countDraftEntriesForPlayer(game, p.name);
+    return acc;
+  }, {});
+  const playerTeamSizes = (Array.isArray(game && game.players) ? game.players : []).reduce((acc, p) => {
+    if (!p || !p.name) return acc;
+    acc[p.name] = getFilledDraftSlotCount(p);
+    return acc;
+  }, {});
+
+  return {
+    allDrafts: allDraftsList,
+    playerEntryCounts,
+    playerTeamSizes,
+    playerDraftSlots
+  };
+}
+
+function emitDraftUpdate(io, room, game) {
+  io.to(room).emit('draftUpdate', buildDraftUpdatePayload(game));
+}
+
+function getNextOpenDraftSlotIndex(player) {
+  if (!player || !Array.isArray(player.team)) return 0;
+  for (let i = 0; i < 2; i += 1) {
+    if (!String(player.team[i] || '').trim()) return i;
+  }
+  return -1;
 }
 
 function appendChatMessage(roomData, message) {
@@ -95,6 +270,17 @@ function getRoomData(roomCode) {
 }
 
 function emitRoomData(io, roomCode, roomData) {
+  if (!roomData.voiceConfig || typeof roomData.voiceConfig !== 'object') {
+    roomData.voiceConfig = {
+      narratorVoiceId: 'bm_george',
+      updatedBy: '',
+      updatedAt: 0
+    };
+  }
+  const narratorVoiceId = NARRATOR_VOICE_IDS.has(String(roomData.voiceConfig.narratorVoiceId || ''))
+    ? String(roomData.voiceConfig.narratorVoiceId)
+    : 'bm_george';
+  roomData.voiceConfig.narratorVoiceId = narratorVoiceId;
   const safePackId = coercePackId(roomData && roomData.settings && roomData.settings.contentPackId);
   if (roomData && roomData.settings) {
     roomData.settings.contentPackId = safePackId;
@@ -105,6 +291,11 @@ function emitRoomData(io, roomCode, roomData) {
     host: roomData.host,
     settings: roomData.settings,
     messages: roomData.messages,
+    voiceConfig: {
+      narratorVoiceId,
+      updatedBy: roomData.voiceConfig.updatedBy ? String(roomData.voiceConfig.updatedBy) : '',
+      updatedAt: Number(roomData.voiceConfig.updatedAt) || 0
+    },
     packCatalog: getPackCatalog(),
     selectedPackMeta: getPublicPackMeta(safePackId)
   });
@@ -204,12 +395,12 @@ async function buildDraftWaitPreviewForPlayer(game, playerName) {
   };
 }
 
-function emitFinalRoundResults(io, room, game) {
+async function emitFinalRoundResults(io, room, game) {
   if (!game || !game.round4Results) return false;
   if (game.finalResultsEmitted) return true;
 
   game.finalResultsEmitted = true;
-  io.to(room).emit('finalRoundResults', {
+  const finalRoundResultsPayload = {
     winner: game.round4Results.winner || null,
     isTie: game.round4Results.isTie === true,
     tiedPlayers: Array.isArray(game.round4Results.tiedPlayers) ? game.round4Results.tiedPlayers : [],
@@ -217,8 +408,12 @@ function emitFinalRoundResults(io, room, game) {
     voteCount: {},
     leaderboard: game.round4Results.leaderboardData,
     pointBreakdown: game.round4Results.pointBreakdown,
-    packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId)
-  });
+    packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
+    voiceCues: buildFinalRoundResultsVoiceCues({
+      isTie: game.round4Results.isTie === true
+    })
+  };
+  await emitRoomEventWithVoiceCuePrewarm(io, room, 'finalRoundResults', finalRoundResultsPayload, { timeoutMs: 2200 });
 
   setTimeout(() => endGame(io, room), 3000);
   return true;
@@ -339,6 +534,40 @@ function registerSocketHandlers(io) {
       markRoomsDirty();
     });
 
+    const handleQueueNarratorVoice = (payload) => {
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
+
+      const { room, name, roomData } = joined;
+      if (!roomData || roomData.host !== name) return;
+
+      const requestedId = String(payload && payload.voiceId || '').trim();
+      if (!NARRATOR_VOICE_IDS.has(requestedId)) return;
+
+      const previousId = roomData.voiceConfig && roomData.voiceConfig.narratorVoiceId
+        ? String(roomData.voiceConfig.narratorVoiceId)
+        : 'bm_george';
+      const now = Date.now();
+      roomData.voiceConfig = {
+        narratorVoiceId: requestedId,
+        updatedBy: name,
+        updatedAt: now
+      };
+
+      const eventPayload = {
+        narratorVoiceId: requestedId,
+        previousNarratorVoiceId: previousId,
+        queuedBy: name,
+        queuedAt: now
+      };
+      io.to(room).emit('narratorVoiceQueued', eventPayload);
+      io.to(room).emit('kokoroNarratorQueued', eventPayload); // legacy alias
+      markRoomsDirty();
+    };
+
+    socket.on('queueNarratorVoice', handleQueueNarratorVoice);
+    socket.on('queueKokoroNarratorVoice', handleQueueNarratorVoice); // legacy alias
+
     socket.on('toggleReady', () => {
       const joined = getJoinedRoom(socket);
       if (!joined) return;
@@ -457,14 +686,15 @@ function registerSocketHandlers(io) {
 
       const player = game.players.find(p => p.name === name);
       if (!player) return;
+      ensurePlayerDraftSlotArrays(game, player, name);
 
       if (player.draftLocked) {
         socket.emit('draftError', 'You have already locked in your team!');
         return;
       }
 
-      const existingEntries = Array.isArray(game.draftEntries[name]) ? game.draftEntries[name] : [];
-      if (existingEntries.length >= 2) {
+      const nextSlotIndex = getNextOpenDraftSlotIndex(player);
+      if (nextSlotIndex < 0 || countDraftEntriesForPlayer(game, name) >= 2) {
         socket.emit('draftError', 'You can draft max 2 characters!');
         return;
       }
@@ -473,9 +703,9 @@ function registerSocketHandlers(io) {
       if (!character) return;
 
       const charNormalized = character.toLowerCase();
-      const isDuplicateOwn = player.team.some(c => c.toLowerCase() === charNormalized);
+      const isDuplicateOwn = player.team.some(c => String(c || '').toLowerCase() === charNormalized);
       const isDuplicateOther = game.players.some(p =>
-        p.name !== name && p.team.some(c => c.toLowerCase() === charNormalized)
+        p.name !== name && Array.isArray(p.team) && p.team.some(c => String(c || '').toLowerCase() === charNormalized)
       );
       const isDuplicateAcrossRounds = game.allCharactersDrafted.some(c => c.toLowerCase() === charNormalized);
 
@@ -492,18 +722,15 @@ function registerSocketHandlers(io) {
         autoFilled = true;
       }
 
-      player.team.push(finalCharacter);
-      player.teamAutoFilled.push(autoFilled);
-      game.allCharactersDrafted.push(finalCharacter);
+      player.team[nextSlotIndex] = finalCharacter;
+      player.teamAutoFilled[nextSlotIndex] = autoFilled;
+      player.teamEditLocks[nextSlotIndex] = autoFilled === true;
+      replaceCharInAllCharactersDrafted(game, '', finalCharacter);
 
-      const pickNumberInRound = player.team.length;
+      const pickNumberInRound = nextSlotIndex + 1;
       const globalDraftOrder = game.allCharactersDrafted.length;
       const draftedAtMs = Math.max(0, Date.now() - (game.roundStartTime || Date.now()));
-
-      if (!game.draftEntries[name]) {
-        game.draftEntries[name] = [];
-      }
-      game.draftEntries[name].push({
+      game.draftEntries[name][nextSlotIndex] = {
         character: finalCharacter,
         originalScenario: game.currentScenario || '',
         originalTwist: game.currentTwist || '',
@@ -511,44 +738,139 @@ function registerSocketHandlers(io) {
         pickNumberInRound,
         globalDraftOrder,
         draftedAtMs,
-        autoFilled
-      });
+        draftedAtWallMs: Date.now(),
+        updatedAtMs: Date.now(),
+        autoFilled,
+        editLocked: autoFilled === true,
+        editCount: 0
+      };
 
-      const playerEntryCount = game.draftEntries[name].length;
-
-      const allDraftsList = [];
-      game.players.forEach(p => {
-        p.team.forEach((char, idx) => {
-          allDraftsList.push({
-            name: p.name,
-            character: char,
-            autoFilled: p.teamAutoFilled[idx] === true
-          });
-        });
-      });
+      const playerEntryCount = countDraftEntriesForPlayer(game, name);
 
       socket.emit('draftSuccess', {
         character: finalCharacter,
         teamSize: playerEntryCount,
-        autoFilled
+        autoFilled,
+        slotIndex: nextSlotIndex,
+        edited: false
       });
 
-      io.to(room).emit('draftUpdate', {
-        player: name,
-        character: finalCharacter,
-        allDrafts: allDraftsList,
-        playerEntryCounts: game.players.reduce((acc, p) => {
-          acc[p.name] = Array.isArray(game.draftEntries[p.name]) ? game.draftEntries[p.name].length : 0;
-          return acc;
-        }, {}),
-        playerTeamSizes: game.players.reduce((acc, p) => {
-          acc[p.name] = p.team.length;
-          return acc;
-        }, {})
-      });
+      emitDraftUpdate(io, room, game);
 
       scheduleDraftWarmup(game, finalCharacter);
 
+      markRoomsDirty();
+    });
+
+    socket.on('editDraftCharacter', (payload) => {
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
+
+      if (!allowRequest(`${socket.id}:editDraftCharacter`, 10000, 24)) {
+        socket.emit('draftError', 'Too many draft edits.');
+        return;
+      }
+
+      const { room, name, roomData } = joined;
+      const game = roomData.gameState;
+      if (!game || game.activePhase !== 'DRAFT') return;
+
+      const player = game.players.find(p => p.name === name);
+      if (!player) return;
+      ensurePlayerDraftSlotArrays(game, player, name);
+
+      if (player.draftLocked) {
+        socket.emit('draftError', 'You have already locked in your team!');
+        return;
+      }
+
+      const slotIndex = Math.max(0, Math.min(1, Number(payload && payload.slotIndex) || 0));
+      const existingCharacter = String(player.team[slotIndex] || '').trim();
+      if (!existingCharacter) {
+        socket.emit('draftError', 'That draft slot is empty.');
+        return;
+      }
+
+      if (player.teamEditLocks[slotIndex] === true) {
+        socket.emit('draftError', 'That entry was auto-filled and is locked for fairness.');
+        return;
+      }
+
+      const character = sanitizeDraftCharacter(payload && payload.character);
+      if (!character) return;
+
+      const nextNormalized = character.toLowerCase();
+      const currentNormalized = existingCharacter.toLowerCase();
+      if (nextNormalized === currentNormalized) {
+        socket.emit('draftSuccess', {
+          character: existingCharacter,
+          teamSize: countDraftEntriesForPlayer(game, name),
+          autoFilled: player.teamAutoFilled[slotIndex] === true,
+          slotIndex,
+          edited: true,
+          unchanged: true
+        });
+        return;
+      }
+
+      const isDuplicateOwn = player.team.some((c, idx) => idx !== slotIndex && String(c || '').toLowerCase() === nextNormalized);
+      const isDuplicateOther = game.players.some(p =>
+        p.name !== name && Array.isArray(p.team) && p.team.some(c => String(c || '').toLowerCase() === nextNormalized)
+      );
+      const isDuplicateAcrossRounds = game.allCharactersDrafted.some(c => String(c || '').toLowerCase() === nextNormalized);
+
+      let finalCharacter = character;
+      let autoFilled = false;
+      if (isDuplicateOwn || isDuplicateOther || isDuplicateAcrossRounds) {
+        let randomWord = getRandomWord();
+        while (
+          game.players.some(p => Array.isArray(p.team) && p.team.some(c => String(c || '').toLowerCase() === randomWord.toLowerCase()))
+          || game.allCharactersDrafted.some(c => String(c || '').toLowerCase() === randomWord.toLowerCase())
+        ) {
+          randomWord = getRandomWord();
+        }
+        finalCharacter = randomWord;
+        autoFilled = true;
+      }
+
+      replaceCharInAllCharactersDrafted(game, existingCharacter, finalCharacter);
+      player.team[slotIndex] = finalCharacter;
+      player.teamAutoFilled[slotIndex] = autoFilled === true;
+      player.teamEditLocks[slotIndex] = autoFilled === true;
+
+      const draftedAtMs = Math.max(0, Date.now() - (game.roundStartTime || Date.now()));
+      const existingMeta = game.draftEntries[name][slotIndex] && typeof game.draftEntries[name][slotIndex] === 'object'
+        ? game.draftEntries[name][slotIndex]
+        : {};
+      game.draftEntries[name][slotIndex] = {
+        ...existingMeta,
+        character: finalCharacter,
+        originalScenario: existingMeta.originalScenario || game.currentScenario || '',
+        originalTwist: existingMeta.originalTwist || game.currentTwist || '',
+        draftedRound: existingMeta.draftedRound || ((game.currentRound || 0) + 1),
+        pickNumberInRound: slotIndex + 1,
+        globalDraftOrder: existingMeta.globalDraftOrder || (game.allCharactersDrafted.length || (slotIndex + 1)),
+        draftedAtMs: Number.isFinite(Number(existingMeta.draftedAtMs)) ? Number(existingMeta.draftedAtMs) : draftedAtMs,
+        draftedAtWallMs: Number(existingMeta.draftedAtWallMs) || Date.now(),
+        updatedAtMs: Date.now(),
+        autoFilled: autoFilled === true,
+        editLocked: autoFilled === true,
+        editCount: Math.max(0, Number(existingMeta.editCount) || 0) + 1,
+        editedAtMs: Date.now(),
+        editedFromCharacter: existingCharacter
+      };
+
+      socket.emit('draftSuccess', {
+        character: finalCharacter,
+        teamSize: countDraftEntriesForPlayer(game, name),
+        autoFilled,
+        slotIndex,
+        edited: true,
+        previousCharacter: existingCharacter
+      });
+
+      emitDraftUpdate(io, room, game);
+      scheduleDraftWarmup(game, finalCharacter);
       markRoomsDirty();
     });
 
@@ -563,7 +885,7 @@ function registerSocketHandlers(io) {
       const player = game.players.find(p => p.name === name);
       if (!player) return;
 
-      const playerEntryCount = Array.isArray(game.draftEntries[name]) ? game.draftEntries[name].length : 0;
+      const playerEntryCount = countDraftEntriesForPlayer(game, name);
 
       if (playerEntryCount < 2) {
         socket.emit('draftError', 'You must have 2 characters to lock in!');
@@ -816,7 +1138,11 @@ function registerSocketHandlers(io) {
           finalLeaderboard: evalLeaderboard,
           revealTimeline,
           isTie,
-          tiedPlayers: tiedTeams
+          tiedPlayers: tiedTeams,
+          voiceCues: buildRound4EvaluatedVoiceCues({
+            evaluationId,
+            isTie
+          })
         };
 
         game.round4Results = {
@@ -839,7 +1165,7 @@ function registerSocketHandlers(io) {
           ` teams=${totalTeams} entries=${totalEntries} tie=${isTie ? 'yes' : 'no'}` +
           ` in ${Math.max(0, Date.now() - evalStartedAt)}ms`
         );
-        io.to(room).emit('round4Evaluated', payload);
+        await emitRoomEventWithVoiceCuePrewarm(io, room, 'round4Evaluated', payload, { timeoutMs: 2200 });
       } catch (error) {
         console.error('❌ Round 4 evaluation error:', error);
         socket.emit('round4EvaluationError', { message: 'Failed to evaluate Round 4 teams.' });

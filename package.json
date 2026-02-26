@@ -8,7 +8,14 @@
     "packs:validate": "node server/content/validatePacks.js",
     "eval:viability": "node server/viabilityTestHarness.js",
     "bench:context": "node server/benchmarks/contextEngine/replayHarness.js",
-    "bench:random500": "node server/benchmarks/contextEngine/random500Harness.js"
+    "bench:random500": "node server/benchmarks/contextEngine/random500Harness.js",
+    "bench:context:identity-sources": "node server/benchmarks/contextEngine/identitySourceEnrichmentHarness.js",
+    "bench:tts:anchors": "node server/benchmarks/ttsEntryQuality/anchorAuditHarness.js",
+    "bench:tts:entry": "node server/benchmarks/ttsEntryQuality/entryVoiceQualityHarness.js",
+    "bench:tts:callouts": "node server/benchmarks/ttsEntryQuality/audioCalloutBatchHarness.js",
+    "bench:tts:sources": "node server/benchmarks/ttsEntryQuality/externalSourceReliabilityHarness.js",
+    "bench:tts:blurbs": "node server/benchmarks/ttsEntryQuality/audioCalloutBatchHarness.js",
+    "bench:tts:all": "node server/benchmarks/ttsEntryQuality/runAll.js"
   },
   "keywords": [],
   "author": "",

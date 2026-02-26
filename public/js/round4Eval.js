@@ -19,10 +19,13 @@ const round4State = {
   evalLookup: Object.create(null),
   revealTimer: null,
   revealStartTimer: null,
+  cinematicRenderTimer: null,
   revealConfig: null,
   pendingFinalResultsTimer: null,
   preloadPromise: null,
   preloadDone: false,
+  revealAnnouncerWarmPromise: null,
+  revealAnnouncerWarmDone: false,
   revealPrepared: false,
   revealPreparePromise: null,
   revealProfiles: Object.create(null),
@@ -33,6 +36,9 @@ const round4State = {
   loadingReadyToStart: false,
   loadingScenario: '',
   loadingTwist: '',
+  pendingLoadingReadyVoiceCue: null,
+  pendingLoadingReadyVoiceCueEvalId: null,
+  loadingReadyVoiceSpokenEvalId: null,
   animationPrimed: false,
   animationPrimePromise: null,
   revealPerfMode: null,
@@ -92,6 +98,30 @@ function playSharedHighestOVRCardBlurb(entries, options = {}) {
   }
 }
 
+function playSharedFinaleMvpVictoryCallout(entries, options = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.playFinaleMvpVictoryCallout !== 'function') return false;
+  try {
+    return bridge.playFinaleMvpVictoryCallout(entries, options);
+  } catch (error) {
+    return false;
+  }
+}
+
+function buildRound4LoadingReadyCue(evaluationId = '') {
+  const safeEvalId = String(evaluationId || 'n/a').trim() || 'n/a';
+  return {
+    id: `round4-loading-ready-${safeEvalId}`,
+    type: 'round4',
+    text: 'Round four results are in.',
+    subtitleText: 'Round 4 evaluation complete',
+    priority: 82,
+    intensity: 0.64,
+    allowLiveGenerate: true,
+    dedupeKey: `round4:loading-ready:${safeEvalId}`
+  };
+}
+
 function prefetchSharedCharacterCardBlurbs(entries, options = {}) {
   const bridge = getSharedAudioBridge();
   if (!bridge || typeof bridge.prefetchCharacterCardBlurbs !== 'function') return false;
@@ -100,6 +130,637 @@ function prefetchSharedCharacterCardBlurbs(entries, options = {}) {
   } catch (error) {
     return false;
   }
+}
+
+function getNarratorLeadLineFromVoiceCues(cues = []) {
+  const list = Array.isArray(cues) ? cues : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const cue = list[i] && typeof list[i] === 'object' ? list[i] : null;
+    if (!cue) continue;
+    const type = String(cue.type || '').toLowerCase();
+    if (type !== 'narration' && type !== 'round4') continue;
+    const line = String(cue.subtitleText || cue.text || '').replace(/\s+/g, ' ').trim();
+    if (line) return line;
+  }
+  return 'Final results are in.';
+}
+
+function enqueueSharedVoiceCues(cues, options = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.enqueueVoiceCues !== 'function') return false;
+  try {
+    return bridge.enqueueVoiceCues(cues, options);
+  } catch (error) {
+    return false;
+  }
+}
+
+function prefetchSharedVoiceCues(cues, options = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.prefetchVoiceCues !== 'function') return false;
+  try {
+    return bridge.prefetchVoiceCues(cues, options);
+  } catch (error) {
+    return false;
+  }
+}
+
+function warmSharedVoiceCuesNow(cues, options = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.warmVoiceCuesNow !== 'function') return null;
+  try {
+    return bridge.warmVoiceCuesNow(cues, options);
+  } catch (error) {
+    return null;
+  }
+}
+
+function waitForSharedVoiceCueCompletion(cue = null, {
+  timeoutMs = 1200,
+  minHoldMs = 0,
+  startTimeoutMs = null
+} = {}) {
+  const cueId = String(cue && cue.id || '').trim();
+  const cueDedupeKey = String(cue && cue.dedupeKey || '').trim();
+  const safeTimeoutMs = Math.max(120, Number(timeoutMs) || 1200);
+  const safeMinHoldMs = Math.max(0, Number(minHoldMs) || 0);
+  const safeStartTimeoutMs = Math.max(safeTimeoutMs, Number(startTimeoutMs) || (safeTimeoutMs + 400));
+  const bridge = getSharedAudioBridge();
+  let localVoiceEnabled = true;
+  try {
+    if (bridge && typeof bridge.getState === 'function') {
+      const state = bridge.getState() || {};
+      localVoiceEnabled = !(
+        state.muted === true
+        || state.voiceEnabled === false
+        || state.voiceUnlocked === false
+        || state.voiceSupported === false
+      );
+    }
+  } catch (error) {
+  }
+
+  const minHoldPromise = new Promise((resolve) => window.setTimeout(resolve, safeMinHoldMs));
+  if (!cueId && !cueDedupeKey) {
+    return minHoldPromise;
+  }
+  if (!localVoiceEnabled) {
+    return minHoldPromise;
+  }
+
+  const completionPromise = new Promise((resolve) => {
+    let settled = false;
+    let pollTimerId = null;
+    let startedAt = 0;
+    const createdAt = Date.now();
+    const matchesCue = (detail) => {
+      const eventId = String(detail && detail.id || '').trim();
+      const eventDedupeKey = String(detail && detail.dedupeKey || '').trim();
+      return Boolean((cueId && eventId === cueId) || (cueDedupeKey && eventDedupeKey === cueDedupeKey));
+    };
+    const clearTimers = () => {
+      if (pollTimerId) {
+        window.clearTimeout(pollTimerId);
+        pollTimerId = null;
+      }
+    };
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      try {
+        window.removeEventListener('lobby:voice-cue-start', onStart);
+      } catch (error) {
+      }
+      try {
+        window.removeEventListener('lobby:voice-cue-end', onEnd);
+      } catch (error) {
+      }
+      resolve();
+    };
+    const scheduleTimeoutCheck = () => {
+      if (settled) return;
+      clearTimers();
+      pollTimerId = window.setTimeout(() => {
+        if (settled) return;
+        const now = Date.now();
+        if (startedAt > 0) {
+          if ((now - startedAt) >= safeTimeoutMs) {
+            done();
+            return;
+          }
+        } else if ((now - createdAt) >= safeStartTimeoutMs) {
+          done();
+          return;
+        }
+        scheduleTimeoutCheck();
+      }, 90);
+    };
+    const onStart = (event) => {
+      const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
+      if (!matchesCue(detail)) return;
+      startedAt = Date.now();
+      scheduleTimeoutCheck();
+    };
+    const onEnd = (event) => {
+      const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
+      if (matchesCue(detail)) done();
+    };
+    try {
+      window.addEventListener('lobby:voice-cue-start', onStart);
+      window.addEventListener('lobby:voice-cue-end', onEnd);
+    } catch (error) {
+      resolve();
+      return;
+    }
+    scheduleTimeoutCheck();
+  });
+
+  return Promise.all([minHoldPromise, completionPromise]).then(() => true);
+}
+
+function waitForRevealLoadingNarrationToFinish({
+  timeoutMs = 9000,
+  minQuietMs = 220
+} = {}) {
+  const bridge = getSharedAudioBridge();
+  if (!bridge || typeof bridge.getVoiceState !== 'function') {
+    return Promise.resolve({ ok: true, skipped: true, reason: 'bridge-unavailable' });
+  }
+
+  const safeTimeoutMs = Math.max(1500, Number(timeoutMs) || 9000);
+  const safeMinQuietMs = Math.max(0, Number(minQuietMs) || 220);
+  const startAt = Date.now();
+  let quietSince = 0;
+  let hinted = false;
+
+  const readVoiceGateState = () => {
+    let voiceState = null;
+    let bridgeState = null;
+    try {
+      voiceState = bridge.getVoiceState ? (bridge.getVoiceState() || null) : null;
+    } catch (error) {
+      voiceState = null;
+    }
+    try {
+      bridgeState = bridge.getState ? (bridge.getState() || null) : null;
+    } catch (error) {
+      bridgeState = null;
+    }
+
+    const voiceUnavailable = Boolean(
+      !voiceState
+      || bridgeState?.muted === true
+      || bridgeState?.voiceEnabled === false
+      || bridgeState?.voiceUnlocked === false
+      || bridgeState?.voiceSupported === false
+    );
+
+    return {
+      voiceUnavailable,
+      speaking: Boolean(voiceState && voiceState.speaking),
+      queued: Math.max(0, Number(voiceState && voiceState.queued) || 0)
+    };
+  };
+
+  return new Promise((resolve) => {
+    const tick = () => {
+      const now = Date.now();
+      const state = readVoiceGateState();
+      if (state.voiceUnavailable) {
+        resolve({ ok: true, skipped: true, reason: 'voice-unavailable' });
+        return;
+      }
+
+      const active = state.speaking || state.queued > 0;
+      if (active) {
+        quietSince = 0;
+        if (!hinted) {
+          hinted = true;
+          const hint = document.getElementById('evalPreloadHint');
+          if (hint) hint.textContent = 'Waiting for unfinished assets and narration to stop. ;)';
+        }
+      } else if (!quietSince) {
+        quietSince = now;
+      }
+
+      if (quietSince && (now - quietSince) >= safeMinQuietMs) {
+        resolve({ ok: true, waitedMs: now - startAt });
+        return;
+      }
+
+      if ((now - startAt) >= safeTimeoutMs) {
+        resolve({ ok: false, timedOut: true, waitedMs: now - startAt });
+        return;
+      }
+      window.setTimeout(tick, 90);
+    };
+    tick();
+  });
+}
+
+function pickRevealAnnouncerVariant(options = [], seed = 0) {
+  const list = Array.isArray(options) ? options.filter(Boolean) : [];
+  if (!list.length) return '';
+  const idx = Math.abs(Number(seed) || 0) % list.length;
+  return String(list[idx] || '');
+}
+
+function getRevealAnnouncerBandKey(ovr = 0) {
+  const value = Math.max(0, Math.min(99, Number(ovr) || 0));
+  if (value <= 10) return 'appalled';
+  if (value <= 30) return 'unimpressed';
+  if (value <= 65) return 'dismissive';
+  if (value <= 75) return 'content';
+  if (value <= 83) return 'impressed';
+  if (value <= 91) return 'strong';
+  if (value <= 98) return 'elite';
+  return 'iconic';
+}
+
+function getRevealAnnouncerQueueContext(assignment = null) {
+  const queue = Array.isArray(round4State.queue) ? round4State.queue : [];
+  const key = assignment && assignment.key ? String(assignment.key) : '';
+  const queueIndex = key ? queue.findIndex((item) => String(item && item.key || '') === key) : -1;
+  const prior = queueIndex > 0 ? queue.slice(0, queueIndex) : [];
+  const lowBefore = prior.filter((item) => (Number(item && item.evalData && item.evalData.ovr) || 0) <= 30).length;
+  let lowStreakBefore = 0;
+  for (let i = prior.length - 1; i >= 0; i -= 1) {
+    const priorOvr = Number(prior[i] && prior[i].evalData && prior[i].evalData.ovr) || 0;
+    if (priorOvr > 30) break;
+    lowStreakBefore += 1;
+  }
+  const lowRatioBefore = prior.length ? (lowBefore / prior.length) : 0;
+  return {
+    queueIndex,
+    lowBefore,
+    lowStreakBefore,
+    lowRatioBefore,
+    lowFlood: lowBefore >= 4 || lowStreakBefore >= 2 || lowRatioBefore >= 0.42
+  };
+}
+
+const REVEAL_ANNOUNCER_BANKS = {
+  appalled: {
+    intensity: 0.94, rate: 1.19, pitch: 0.96, gain: 0.97,
+    openers: ['0!?!?', 'WHAT was that?!', 'Yikes!', 'Oh no.', 'Ha! no way!', 'Brutal.', 'Disaster.'],
+    cores: ['{ovr}?!', '{ovr}? no way.', '{ovr}. rough.', '{ovr}. that hurts.', '{ovr}? absolutely not.', '{ovr}. brutal.'],
+    numberlessCores: ['that is rough.', 'absolute disaster.', 'that hurts badly.', 'no chance.', 'painful pull.', 'that is chaos.'],
+    tails: ['Try again!', 'Reset!', 'Chaos.', 'Painful pull.', 'This is ugly.', 'Recover.'],
+    flood: ['Are you even trying?', 'This lobby is farming low rolls.', 'Somebody save this draft.', 'The floor is collapsing.', 'Holy smokes- what a mess.'],
+    templates: ['{open} {core}', '{flood} {core}', '{open} {flood}', '{core}'],
+    numberlessTemplates: ['{open} {core}', '{flood}', '{open} {tail}', '{core}']
+  },
+  unimpressed: {
+    intensity: 0.78, rate: 1.12, pitch: 0.91, gain: 0.95,
+    openers: ["C'mon.", 'Really?', 'Not great.', 'Yeaah-- no.', "That ain't good.", 'OOF.', 'Tough one.'],
+    cores: ['{ovr} is not good.', '{ovr}? nah.', '{ovr}. weak.', '{ovr}. keep moving.', '{ovr}... not ideal.'],
+    numberlessCores: ['not good.', 'weak pull.', 'rough value.', 'keep moving.', 'not ideal.', 'that is a miss.'],
+    tails: ['Need better.', 'That will drag.', 'Do better.', 'Keep searching.', 'No panic. Yet.'],
+    flood: ['Another low one?', 'This is a rough streak.', 'The misses are piling up.'],
+    templates: ['{open} {core}', '{flood} {core}', '{open} {tail}', '{core}'],
+    numberlessTemplates: ['{open} {core}', '{flood}', '{open} {tail}', '{core}']
+  },
+  dismissive: {
+    intensity: 0.62, rate: 1.09, pitch: 0.88, gain: 0.93,
+    openers: ['Uh-huh.', 'Okay.', '...riight.', 'Whatever.', 'Sure.', 'Fine.', 'Not ideal.'],
+    cores: ['{ovr}.', '{ovr}. serviceable.', '{ovr}. playable.', '{ovr}. move on.', '{ovr}. not special.'],
+    numberlessCores: ['serviceable.', 'playable.', 'moving on.', 'not special.', 'fine.', 'it exists.'],
+    tails: ['Next.', 'Move.', 'No fireworks.', 'Keep rolling.', 'It exists.'],
+    flood: ['At least it is not another single digit.', 'The board needed a reset.', 'Stabilizing???'],
+    templates: ['{open} {core}', '{core} {tail}', '{open} {tail}', '{core}'],
+    numberlessTemplates: ['{open} {core}', '{core} {tail}', '{open} {tail}', '{tail}']
+  },
+  content: {
+    intensity: 0.68, rate: 1.04, pitch: 0.86, gain: 0.94,
+    openers: ['Not bad.', 'Okay!', 'Clean.', 'Solid.', 'Fair enough.', 'That works.', 'Nice.'],
+    cores: ['{ovr} is fine', '{ovr} works', '{ovr}. decent add.', '{ovr}. good value', '{ovr}. steady pickup.'],
+    numberlessCores: ['clean add.', 'solid pickup.', 'that works.', 'good value.', 'steady pickup.', 'nice little help.'],
+    tails: ['No complaints.', 'That helps.', 'Take it.', 'Board stays stable.', 'Respectable.'],
+    templates: ['{open} {core}', '{core} {tail}', '{open} {tail}', '{open} {ovr}!'],
+    numberlessTemplates: ['{open} {core}', '{core} {tail}', '{open} {tail}', '{open}']
+  },
+  impressed: {
+    intensity: 0.8, rate: 0.99, pitch: 0.84, gain: 0.95,
+    openers: ['Very solid add!', 'Now we are talking!', 'Okay, nice!', 'Strong pull!', 'That is value!', 'Good one!'],
+    cores: ['{ovr} is real value.', '{ovr}! very solid.', '{ovr}. strong add.', '{ovr}. that plays.', '{ovr}. contributor.'],
+    numberlessCores: ['real value.', 'very solid.', 'strong add.', 'that plays.', 'good contributor.', 'very usable.'],
+    tails: ['That can win rounds.', 'Big help.', 'Keep stacking.', 'Good momentum.'],
+    templates: ['{open} {core}', '{open} {tail}', '{core} {tail}', '{open} {ovr}!', '{core}'],
+    numberlessTemplates: ['{open} {core}', '{open} {tail}', '{core} {tail}', '{open}']
+  },
+  strong: {
+    intensity: 0.86, rate: 0.95, pitch: 0.82, gain: 0.97,
+    openers: ['Excellent!', 'Huge add!', 'That is premium!', 'Now that is a pickup!', 'Beautiful.', 'Massive value!'],
+    cores: ['{ovr}!', '{ovr}! nasty.', '{ovr}. top-tier impact.', '{ovr}. huge value.'],
+    numberlessCores: ['top-tier impact.', 'huge value.', 'massive add.', 'that is premium.', 'beautiful pull.', 'major pickup.'],
+    tails: ['That changes the board.', 'Heating up now.', 'Serious momentum.', 'Real weapon.'],
+    templates: ['{open} {core}', '{core} {tail}', '{open}', '{open} {ovr}!'],
+    numberlessTemplates: ['{open} {core}', '{core} {tail}', '{open}', '{tail}']
+  },
+  elite: {
+    intensity: 0.93, rate: 0.92, pitch: 0.8, gain: 0.99,
+    openers: ['AMAZING!', 'MONSTER pull!', 'ELITE!', 'Insane!', 'Unbelievable!', 'WOW!'],
+    cores: ['{ovr}!', '{ovr}! absurd.', '{ovr}! elite ceiling.', '{ovr}! monster score.'],
+    numberlessCores: ['absurd pull.', 'elite ceiling.', 'monster score.', 'this is huge.', 'ridiculous value.', 'big time add.'],
+    tails: ['That can carry.', 'The lobby felt that.', 'Game changer.', 'Championship energy.'],
+    templates: ['{open} {core}', '{core} {tail}', '{open} {ovr}!', '{open}'],
+    numberlessTemplates: ['{open} {core}', '{core} {tail}', '{open}', '{tail}']
+  },
+  iconic: {
+    intensity: 0.98, rate: 0.88, pitch: 0.78, gain: 1.0,
+    openers: ['AMAZING!!', 'ICONIC!!', 'UNREAL!!', 'LEGENDARY!!', 'NO WAY!!', 'ABSURD!!'],
+    cores: ['{ovr}!!', '{ovr}! maxed out!', '{ovr}! iconic!', '{ovr}! what a hit!'],
+    numberlessCores: ['maxed out energy!', 'iconic pull!', 'what a hit!', 'absolute showstopper!', 'legendary moment!', 'the room felt that!'],
+    tails: ['That is the moment!', 'The lobby is stunned!', 'Pure endgame power!', 'Showstopper!'],
+    templates: ['{open} {core}', '{core} {tail}', '{open}', '{open} {ovr}!'],
+    numberlessTemplates: ['{open} {core}', '{core} {tail}', '{open}', '{tail}']
+  }
+};
+
+function revealNumberToSpeech(value = 0) {
+  const n = Math.max(0, Math.min(99, Math.round(Number(value) || 0)));
+  const ones = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+  const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  if (n < 10) return ones[n];
+  if (n < 20) return teens[n - 10];
+  const t = Math.floor(n / 10);
+  const o = n % 10;
+  return o ? `${tens[t]}-${ones[o]}` : tens[t];
+}
+
+function escapeRegexLiteral(text = '') {
+  return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hashRevealAnnouncerRoll(seed = 0, salt = 0) {
+  const value = Math.imul((Number(seed) || 0) ^ (Number(salt) || 0), 1103515245) + 12345;
+  return ((value >>> 0) % 10000) / 10000;
+}
+
+function getRevealAnnouncerMentionMode({ ovr = 0, bandKey = 'dismissive', seed = 0, queueMeta = null } = {}) {
+  const band = String(bandKey || '').toLowerCase();
+  const baseMentionChanceByBand = {
+    appalled: 0.46,
+    unimpressed: 0.24,
+    dismissive: 0.1,
+    content: 0.12,
+    impressed: 0.16,
+    strong: 0.24,
+    elite: 0.36,
+    iconic: 0.72
+  };
+  let mentionChance = Number(baseMentionChanceByBand[band]);
+  if (!Number.isFinite(mentionChance)) mentionChance = 0.16;
+  const value = Math.max(0, Math.min(99, Number(ovr) || 0));
+  if (value <= 5 || value >= 99) mentionChance += 0.12;
+  else if (value <= 12 || value >= 95) mentionChance += 0.08;
+  else if (value <= 20 || value >= 90) mentionChance += 0.04;
+  if (queueMeta && queueMeta.lowFlood === true && (band === 'appalled' || band === 'unimpressed')) {
+    mentionChance += 0.05;
+  }
+  mentionChance = Math.max(0.03, Math.min(0.92, mentionChance));
+
+  const mentionRoll = hashRevealAnnouncerRoll(seed, 913);
+  if (mentionRoll >= mentionChance) return 'none';
+
+  const overallRoll = hashRevealAnnouncerRoll(seed, 1777);
+  return overallRoll < 0.5 ? 'overall' : 'number';
+}
+
+function injectOverallIntoRevealLine(text = '', ovrSpeech = '', seed = 0, bandKey = 'dismissive') {
+  let next = String(text || '').trim();
+  const spoken = String(ovrSpeech || '').trim();
+  if (!next || !spoken) return next;
+  if (/\boverall\b/i.test(next)) return next;
+  const re = new RegExp(`\\b${escapeRegexLiteral(spoken)}\\b`, 'i');
+  if (!re.test(next)) return next;
+  const usePrefix = hashRevealAnnouncerRoll(seed, 2411) < (String(bandKey || '').toLowerCase() === 'iconic' ? 0.35 : 0.5);
+  return next.replace(re, usePrefix ? `overall ${spoken}` : `${spoken} overall`);
+}
+
+function tuneRevealAnnouncerTextPace(text = '', bandKey = 'dismissive') {
+  let next = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!next) return '';
+  next = next
+    .replace(/\bthat is\b/gi, "that's")
+    .replace(/\byou got a\b/gi, 'you got')
+    .replace(/\belite-level\b/gi, 'elite')
+    .replace(/\bgame-changing\b/gi, 'game changer')
+    .replace(/\bvery solid\b/gi, 'solid')
+    .replace(/\bvaluable addition\b/gi, 'value add');
+  next = next
+    .replace(/\bthat's that's\b/gi, "that's")
+    .replace(/\boverall overall\b/gi, 'overall');
+
+  const maxWordsByBand = {
+    appalled: 7,
+    unimpressed: 7,
+    dismissive: 6,
+    content: 7,
+    impressed: 8,
+    strong: 9,
+    elite: 10,
+    iconic: 12
+  };
+  const maxWords = Number(maxWordsByBand[String(bandKey || '').toLowerCase()]) || 8;
+  const words = next.split(/\s+/).filter(Boolean);
+  if (words.length > maxWords) {
+    next = words.slice(0, maxWords).join(' ');
+    next = next.replace(/[,:;]+$/g, '').trim();
+    if (!/[.!?]$/.test(next)) next += (bandKey === 'dismissive' ? '.' : '!');
+  }
+  return next;
+}
+
+function renderRevealAnnouncerTemplate(template = '', ctx = {}) {
+  return String(template || '')
+    .replace(/\{ovr\}/g, String(ctx.ovr || 0))
+    .replace(/\{open\}/g, String(ctx.open || '').trim())
+    .replace(/\{core\}/g, String(ctx.core || '').trim())
+    .replace(/\{tail\}/g, String(ctx.tail || '').trim())
+    .replace(/\{flood\}/g, String(ctx.flood || '').trim())
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function estimateRevealAnnouncerDurationMs(text = '', rate = 1) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  const exclamations = (String(text || '').match(/[!?]/g) || []).length;
+  const pauses = (String(text || '').match(/[.,;]/g) || []).length;
+  const base = 180 + (words * 145) + (exclamations * 36) + (pauses * 26);
+  const scaled = base / Math.max(0.72, Math.min(1.35, Number(rate) || 1));
+  return Math.max(220, Math.min(1500, Math.round(scaled)));
+}
+
+function getRevealAnnouncerLeadInMs(revealTier = 'bronze', cue = null) {
+  const tier = String(revealTier || '').toLowerCase();
+  const est = Number(cue && cue.estimatedMs) || 520;
+  if (tier === 'elite') return Math.max(200, Math.min(420, Math.round(est * 0.33)));
+  if (tier === 'diamond') return Math.max(150, Math.min(320, Math.round(est * 0.28)));
+  if (tier === 'gold') return Math.max(120, Math.min(240, Math.round(est * 0.22)));
+  if (tier === 'silver') return Math.max(90, Math.min(180, Math.round(est * 0.18)));
+  return Math.max(70, Math.min(140, Math.round(est * 0.14)));
+}
+
+function getRevealAnnouncerPadMs(revealTier = 'bronze', ovr = 0, cue = null) {
+  const tier = String(revealTier || '').toLowerCase();
+  const value = Math.max(0, Math.min(99, Number(ovr) || 0));
+  const lite = getRevealPerfMode() === 'lite';
+  let base = lite ? 70 : 120;
+  if (tier === 'silver') base = lite ? 90 : 150;
+  if (tier === 'gold') base = lite ? 110 : 180;
+  if (tier === 'diamond') base = lite ? 130 : 220;
+  if (tier === 'elite') base = lite ? 150 : 260;
+  if (value >= 96) base += lite ? 30 : 55;
+  else if (value >= 90) base += lite ? 18 : 34;
+  return Math.max(40, Math.round(base));
+}
+
+function getRevealShowcaseHoldMs(revealTier = 'bronze', ovr = 0, cue = null) {
+  const tier = String(revealTier || '').toLowerCase();
+  const value = Math.max(0, Math.min(99, Number(ovr) || 0));
+  const lite = getRevealPerfMode() === 'lite';
+  let base;
+  switch (tier) {
+    case 'elite':
+      base = lite ? 260 : 520;
+      break;
+    case 'diamond':
+      base = lite ? 220 : 440;
+      break;
+    case 'gold':
+      base = lite ? 170 : 320;
+      break;
+    case 'silver':
+      base = lite ? 130 : 220;
+      break;
+    case 'lowest':
+      base = lite ? 70 : 130;
+      break;
+    default:
+      base = lite ? 90 : 170;
+      break;
+  }
+  const ovrLift = value >= 96
+    ? (lite ? 80 : 180)
+    : value >= 90
+      ? (lite ? 50 : 120)
+      : value >= 78
+      ? (lite ? 30 : 70)
+        : 0;
+  return Math.max(0, Math.round(base + ovrLift));
+}
+
+function buildRevealTierAnnouncerCue(assignment = null, profile = null) {
+  const evalData = assignment && assignment.evalData ? assignment.evalData : {};
+  const ovr = Math.max(0, Math.min(99, Number(evalData && evalData.ovr) || 0));
+  if (!ovr) return null;
+  const revealTier = String(profile && profile.revealTier || getRevealTierFromEval(evalData) || 'bronze').toLowerCase();
+  const queueMeta = getRevealAnnouncerQueueContext(assignment);
+  const seed = (Number(ovr) * 31)
+    + (Number(assignment && assignment.teamIndex) * 17)
+    + (Number(assignment && assignment.slotIndex) * 13)
+    + (String(revealTier).length * 7)
+    + (Number(queueMeta && queueMeta.queueIndex) * 5);
+  const bandKey = getRevealAnnouncerBandKey(ovr);
+  const bank = REVEAL_ANNOUNCER_BANKS[bandKey] || REVEAL_ANNOUNCER_BANKS.dismissive;
+  const mentionMode = getRevealAnnouncerMentionMode({ ovr, bandKey, seed, queueMeta });
+  const mentionNumber = mentionMode === 'number' || mentionMode === 'overall';
+  const open = pickRevealAnnouncerVariant(bank.openers, seed + 1);
+  const core = pickRevealAnnouncerVariant(mentionNumber ? bank.cores : (bank.numberlessCores || bank.cores), seed + 3);
+  const tail = pickRevealAnnouncerVariant(bank.tails, seed + 5);
+  const flood = pickRevealAnnouncerVariant(bank.flood || [], seed + 7);
+  const templateSource = mentionNumber
+    ? (Array.isArray(bank.templates) ? bank.templates : [])
+    : (Array.isArray(bank.numberlessTemplates) && bank.numberlessTemplates.length
+      ? bank.numberlessTemplates
+      : ['{open} {core}', '{core} {tail}', '{open} {tail}', '{core}']);
+  const templatePool = []
+    .concat(templateSource)
+    .concat((queueMeta && queueMeta.lowFlood && Array.isArray(templateSource) && bandKey !== 'iconic' && bandKey !== 'elite')
+      ? (mentionNumber ? ['{flood} {core}', '{open} {flood}', '{flood}'] : ['{flood}', '{open} {flood}', '{flood} {tail}'])
+      : []);
+  let text = renderRevealAnnouncerTemplate(
+    pickRevealAnnouncerVariant(templatePool, seed + 11),
+    { ovr, open, core, tail, flood }
+  );
+  text = String(text || '').replace(/\s+/g, ' ').trim();
+  const ovrSpeech = revealNumberToSpeech(ovr);
+  if (mentionNumber && !new RegExp(`\\b${ovr}\\b`).test(text)) {
+    const numberLead = bandKey === 'appalled' || bandKey === 'unimpressed' || bandKey === 'dismissive'
+      ? `${ovrSpeech}.`
+      : `${ovrSpeech}!`;
+    text = `${numberLead} ${text}`.replace(/\s+/g, ' ').trim();
+  } else if (mentionNumber) {
+    text = text.replace(new RegExp(`\\b${escapeRegexLiteral(String(ovr))}\\b`, 'g'), ovrSpeech);
+  }
+  if (mentionMode === 'overall') {
+    text = injectOverallIntoRevealLine(text, ovrSpeech, seed + 29, bandKey);
+  }
+  if (!mentionNumber) {
+    text = text
+      .replace(new RegExp(`\\b${escapeRegexLiteral(String(ovr))}\\b`, 'gi'), '')
+      .replace(new RegExp(`\\b${escapeRegexLiteral(ovrSpeech)}\\b`, 'gi'), '')
+      .replace(/\boverall\b/gi, '');
+  }
+  text = text.replace(/\bOVR\b/gi, '').replace(/\s+/g, ' ').trim();
+  text = tuneRevealAnnouncerTextPace(text, bandKey);
+  if (text && !/[.!?]$/.test(text)) {
+    text += (bandKey === 'dismissive' ? '.' : '!');
+  }
+  if (!text) return null;
+  const intensity = Number(bank.intensity) || 0.8;
+  const bandRate = Number(bank.rate) || 0.95;
+  const bandPitch = Number(bank.pitch) || 0.84;
+  const rate = Math.max(0.86, Math.min(1.34, bandRate + (
+    (bandKey === 'appalled' || bandKey === 'unimpressed') ? 0.07
+      : bandKey === 'dismissive' ? 0.05
+      : bandKey === 'content' ? 0.03
+      : bandKey === 'impressed' ? 0.01
+      : bandKey === 'strong' ? -0.01
+      : bandKey === 'elite' ? -0.03
+      : -0.05
+  )));
+  const pitch = Math.max(0.7, Math.min(1.18, bandPitch + (
+    (bandKey === 'appalled' || bandKey === 'unimpressed') ? 0.03
+      : bandKey === 'dismissive' ? 0.01
+      : bandKey === 'elite' ? -0.02
+      : bandKey === 'iconic' ? -0.03
+      : 0
+  )));
+  const adjustedRate = mentionMode === 'none'
+    ? Math.min(1.38, rate + (bandKey === 'appalled' || bandKey === 'unimpressed' || bandKey === 'dismissive' ? 0.07 : 0.04))
+    : mentionMode === 'overall'
+      ? Math.max(0.82, rate - 0.03)
+      : rate;
+  const adjustedPitch = mentionMode === 'none'
+    ? Math.min(1.2, pitch + (bandKey === 'appalled' || bandKey === 'unimpressed' ? 0.03 : 0.01))
+    : mentionMode === 'overall'
+      ? Math.max(0.68, pitch - 0.01)
+      : pitch;
+  const estimatedMs = estimateRevealAnnouncerDurationMs(text, adjustedRate);
+  const leadInMs = getRevealAnnouncerLeadInMs(revealTier, { estimatedMs });
+  return {
+    id: `round4-reveal-announcer-v4-${assignment && assignment.key ? assignment.key : `ovr-${ovr}`}`,
+    type: 'round4',
+    text,
+    subtitleText: `Reveal call: ${ovr}`,
+    intensity,
+    priority: 84 + Math.min(10, Math.max(0, Math.round((ovr - 70) / 3))),
+    preempt: true,
+    allowLiveGenerate: true,
+    dedupeKey: `round4:v4:reveal:announcer:${assignment && assignment.key ? assignment.key : ''}:${ovr}:${bandKey}:${mentionMode}`,
+    speechSpec: {
+      voiceStyle: 'cinematic',
+      rate: adjustedRate,
+      pitch: adjustedPitch,
+      gain: Number(bank.gain) || (revealTier === 'elite' ? 0.98 : 0.94)
+    },
+    estimatedMs,
+    leadInMs
+  };
 }
 
 function detectRevealPerfMode() {
@@ -417,15 +1078,31 @@ function sanitizeRevealTierClassList(classList) {
 
 function getRevealProfileForAssignment(assignment) {
   const fallbackTier = getRevealTierFromEval(assignment && assignment.evalData ? assignment.evalData : null);
-  const fallbackBase = applyPerfProfileTuning(REVEAL_TIER_PROFILES[fallbackTier] || REVEAL_TIER_PROFILES.bronze);
+  const rawFallbackBase = applyPerfProfileTuning(REVEAL_TIER_PROFILES[fallbackTier] || REVEAL_TIER_PROFILES.bronze);
+  const fallbackBase = {
+    ...rawFallbackBase,
+    anticipationMs: Math.round((Number(rawFallbackBase.anticipationMs) || 280) * 1.12),
+    flightMs: Math.round((Number(rawFallbackBase.flightMs) || 900) * 1.17),
+    settleMs: Math.round((Number(rawFallbackBase.settleMs) || 260) * 1.14),
+    cadencePadMs: Math.round((Number(rawFallbackBase.cadencePadMs) || 140) * 1.22),
+    flightArcPx: Math.max(18, Math.round((Number(rawFallbackBase.flightArcPx) || 30) * 0.9)),
+    spinDeg: Math.round((Number(rawFallbackBase.spinDeg) || 0) * 0.86)
+  };
+  const fallbackOvr = Number(assignment && assignment.evalData && assignment.evalData.ovr) || 0;
+  const announcerCue = buildRevealTierAnnouncerCue(assignment, { revealTier: fallbackTier });
+  const announcePadMs = getRevealAnnouncerPadMs(fallbackTier, fallbackOvr, announcerCue);
+  const showcaseHoldMs = getRevealShowcaseHoldMs(fallbackTier, fallbackOvr, announcerCue);
   const profile = assignment && assignment.key ? round4State.revealProfiles[assignment.key] : null;
   if (profile) return profile;
 
   return {
     ...fallbackBase,
     revealTier: fallbackTier,
+    announcerCue,
+    showcaseHoldMs,
+    announcePadMs,
     offsetMs: (Number(round4State.queueIndex) || 0) * getRevealConfig().stepIntervalMs,
-    totalMs: fallbackBase.anticipationMs + fallbackBase.flightMs + fallbackBase.settleMs + fallbackBase.cadencePadMs
+    totalMs: fallbackBase.anticipationMs + showcaseHoldMs + fallbackBase.flightMs + fallbackBase.settleMs + fallbackBase.cadencePadMs + announcePadMs
   };
 }
 
@@ -437,20 +1114,42 @@ function prepareRevealSequenceProfiles() {
     const nextProfiles = Object.create(null);
     let offsetMs = 0;
 
-    round4State.queue.forEach((assignment) => {
+    round4State.queue.forEach((assignment, index) => {
       const revealTier = getRevealTierFromEval(assignment && assignment.evalData ? assignment.evalData : null);
-      const base = applyPerfProfileTuning(REVEAL_TIER_PROFILES[revealTier] || REVEAL_TIER_PROFILES.bronze);
-      const totalMs = base.anticipationMs + base.flightMs + base.settleMs + base.cadencePadMs;
-      const cadence = Math.max(config.stepIntervalMs, Math.round(totalMs * 0.9));
+      const tunedBase = applyPerfProfileTuning(REVEAL_TIER_PROFILES[revealTier] || REVEAL_TIER_PROFILES.bronze);
+      const base = {
+        ...tunedBase,
+        anticipationMs: Math.round((Number(tunedBase.anticipationMs) || 280) * 1.12),
+        flightMs: Math.round((Number(tunedBase.flightMs) || 900) * 1.17),
+        settleMs: Math.round((Number(tunedBase.settleMs) || 260) * 1.14),
+        cadencePadMs: Math.round((Number(tunedBase.cadencePadMs) || 140) * 1.22),
+        flightArcPx: Math.max(18, Math.round((Number(tunedBase.flightArcPx) || 30) * 0.9)),
+        spinDeg: Math.round((Number(tunedBase.spinDeg) || 0) * 0.86)
+      };
+      const announcerCue = buildRevealTierAnnouncerCue(assignment, { revealTier });
+      const announcePadMs = getRevealAnnouncerPadMs(revealTier, Number(assignment && assignment.evalData && assignment.evalData.ovr) || 0, announcerCue);
+      const showcaseHoldMs = getRevealShowcaseHoldMs(
+        revealTier,
+        Number(assignment && assignment.evalData && assignment.evalData.ovr) || 0,
+        announcerCue
+      );
+      const totalMs = base.anticipationMs + showcaseHoldMs + base.flightMs + base.settleMs + base.cadencePadMs + announcePadMs;
+      const cadence = Math.max(config.stepIntervalMs, Math.round(totalMs * 0.98));
+      const periodicPauseMs = ((index + 1) % 3 === 0 ? (getRevealPerfMode() === 'lite' ? 240 : 420) : 0)
+        + ((revealTier === 'elite' || revealTier === 'diamond') ? (getRevealPerfMode() === 'lite' ? 180 : 320) : 0);
 
       nextProfiles[assignment.key] = {
         ...base,
         revealTier,
+        announcerCue,
+        showcaseHoldMs,
+        announcePadMs,
+        cadencePauseMs: periodicPauseMs,
         offsetMs,
         totalMs
       };
 
-      offsetMs += cadence;
+      offsetMs += cadence + periodicPauseMs;
     });
 
     round4State.revealProfiles = nextProfiles;
@@ -677,7 +1376,7 @@ function setLoadingReadyState(isReady) {
 
   if (round4State.loadingReadyToStart) {
     button.textContent = 'START REVEAL CEREMONY';
-    if (hint) hint.textContent = 'Everything is staged. You can start this reveal locally as soon as you are ready.';
+    if (hint) hint.textContent = 'Everything is staged, including announcer callouts. You can start the reveal locally as soon as you are ready.';
     if (status) status.textContent = 'Showdown ready. Tap start to begin the final reveal.';
   } else {
     button.textContent = 'PREPARING REVEAL CEREMONY...';
@@ -737,7 +1436,7 @@ function startRound4Reveal() {
     round4State.revealStartTimer = null;
   }
 
-  const ceremonyPreludeMs = 2200;
+  const ceremonyPreludeMs = 1100;
   round4State.revealStartTimer = window.setTimeout(() => {
     round4State.revealStartTimer = null;
     if (loading) loading.style.display = 'none';
@@ -838,6 +1537,10 @@ function resetCinematicState() {
     window.clearTimeout(round4State.revealTimer);
     round4State.revealTimer = null;
   }
+  if (round4State.cinematicRenderTimer) {
+    window.clearTimeout(round4State.cinematicRenderTimer);
+    round4State.cinematicRenderTimer = null;
+  }
   if (round4State.pendingFinalResultsTimer) {
     window.clearTimeout(round4State.pendingFinalResultsTimer);
     round4State.pendingFinalResultsTimer = null;
@@ -854,6 +1557,8 @@ function resetCinematicState() {
   round4State.revealConfig = null;
   round4State.preloadPromise = null;
   round4State.preloadDone = false;
+  round4State.revealAnnouncerWarmPromise = null;
+  round4State.revealAnnouncerWarmDone = false;
   round4State.revealPrepared = false;
   round4State.revealPreparePromise = null;
   round4State.animationPrimePromise = null;
@@ -863,6 +1568,9 @@ function resetCinematicState() {
   round4State.teamBoardCollapsed = Object.create(null);
   round4State.loadingScenario = '';
   round4State.loadingTwist = '';
+  round4State.pendingLoadingReadyVoiceCue = null;
+  round4State.pendingLoadingReadyVoiceCueEvalId = null;
+  round4State.loadingReadyVoiceSpokenEvalId = null;
   round4State.pageCollapsed = Object.create(null);
   round4State.pageLastTouchedAt = Object.create(null);
   round4State.pageNavActive = 'cards';
@@ -1187,6 +1895,19 @@ function renderActivePlaque() {
 
   const ovrButton = host.querySelector('.eval-active-ovr-btn');
   if (ovrButton) {
+    const primeBlurb = () => {
+      try {
+        prefetchSharedCharacterCardBlurbs([evalData], {
+          context: 'ovr-button-prime',
+          maxEntries: 1,
+          warmTop: 1,
+          voiceWarmTop: 1,
+          immediate: true
+        });
+      } catch (_error) {}
+    };
+    ovrButton.addEventListener('pointerenter', primeBlurb, { once: true });
+    ovrButton.addEventListener('focus', primeBlurb, { once: true });
     ovrButton.addEventListener('click', () => openOVRBreakdown(evalData));
   }
 }
@@ -1201,10 +1922,10 @@ function getRevealConfig() {
   const now = Date.now();
   const liteMode = getRevealPerfMode() === 'lite';
 
-  const initialDelayMs = Math.max(liteMode ? 900 : 1100, Math.round((Number(incoming.initialDelayMs) || 3300) * (liteMode ? 1.05 : 1.08)));
-  const stepIntervalMs = Math.max(liteMode ? 1900 : 2200, Math.round((Number(incoming.stepIntervalMs) || 3050) * (liteMode ? 1.02 : 1.08)));
-  const dockDurationMs = Math.max(liteMode ? 1150 : 1350, Math.round((Number(incoming.dockDurationMs) || 1450) * (liteMode ? 1.02 : 1.08)));
-  const finalResultsDelayMs = Math.max(liteMode ? 1500 : 1800, Math.round((Number(incoming.finalResultsDelayMs) || 2850) * (liteMode ? 1.03 : 1.08)));
+  const initialDelayMs = Math.max(liteMode ? 1200 : 1500, Math.round((Number(incoming.initialDelayMs) || 3300) * (liteMode ? 1.12 : 1.22)));
+  const stepIntervalMs = Math.max(liteMode ? 2600 : 3200, Math.round((Number(incoming.stepIntervalMs) || 3050) * (liteMode ? 1.12 : 1.25)));
+  const dockDurationMs = Math.max(liteMode ? 1300 : 1650, Math.round((Number(incoming.dockDurationMs) || 1450) * (liteMode ? 1.08 : 1.16)));
+  const finalResultsDelayMs = Math.max(liteMode ? 1700 : 2200, Math.round((Number(incoming.finalResultsDelayMs) || 2850) * (liteMode ? 1.08 : 1.18)));
   const startAtMs = Number(incoming.startAtMs) || (now + initialDelayMs);
 
   return {
@@ -1385,6 +2106,85 @@ function preloadCinematicAssets() {
   return round4State.preloadPromise;
 }
 
+function prepareRevealAnnouncerVoiceWarmup() {
+  if (round4State.revealAnnouncerWarmPromise) return round4State.revealAnnouncerWarmPromise;
+
+  const cues = (Array.isArray(round4State.queue) ? round4State.queue : [])
+    .slice(0, 24)
+    .map((assignment) => buildRevealTierAnnouncerCue(assignment, null))
+    .filter(Boolean);
+
+  if (!cues.length) {
+    round4State.revealAnnouncerWarmDone = true;
+    round4State.revealAnnouncerWarmPromise = Promise.resolve({ ok: true, skipped: true, reason: 'no-announcer-cues' });
+    return round4State.revealAnnouncerWarmPromise;
+  }
+
+  round4State.revealAnnouncerWarmDone = false;
+  round4State.revealAnnouncerWarmPromise = Promise.race([
+    Promise.resolve().then(async () => {
+    const perfMode = getRevealPerfMode();
+    const warmLimit = Math.max(4, Math.min(cues.length, 24));
+    const warmConcurrency = perfMode === 'lite' ? 3 : 5;
+    setRevealCeremonyProgress(62, 'Warming announcer callouts');
+    setLoadingBotContext(null, null, `Warming announcer callouts (${warmLimit}/${cues.length})...`);
+
+    let warmResult = null;
+    const directWarm = warmSharedVoiceCuesNow(cues, {
+      source: 'round4-reveal-announcer',
+      limit: warmLimit,
+      concurrency: warmConcurrency,
+      preserveOrder: true,
+      onProgress: (progress = {}) => {
+        const done = Math.max(0, Number(progress.done) || 0);
+        const total = Math.max(1, Number(progress.total) || warmLimit);
+        const pct = Math.round((done / total) * 100);
+        setRevealCeremonyProgress(62 + Math.round(pct * 0.2), `Warming announcer callouts ${done}/${total}`);
+        setLoadingBotContext(null, null, `Priming announcer callouts ${done}/${total}...`);
+      }
+    });
+
+    if (directWarm && typeof directWarm.then === 'function') {
+      warmResult = await directWarm.catch(() => null);
+    } else {
+      warmResult = { ok: true, deferred: true, unique: cues.length };
+      prefetchSharedVoiceCues(cues, { source: 'round4-reveal-announcer', delayMs: 0 });
+    }
+
+    prefetchSharedVoiceCues(cues, { source: 'round4-reveal-announcer-tail', delayMs: 0 });
+    round4State.revealAnnouncerWarmDone = true;
+    setRevealCeremonyProgress(82, 'Announcer callouts primed');
+    setLoadingBotContext(null, null, 'Announcer callouts primed for the reveal.');
+    return warmResult || { ok: true, unique: cues.length };
+  }).catch(() => {
+    round4State.revealAnnouncerWarmDone = true;
+    prefetchSharedVoiceCues(cues, { source: 'round4-reveal-announcer-fallback', delayMs: 0 });
+    setRevealCeremonyProgress(78, 'Announcer callouts queued');
+    setLoadingBotContext(null, null, 'Announcer callouts queued. Remaining warmup will continue in the background.');
+    return { ok: false, reason: 'announcer-warm-failed' };
+  }),
+    new Promise((resolve) => {
+      const warmupTimeoutMs = Math.max(
+        5200,
+        getRevealPerfMode() === 'lite'
+          ? 6200 + Math.round(cues.length * 110)
+          : 7600 + Math.round(cues.length * 90)
+      );
+      window.setTimeout(() => {
+        if (!round4State.revealAnnouncerWarmDone) {
+          round4State.revealAnnouncerWarmDone = true;
+          prefetchSharedVoiceCues(cues, { source: 'round4-reveal-announcer-timeout-tail', delayMs: 0 });
+          setRevealCeremonyProgress(78, 'Announcer callouts queued');
+          setLoadingBotContext(null, null, 'Continuing setup... announcer callouts will finish warming in the background.');
+        }
+        resolve({ ok: false, timedOut: true, reason: 'announcer-warm-timeout' });
+      }, warmupTimeoutMs);
+    })
+  ]);
+
+  return round4State.revealAnnouncerWarmPromise;
+}
+
 function scheduleNextAutoReveal() {
   if (round4State.sequenceComplete) return;
   if (round4State.revealTimer) {
@@ -1451,6 +2251,7 @@ function finishSequenceIfComplete() {
 
 function animateDockTransition(assignment, onDone) {
   const profile = getRevealProfileForAssignment(assignment);
+  const showcaseHoldMs = Math.max(0, Number(profile && profile.showcaseHoldMs) || 0);
   const active = document.getElementById('evalActivePlaque');
   const host = document.getElementById('evalHeroHost');
   const target = document.querySelector(`.eval-slot[data-team-index='${assignment.teamIndex}'][data-slot-index='${assignment.slotIndex}']`);
@@ -1464,21 +2265,70 @@ function animateDockTransition(assignment, onDone) {
   active.style.setProperty('--reveal-anticipation-ms', `${profile.anticipationMs}ms`);
   active.style.setProperty('--reveal-lift', `${profile.anticipationLift}px`);
   active.style.setProperty('--reveal-tilt', `${profile.anticipationTilt}deg`);
+  active.style.setProperty('--reveal-showcase-ms', `${showcaseHoldMs}ms`);
+  {
+    const hoverSeed = (
+      (Number(assignment && assignment.teamIndex) * 17)
+      + (Number(assignment && assignment.slotIndex) * 13)
+      + (Number(assignment && assignment.evalData && assignment.evalData.ovr) || 0) * 7
+    );
+    const tilt = ((((hoverSeed % 9) - 4) * 0.45) || 0.35);
+    const driftX = (((Math.floor(hoverSeed / 3) % 7) - 3) * 1.3);
+    const driftY = -1 * (2 + ((Math.floor(hoverSeed / 5) % 4)));
+    const scale = 1.008 + ((hoverSeed % 4) * 0.006);
+    const durationMs = Math.max(520, Math.min(1450, Math.round(showcaseHoldMs * 0.56) || 760));
+    active.style.setProperty('--reveal-hover-tilt', `${tilt.toFixed(2)}deg`);
+    active.style.setProperty('--reveal-hover-drift-x', `${driftX.toFixed(1)}px`);
+    active.style.setProperty('--reveal-hover-drift-y', `${driftY.toFixed(1)}px`);
+    active.style.setProperty('--reveal-hover-scale', `${scale.toFixed(3)}`);
+    active.style.setProperty('--reveal-hover-ms', `${durationMs}ms`);
+  }
 
   if (host) {
     sanitizeRevealTierClassList(host.classList);
     host.classList.add(`reveal-tier-${profile.revealTier}`);
+    host.style.setProperty('--reveal-showcase-ms', `${showcaseHoldMs}ms`);
     if (profile.spotlight) {
       host.classList.add('is-spotlight');
     }
   }
 
-  setAnimTimer(() => {
+  const announcerCueBase = (profile && profile.announcerCue) ? { ...profile.announcerCue } : buildRevealTierAnnouncerCue(assignment, profile);
+  let announcerHoldWait = null;
+  if (announcerCueBase) {
+    const startOffsetMs = showcaseHoldMs > 0
+      ? Math.max(30, Math.min(160, Math.round(showcaseHoldMs * 0.1)))
+      : 0;
+    const announcerDelayMs = Math.max(0, Number(profile.anticipationMs || 0) + startOffsetMs);
+    announcerCueBase.delayMs = announcerDelayMs;
+    announcerCueBase.allowLiveGenerate = true;
+    const announcerTimeoutMs = Math.max(
+      showcaseHoldMs + 620,
+      Number(announcerCueBase.estimatedMs || 0) + Number(announcerCueBase.leadInMs || 0) + 1100,
+      Number(announcerCueBase.delayMs || 0) + 950
+    );
+    announcerHoldWait = waitForSharedVoiceCueCompletion(announcerCueBase, {
+      timeoutMs: announcerTimeoutMs,
+      minHoldMs: showcaseHoldMs,
+      startTimeoutMs: Math.max(
+        announcerTimeoutMs + 700,
+        Number(announcerCueBase.delayMs || 0) + Number(announcerCueBase.estimatedMs || 0) + 1800
+      )
+    });
+    enqueueSharedVoiceCues([announcerCueBase], { clear: false });
+  }
+
+  let launchedToSlot = false;
+  const launchToSlot = () => {
+    if (launchedToSlot) return;
+    launchedToSlot = true;
+    if (!round4State.transitionRunning || round4State.currentAssignment !== assignment) return;
     const startRect = active.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
     const clone = active.cloneNode(true);
     clone.removeAttribute('id');
     clone.classList.remove('is-reveal-anticipating');
+    clone.classList.remove('is-reveal-showcasing');
     clone.classList.add('eval-flight-clone', `reveal-tier-${profile.revealTier}`);
     clone.style.left = `${startRect.left}px`;
     clone.style.top = `${startRect.top}px`;
@@ -1489,6 +2339,9 @@ function animateDockTransition(assignment, onDone) {
     document.body.appendChild(clone);
 
     active.style.visibility = 'hidden';
+    active.classList.remove('is-reveal-showcasing');
+    active.classList.remove('is-reveal-anticipating');
+    if (host) host.classList.remove('is-showcase-hold');
     playEliteRevealAudio(profile, 'launch');
 
     const dx = (targetRect.left + targetRect.width / 2) - (startRect.left + startRect.width / 2);
@@ -1532,15 +2385,35 @@ function animateDockTransition(assignment, onDone) {
     setAnimTimer(() => {
       clone.remove();
       active.style.visibility = '';
-      active.classList.remove('is-reveal-anticipating');
       if (host) {
         sanitizeRevealTierClassList(host.classList);
       }
       triggerSlotImpact(target, profile);
       triggerPoolCrashEffects(assignment, profile);
       playEliteRevealAudio(profile, 'impact');
-      onDone();
+      const announcePadMs = Math.max(0, Number(profile && profile.announcePadMs) || 0);
+      if (announcePadMs > 0) {
+        setAnimTimer(() => onDone(), announcePadMs);
+      } else {
+        onDone();
+      }
     }, profile.flightMs + 12);
+  };
+
+  setAnimTimer(() => {
+    if (showcaseHoldMs > 0) {
+      active.classList.add('is-reveal-showcasing');
+      if (host) host.classList.add('is-showcase-hold');
+      if (announcerHoldWait && typeof announcerHoldWait.then === 'function') {
+        Promise.resolve(announcerHoldWait).finally(() => {
+          launchToSlot();
+        });
+      } else {
+        setAnimTimer(launchToSlot, showcaseHoldMs);
+      }
+      return;
+    }
+    launchToSlot();
   }, profile.anticipationMs);
 }
 
@@ -2263,9 +3136,12 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
   const winnerTeamStats = gameEndedData && gameEndedData.winnerTeamStats && typeof gameEndedData.winnerTeamStats === 'object'
     ? gameEndedData.winnerTeamStats
     : {};
+  const winnerTeamCharacters = Array.isArray(gameEndedData && gameEndedData.winnerTeamCharacters)
+    ? gameEndedData.winnerTeamCharacters
+    : [];
   const eliteFinalSix = Array.isArray(gameEndedData && gameEndedData.eliteFinalSix) && gameEndedData.eliteFinalSix.length
     ? gameEndedData.eliteFinalSix
-    : (Array.isArray(gameEndedData && gameEndedData.winnerTeamCharacters) ? gameEndedData.winnerTeamCharacters : []);
+    : winnerTeamCharacters;
 
   const winnerName = String(winnerInfo && winnerInfo.name ? winnerInfo.name : (finalLeaderboard[0] && finalLeaderboard[0].name ? finalLeaderboard[0].name : 'Champion'));
   const winnerScore = Number(finalLeaderboard[0] && finalLeaderboard[0].score) || 0;
@@ -2288,6 +3164,16 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
   const verdictTier = getRound4FinaleVerdictTier(teamOVR, margin, rarityScore);
   const eliteSectionAvailable = Boolean(eliteFinalSix && eliteFinalSix.length);
   const fastestLockText = Number.isFinite(fastestLockMs) ? formatLockDuration(fastestLockMs) : 'n/a';
+  const normalizedMvpName = String(mvp || '').trim().toLowerCase();
+  const mvpEntry = (winnerTeamCharacters.find((entry) => String(entry && entry.character || '').trim().toLowerCase() === normalizedMvpName)
+    || winnerTeamCharacters.slice().sort((a, b) => (Number(b && b.ovr) || 0) - (Number(a && a.ovr) || 0))[0]
+    || eliteFinalSix.slice().sort((a, b) => (Number(b && b.ovr) || 0) - (Number(a && a.ovr) || 0))[0]
+    || null);
+  const mvpPortraitRaw = mvpEntry && mvpEntry.imageUrl ? String(mvpEntry.imageUrl).trim() : '';
+  const mvpPortrait = mvpPortraitRaw
+    ? resolveCharacterImage(mvpPortraitRaw, mvpEntry && mvpEntry.character ? mvpEntry.character : 'MVP')
+    : buildMissingCharacterImage('MVP');
+  const mvpDisplayName = String(mvpEntry && mvpEntry.character || mvp || 'MVP');
 
   const podiumRows = finalLeaderboard.slice(0, Math.max(3, Math.min(6, finalLeaderboard.length || 0))).map((entry, index) => {
     const score = Number(entry && entry.score) || 0;
@@ -2379,6 +3265,19 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
           <span class="kpi-mvp">MVP <b>${escapeHtml(mvp)}</b></span>
           <span class="kpi-rarity">Rarity <b>${rarityScore}</b></span>
         </div>
+        <section class="eval-finale-mvp-callout" data-mvp-callout data-state="idle" aria-label="MVP victory callout">
+          <div class="eval-finale-mvp-portrait-wrap">
+            <img class="eval-finale-mvp-portrait" src="${escapeHtml(mvpPortrait)}" alt="${escapeHtml(mvpDisplayName)} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('MVP')}';">
+          </div>
+          <div class="eval-finale-mvp-bubble">
+            <div class="eval-finale-mvp-bubble-top">
+              <span class="eval-finale-mvp-chip">MVP Voice</span>
+              <span class="eval-finale-mvp-name" data-mvp-callout-name>${escapeHtml(mvpDisplayName)}</span>
+            </div>
+            <p class="eval-finale-mvp-line" data-mvp-callout-line>Preparing victory callout...</p>
+            <div class="eval-finale-mvp-meta" data-mvp-callout-meta>Winner-only phrase set - archetype-shaped</div>
+          </div>
+        </section>
       </header>
 
       <div class="eval-finale-spotlight-shell">
@@ -2499,6 +3398,62 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
     round4State.pageNavActive = 'finale';
     round4State.pageNavMenuOpen = false;
     bindRound4FinaleUi(panel);
+    const mvpCalloutNode = panel.querySelector('[data-mvp-callout]');
+    const mvpCalloutNameNode = panel.querySelector('[data-mvp-callout-name]');
+    const mvpCalloutLineNode = panel.querySelector('[data-mvp-callout-line]');
+    const mvpCalloutMetaNode = panel.querySelector('[data-mvp-callout-meta]');
+    const updateMvpCalloutOverlay = (payload = {}) => {
+      if (!mvpCalloutNode) return;
+      const state = String(payload && payload.state || 'idle');
+      mvpCalloutNode.setAttribute('data-state', state);
+      if (mvpCalloutNameNode && payload && payload.characterName) {
+        mvpCalloutNameNode.textContent = String(payload.characterName);
+      }
+      if (mvpCalloutLineNode) {
+        const line = String(payload && (payload.phrase || payload.compositeLine || payload.subtitle) || '').trim();
+        if (line) mvpCalloutLineNode.textContent = line;
+      }
+      if (mvpCalloutMetaNode) {
+        const metaBits = [];
+        if (payload && payload.classLabel) metaBits.push(String(payload.classLabel));
+        if (payload && payload.temperament) metaBits.push(String(payload.temperament).replace(/_/g, ' '));
+        else if (payload && payload.voiceStyle) metaBits.push(String(payload.voiceStyle));
+        if (state === 'speaking') metaBits.push('MVP victory callout');
+        if (!metaBits.length) metaBits.push('Winner-only phrase set - archetype-shaped');
+        mvpCalloutMetaNode.textContent = metaBits.join(' - ');
+      }
+    };
+
+    const finaleCalloutRoster = winnerTeamCharacters.length ? winnerTeamCharacters : eliteFinalSix;
+    if (finaleCalloutRoster.length) {
+      ensureSharedAudioReady();
+      const narratorLeadText = getNarratorLeadLineFromVoiceCues(Array.isArray(gameEndedData && gameEndedData.voiceCues) ? gameEndedData.voiceCues : []);
+      const mvpDelayMs = Math.max(
+        520,
+        Math.min(1900, 520 + Math.round((String(narratorLeadText || '').length || 0) * 14))
+      );
+      Promise.resolve(playSharedFinaleMvpVictoryCallout(finaleCalloutRoster, {
+        context: 'round4-finale-mvp',
+        dedupeFinale: true,
+        delayMs: mvpDelayMs,
+        throttleMs: 0,
+        narratorLeadText,
+        onOverlayUpdate: updateMvpCalloutOverlay
+      })).then((audioResult) => {
+        if (!audioResult || audioResult.skipped) return;
+      }).catch(() => {
+        updateMvpCalloutOverlay({
+          state: 'fallback',
+          subtitle: 'MVP victory callout unavailable.',
+          characterName: mvpDisplayName
+        });
+      });
+    } else {
+      updateMvpCalloutOverlay({
+        state: 'fallback',
+        subtitle: 'No winner roster available for MVP callout.'
+      });
+    }
     refreshRound4PageUi();
     try {
       const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2534,19 +3489,51 @@ function renderCinematicSequence() {
 
   setRevealCeremonyProgress(56, 'Building reveal sequence');
   updateLoadingDockProgress(0, Math.max(1, round4State.queue.length || 1), 'Stabilizing fetch quality');
+  const minLoadingReadyMs = getRevealPerfMode() === 'lite' ? 4800 : 5600;
 
   Promise.allSettled([
     preloadCinematicAssets(),
     prepareRevealSequenceProfiles(),
-    primeAnimationPipeline()
+    primeAnimationPipeline(),
+    prepareRevealAnnouncerVoiceWarmup(),
+    waitForRevealLoadingNarrationToFinish({
+      timeoutMs: 9000,
+      minQuietMs: 260
+    }),
+    new Promise((resolve) => window.setTimeout(resolve, minLoadingReadyMs))
   ]).finally(() => {
-    if (!round4State.animationPrimed) {
-      round4State.animationPrimed = true;
-    }
-    setRevealCeremonyProgress(100, 'Reveal ceremony ready');
-    updateLoadingDockProgress(round4State.queue.length || 1, round4State.queue.length || 1, 'Reveal profile ready');
-    setLoadingBotContext(null, null, '');
-    setLoadingReadyState(true);
+    void (async () => {
+      if (!round4State.animationPrimed) {
+        round4State.animationPrimed = true;
+      }
+      setRevealCeremonyProgress(100, 'Reveal ceremony ready');
+      updateLoadingDockProgress(round4State.queue.length || 1, round4State.queue.length || 1, 'Reveal profile ready');
+
+      const readyCueEvalId = String(round4State.pendingLoadingReadyVoiceCueEvalId || '').trim();
+      const pendingReadyCue = round4State.pendingLoadingReadyVoiceCue && typeof round4State.pendingLoadingReadyVoiceCue === 'object'
+        ? { ...round4State.pendingLoadingReadyVoiceCue }
+        : null;
+      if (
+        pendingReadyCue
+        && readyCueEvalId
+        && round4State.loadingReadyVoiceSpokenEvalId !== readyCueEvalId
+      ) {
+        round4State.loadingReadyVoiceSpokenEvalId = readyCueEvalId;
+        round4State.pendingLoadingReadyVoiceCue = null;
+        try {
+          enqueueSharedVoiceCues([pendingReadyCue], { clear: false });
+          await waitForSharedVoiceCueCompletion(pendingReadyCue, {
+            minHoldMs: 120,
+            timeoutMs: Math.max(1800, Number(pendingReadyCue.estimatedMs || 0) + 1200),
+            startTimeoutMs: 4200
+          });
+        } catch (error) {
+        }
+      }
+
+      setLoadingBotContext(null, null, '');
+      setLoadingReadyState(true);
+    })();
   });
 }
 
@@ -2865,6 +3852,15 @@ function openOVRBreakdown(evalData) {
   const modal = document.getElementById('ovrBreakdownModal');
   if (!modal || !evalData) return;
   try {
+    prefetchSharedCharacterCardBlurbs([evalData], {
+      context: 'ovr-breakdown-open',
+      maxEntries: 1,
+      warmTop: 1,
+      voiceWarmTop: 1,
+      immediate: true
+    });
+  } catch (_prefetchError) {}
+  try {
     const modalContent = modal.querySelector('.ovr-modal-content');
     const modalBody = modal.querySelector('.ovr-modal-body');
     const tierClass = getTierClassFromEval(evalData);
@@ -2915,15 +3911,30 @@ function openOVRBreakdown(evalData) {
 
     const playCardAudioBtn = document.getElementById('modalPlayCardAudio');
     if (playCardAudioBtn) {
-      playCardAudioBtn.textContent = 'Play Card Audio';
-      playCardAudioBtn.onclick = () => {
+      const finalResultsRevealActive = Boolean(
+        document.querySelector('#round4EvalScreen.active .eval-finale-ceremony')
+        || document.querySelector('#finalScreen.active .final-ceremony-shell')
+      );
+      if (finalResultsRevealActive) {
+        playCardAudioBtn.textContent = 'Unavailable after final results reveal';
+        playCardAudioBtn.disabled = true;
+        playCardAudioBtn.onclick = null;
+        if (audioStatusEl) {
+          audioStatusEl.textContent = 'Unavailable after final results reveal';
+          audioStatusEl.classList.add('is-warning');
+          audioStatusEl.classList.remove('is-ready');
+        }
+      } else {
+        playCardAudioBtn.textContent = 'Play Callout';
+        playCardAudioBtn.disabled = false;
+        playCardAudioBtn.onclick = () => {
         ensureSharedAudioReady();
         const status = document.getElementById('modalCardAudioStatus');
-        const requestLabel = 'Play Card Audio';
-        playCardAudioBtn.textContent = 'Searching Clip...';
+        const requestLabel = 'Play Callout';
+        playCardAudioBtn.textContent = 'Loading Callout...';
         playCardAudioBtn.disabled = true;
         if (status) {
-          status.textContent = 'Resolving quote clip (prefetched when available)...';
+          status.textContent = 'Preparing character callout (prefetched when available)...';
           status.classList.remove('is-warning', 'is-ready');
         }
         const clearStatusLater = (expectedText) => {
@@ -2943,24 +3954,40 @@ function openOVRBreakdown(evalData) {
         };
 
         Promise.resolve(playSharedCharacterCardBlurb(evalData, {
-          context: 'ovr-breakdown',
-          throttleMs: 90
+          context: 'ovr-breakdown-click',
+          throttleMs: 0,
+          preemptVoice: true
         })).then((audioResult) => {
-          if (audioResult === false || audioResult == null) {
-            playCardAudioBtn.textContent = 'Audio Unavailable';
+          if (audioResult && audioResult.skipped) {
+            const skippedMsg = audioResult.reason === 'superseded'
+              ? 'Callout updated to your latest click.'
+              : 'Callout skipped.';
+            playCardAudioBtn.textContent = 'Callout Queued';
             if (status) {
-              status.textContent = 'Audio system unavailable for this clip.';
-              status.classList.add('is-warning');
-              status.classList.remove('is-ready');
+              status.textContent = skippedMsg;
+              status.classList.remove('is-warning');
+              status.classList.add('is-ready');
             }
-            clearStatusLater('Audio system unavailable for this clip.');
+            clearStatusLater(skippedMsg);
             restoreLabel(requestLabel);
             return;
           }
 
-          if (audioResult && (audioResult.mode === 'no-audio-fallback' || audioResult.mode === 'no-audio-library-empty')) {
-            const prompt = String(audioResult.prompt || '').trim() || `No quote clip found for ${evalData.character} yet.`;
-            playCardAudioBtn.textContent = 'No Clip Found :(';
+          if (audioResult === false || audioResult == null) {
+            playCardAudioBtn.textContent = 'Audio Unavailable';
+            if (status) {
+              status.textContent = 'Audio system unavailable for this callout.';
+              status.classList.add('is-warning');
+              status.classList.remove('is-ready');
+            }
+            clearStatusLater('Audio system unavailable for this callout.');
+            restoreLabel(requestLabel);
+            return;
+          }
+
+          if (audioResult && audioResult.mode === 'no-audio-fallback') {
+            const prompt = String(audioResult.prompt || '').trim() || `No callout phrase available for ${evalData.character} yet.`;
+            playCardAudioBtn.textContent = 'No Callout :(';
             if (status) {
               status.textContent = prompt;
               status.classList.add('is-warning');
@@ -2972,25 +3999,26 @@ function openOVRBreakdown(evalData) {
           }
 
           const isSpeechMode = typeof audioResult.mode === 'string' && audioResult.mode.startsWith('speech');
-          playCardAudioBtn.textContent = isSpeechMode ? 'Playing Quote' : 'Playing Clip';
+          playCardAudioBtn.textContent = isSpeechMode ? 'Playing Callout' : 'Playing Audio';
           if (status) {
-            status.textContent = isSpeechMode ? 'Quote voice playing' : 'Quote clip playing';
+            status.textContent = isSpeechMode ? 'Character callout queued / playing' : 'Character audio playing';
             status.classList.add('is-ready');
             status.classList.remove('is-warning');
           }
-          clearStatusLater(isSpeechMode ? 'Quote voice playing' : 'Quote clip playing');
+          clearStatusLater(isSpeechMode ? 'Character callout queued / playing' : 'Character audio playing');
           restoreLabel(requestLabel);
         }).catch(() => {
           playCardAudioBtn.textContent = 'Audio Error';
           if (status) {
-            status.textContent = 'Audio search failed. Try again.';
+            status.textContent = 'Callout lookup failed. Try again.';
             status.classList.add('is-warning');
             status.classList.remove('is-ready');
           }
-          clearStatusLater('Audio search failed. Try again.');
+          clearStatusLater('Callout lookup failed. Try again.');
           restoreLabel(requestLabel);
         });
-      };
+        };
+      }
     }
 
     const scenarioEl = document.getElementById('modalScenarioRelevance');
@@ -3153,12 +4181,28 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
 
     window.socket.on('round4Evaluated', (data) => {
       if (!data || round4State.transitionRunning) return;
-      if (round4State.evaluationId && round4State.evaluationId === data.evaluationId && round4State.rendered) return;
+      const incomingEvalId = String(data && data.evaluationId || '').trim();
+      if (
+        incomingEvalId
+        && round4State.evaluationId
+        && String(round4State.evaluationId) === incomingEvalId
+        && (
+          round4State.rendered
+          || round4State.cinematicRenderTimer
+          || round4State.preloadPromise
+          || round4State.revealPreparePromise
+          || round4State.animationPrimePromise
+        )
+      ) {
+        return;
+      }
 
       round4State.evaluationId = data.evaluationId || null;
       round4State.allTeamEvaluations = data.allTeamEvaluations || data.teamEvaluations || {};
       round4State.finalLeaderboard = Array.isArray(data.finalLeaderboard) ? data.finalLeaderboard : [];
       round4State.revealConfig = data.revealTimeline || null;
+      round4State.pendingLoadingReadyVoiceCueEvalId = incomingEvalId || String(round4State.evaluationId || '').trim() || 'n/a';
+      round4State.pendingLoadingReadyVoiceCue = buildRound4LoadingReadyCue(round4State.pendingLoadingReadyVoiceCueEvalId);
       try {
         const prefetchEntries = Object.values(round4State.allTeamEvaluations || {}).flatMap((team) => (
           Array.isArray(team && team.evaluations) ? team.evaluations : []
@@ -3167,12 +4211,13 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
           prefetchSharedCharacterCardBlurbs(prefetchEntries, {
             context: 'round4-evaluated',
             maxEntries: 24,
-            warmTop: 6
+            warmTop: 12,
+            voiceWarmTop: 18,
+            immediate: true
           });
         }
       } catch (prefetchError) {
       }
-
       const loading = document.getElementById('evalLoading');
       const title = document.getElementById('evalLoadingTitle');
       const subtitle = document.getElementById('evalLoadingSubtitle');
@@ -3184,7 +4229,14 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       updateLoadingDockProgress(0, 100, 'Scoring final teams');
       setLoadingBotContext(data && data.scenario, data && data.twist, '');
 
-      window.setTimeout(renderCinematicSequence, 420);
+      if (round4State.cinematicRenderTimer) {
+        window.clearTimeout(round4State.cinematicRenderTimer);
+        round4State.cinematicRenderTimer = null;
+      }
+      round4State.cinematicRenderTimer = window.setTimeout(() => {
+        round4State.cinematicRenderTimer = null;
+        renderCinematicSequence();
+      }, 420);
     });
 
     window.socket.on('round4EvaluationError', (error) => {

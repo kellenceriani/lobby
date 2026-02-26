@@ -23,6 +23,13 @@ import {
   toggleScenario,
   toggleResultsDetails
 } from './ui.js';
+import { VoiceManager } from './audio/voiceManager.js';
+import { classifyEntryArchetype, mapSpeechStyleToArchetype } from './audio/classifyArchetype.js';
+import { ARCHETYPES } from './audio/archetypes.js';
+import {
+  AdaptiveTtsVoiceEngine as KokoroVoiceEngine,
+  ADAPTIVE_NARRATOR_VOICE_IDS as KOKORO_VOICE_FALLBACKS
+} from './audio/adaptiveTtsVoiceEngine.js';
 
 const socket = io(window.location.origin, {
   path: '/socket.io',
@@ -544,6 +551,7 @@ const AUDIO_CATEGORY_DEFAULTS = {
   reveal: { enabled: true, volume: 0.88 },
   card: { enabled: true, volume: 0.92 }
 };
+const KOKORO_ONLY_VOICE_SYSTEM = true;
 const audioState = {
   unlocked: false,
   htmlMediaUnlocked: false,
@@ -563,6 +571,56 @@ const audioState = {
   musicEnabled: AUDIO_CATEGORY_DEFAULTS.music.enabled,
   revealEnabled: AUDIO_CATEGORY_DEFAULTS.reveal.enabled,
   cardEnabled: AUDIO_CATEGORY_DEFAULTS.card.enabled,
+  voiceEnabled: true,
+  voiceExpressiveMode: true,
+  voiceSupported: null,
+  voiceReady: false,
+  voiceUnlocked: false,
+  voiceQueueLength: 0,
+  voiceSpeaking: false,
+  voiceActiveCueText: '',
+  voiceStatusText: '',
+  voiceStatusTone: '',
+  voiceNarratorVoiceId: '',
+  voiceCharacterVoiceId: '',
+  voiceCharacterProfile: 'auto_archetype',
+  voiceCatalog: [],
+  voiceCatalogSignature: '',
+  voicePreviewCharacterIndex: 0,
+  voiceBackendLastLabel: '',
+  kokoroEnabled: true,
+  kokoroAutoLoad: true,
+  kokoroLoading: false,
+  kokoroReady: false,
+  kokoroError: '',
+  kokoroStatusText: '',
+  kokoroStatusTone: '',
+  kokoroNarratorVoiceId: 'bm_george',
+  kokoroCharacterVoiceId: '',
+  kokoroCatalog: [],
+  kokoroCatalogSignature: '',
+  kokoroLastLoadMs: 0,
+  kokoroDevice: '',
+  kokoroDtype: '',
+  kokoroLoadProgressPct: 0,
+  kokoroLoadProgressText: '',
+  kokoroLoadProgressFile: '',
+  kokoroLoadPhase: '',
+  kokoroWarmupDone: false,
+  kokoroWarmupLoading: false,
+  kokoroWarmupWarmedCount: 0,
+  kokoroCastWarmupDone: false,
+  kokoroCastWarmupLoading: false,
+  kokoroPanelOpen: false,
+  kokoroNarratorQueuedVoiceId: '',
+  kokoroNarratorQueuedBy: '',
+  kokoroNarratorQueuedAt: 0,
+  kokoroNarratorQueuedSig: '',
+  kokoroNarratorQueuedPulseUntil: 0,
+  kokoroNarratorPeerPingCount: 0,
+  kokoroNarratorPeerPingSeenAt: 0,
+  kokoroHostPreviewWarmupDone: false,
+  kokoroHostPreviewWarmupLoading: false,
   currentMusicScene: 'join',
   currentScreenScene: 'join',
   musicLoopToken: 0,
@@ -591,18 +649,13 @@ const audioState = {
   lastCardBlurbAt: 0,
   lastCardBlurbSig: '',
   lastFinaleAutoplaySig: '',
+  lastFinaleVictoryAutoplaySig: '',
   lastFinaleNoAudioToastSig: '',
-  cardClipProbeCache: new Map(),
   cardClipStats: null,
-  cardClipStatsPromise: null,
   cardClipStatsFetchedAt: 0,
   cardClipLibrarySignature: '',
   cardClipResolverApiAvailable: null,
   cardClipResolverApiRetryAt: 0,
-  cardClipIndex: null,
-  cardClipIndexPromise: null,
-  cardSnippetManifest: null,
-  cardSnippetManifestPromise: null,
   cardSnippetMatchCache: new Map(),
   cardSnippetBatchMetaCache: new Map(),
   cardClipPrefetchQueue: [],
@@ -610,17 +663,12 @@ const audioState = {
   cardClipPrefetchDrainTimer: null,
   cardClipPrefetchInFlight: false,
   cardClipPrefetchLastLogAt: 0,
-  cardClipWarmUrlCache: new Set(),
-  cardClipWarmQueue: [],
-  cardClipWarmQueuedUrls: new Set(),
-  cardClipWarmActive: 0,
-  cardClipWarmers: [],
   mediaUrlProbeCache: new Map(),
-  cardPlaybackElement: null,
   cardPlaybackGainScalar: 1,
-  cardPlaybackStopTimer: null,
   cardPlaybackToken: 0,
   cardSpeechToken: 0,
+  voiceCueCache: new Map(),
+  voiceEntryArchetypeCache: new Map(),
   speechVoices: [],
   speechVoicesLoaded: false,
   speechVoicesLoading: false,
@@ -694,6 +742,2342 @@ function hashAudioSeed(input = '') {
   return Math.abs(hash >>> 0);
 }
 
+let voiceManagerInstance = null;
+let voiceStatusResetTimer = null;
+const voiceCuePrefetchState = {
+  queue: [],
+  queuedKeys: new Set(),
+  inFlight: false,
+  timerId: null,
+  lastLogAt: 0
+};
+
+function setVoiceStatus(text = '', tone = '') {
+  audioState.voiceStatusText = String(text || '').trim();
+  audioState.voiceStatusTone = String(tone || '').trim().toLowerCase();
+  if (voiceStatusResetTimer) {
+    window.clearTimeout(voiceStatusResetTimer);
+    voiceStatusResetTimer = null;
+  }
+  if (audioState.voiceStatusText) {
+    voiceStatusResetTimer = window.setTimeout(() => {
+      audioState.voiceStatusText = '';
+      audioState.voiceStatusTone = '';
+      syncAudioControlUI();
+    }, 4200);
+  }
+  syncAudioControlUI();
+}
+
+function getVoiceStatusText() {
+  if (audioState.voiceEnabled === false) return 'Voice cues off';
+  if (audioState.kokoroLoading) return 'Loading adaptive neural voice routing...';
+  if (audioState.kokoroReady) {
+    if (audioState.voiceSpeaking && audioState.voiceActiveCueText) return `Neural voice speaking: ${audioState.voiceActiveCueText}`;
+    return 'Voice ready (adaptive neural)';
+  }
+  if (audioState.kokoroError) return `Neural voice not ready: ${audioState.kokoroError}`;
+  if (!audioState.voiceUnlocked) return 'Tap to enable voice narration (iOS/mobile requires gesture)';
+  if (audioState.muted) return 'Voice muted by master audio';
+  if (audioState.voiceSpeaking && audioState.voiceActiveCueText) return `Speaking: ${audioState.voiceActiveCueText}`;
+  if (audioState.voiceQueueLength > 0) return `Voice queue ready (${audioState.voiceQueueLength})`;
+  return 'Neural voice queued (awaiting provider warmup)';
+}
+
+function getCharacterRuntimeModeText() {
+  return 'Automatic archetype routing always uses the curated 4-voice cast, with gold-standard archetype mapping plus prosody shaping.';
+}
+
+function getVoiceCueCategoryVolume(cue = {}) {
+  if (audioState.muted || audioState.voiceEnabled === false) return 0;
+  const type = String(cue && cue.type || '').toLowerCase();
+  const master = clampAudioLevel(audioState.masterVolume, 0.9);
+  if (type === 'entry') {
+    const previewCue = isVoicePreviewCue(cue)
+      || /voice studio:\s*character preview/i.test(String(cue && cue.subtitleText || ''));
+    if (!audioState.cardEnabled && !previewCue) return 0;
+    const cardVolume = clampAudioLevel(
+      previewCue ? Math.max(0.7, Number(audioState.cardVolume) || AUDIO_CATEGORY_DEFAULTS.card.volume) : audioState.cardVolume,
+      AUDIO_CATEGORY_DEFAULTS.card.volume
+    );
+    return Math.max(0, Math.min(1, master * cardVolume));
+  }
+  return Math.max(0, Math.min(1, master * 0.82));
+}
+
+function normalizeVoiceChoiceId(value = '') {
+  return String(value || '').trim();
+}
+
+const CHARACTER_VOICE_PROFILE_OPTIONS = Object.freeze([
+  { id: 'auto_archetype', label: 'Auto Mix (Runtime Default)', description: 'Gameplay uses the curated 4-voice cast with archetype-specific voice + prosody shaping' },
+  { id: 'villain', label: 'Preview: Villain / Dark', description: 'Gold voice: Ryan (UK male) with darker pacing and lower pitch feel' },
+  { id: 'heroic', label: 'Preview: Heroic / Cinematic', description: 'Gold voice: Guy (US male) with steady cinematic pacing' },
+  { id: 'cartoon', label: 'Preview: Cartoon / Bright', description: 'Gold voice: Aria (US female) with brighter, faster delivery' },
+  { id: 'robotic', label: 'Preview: Robotic / Synthetic', description: 'Gold voice: Guy/Ryan with tighter cadence and flatter shaping' },
+  { id: 'spooky', label: 'Preview: Spooky / Whispery', description: 'Gold voice: Ryan (UK male) slowed for ominous cadence' },
+  { id: 'chaotic', label: 'Preview: Chaotic / Meme', description: 'Gold voice: Aria (US female) fast + animated timing' }
+]);
+
+function normalizeCharacterVoiceProfile(value = '') {
+  const raw = String(value || '').trim().toLowerCase();
+  const found = CHARACTER_VOICE_PROFILE_OPTIONS.find((item) => String(item.id || '').toLowerCase() === raw);
+  return found ? found.id : 'auto_archetype';
+}
+
+function getCharacterVoiceProfileOption(profileId = '') {
+  const normalized = normalizeCharacterVoiceProfile(profileId);
+  return CHARACTER_VOICE_PROFILE_OPTIONS.find((item) => item.id === normalized) || CHARACTER_VOICE_PROFILE_OPTIONS[0];
+}
+
+function setVoiceCharacterProfile(nextProfile, { persist = true } = {}) {
+  audioState.voiceCharacterProfile = normalizeCharacterVoiceProfile(nextProfile);
+  syncAudioControlUI();
+  if (persist) saveAudioPreferences();
+}
+
+function getPreferredVoiceIdForCue(cue = {}) {
+  const type = String(cue && cue.type || '').toLowerCase();
+  if (type === 'entry') {
+    return normalizeVoiceChoiceId(audioState.voiceCharacterVoiceId);
+  }
+  return normalizeVoiceChoiceId(audioState.voiceNarratorVoiceId);
+}
+
+const KOKORO_VOICE_PRESET_META = Object.freeze({
+  af_heart: {
+    shortName: 'Jenny',
+    menuLabel: 'Jenny (US Female) - Neural Host',
+    roleHint: 'Narration • Female 1 • Edge Neural'
+  },
+  af_bella: {
+    shortName: 'Aria',
+    menuLabel: 'Aria (US Female) - Neural Bright',
+    roleHint: 'Narration • Female 2 • Edge Neural'
+  },
+  am_michael: {
+    shortName: 'Guy',
+    menuLabel: 'Guy (US Male) - Neural Heroic',
+    roleHint: 'Narration • Male 1 • Edge Neural'
+  },
+  bm_george: {
+    shortName: 'Ryan',
+    menuLabel: 'Ryan (UK Male) - Neural Dramatic (Suggested)',
+    roleHint: 'Narration • Male 2 • Edge Neural'
+  }
+});
+const KOKORO_VOICE_PRESET_LABELS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(KOKORO_VOICE_PRESET_META).map(([id, meta]) => [id, String(meta && meta.menuLabel || id)])
+  )
+);
+const DEFAULT_NARRATOR_VOICE_ID = 'bm_george';
+const KOKORO_CURATED_VOICE_IDS = Object.freeze(KOKORO_VOICE_FALLBACKS.slice());
+const KOKORO_VOICE_PREWARM_TEXT_BY_ID = Object.freeze({
+  af_heart: 'Round begins.',
+  af_bella: "I'm ready!",
+  am_michael: 'Stay focused.',
+  bm_george: 'Final brief. Scenario locked.'
+});
+const KOKORO_VOICE_PREWARM_SPEED_BY_ID = Object.freeze({
+  af_heart: 1.0,
+  af_bella: 1.08,
+  am_michael: 0.98,
+  bm_george: 0.92
+});
+const KOKORO_HOST_PREVIEW_TEXT = 'Final brief. Scenario locked. Twist incoming.';
+const KOKORO_HOST_PREVIEW_SPEED = 0.92;
+
+function isCurrentPlayerHost() {
+  return Boolean(player && player.name && roomState && roomState.host && String(player.name) === String(roomState.host));
+}
+
+function getKokoroNarratorLabelById(voiceId = '') {
+  const normalized = normalizeKokoroVoiceId(voiceId) || DEFAULT_NARRATOR_VOICE_ID;
+  const entry = findKokoroCatalogEntryById(normalized);
+  return entry ? formatKokoroCatalogLabel(entry) : (KOKORO_VOICE_PRESET_LABELS[normalized] || normalized);
+}
+
+function clearKokoroNarratorPeerPing({ sync = true } = {}) {
+  audioState.kokoroNarratorPeerPingCount = 0;
+  audioState.kokoroNarratorPeerPingSeenAt = Date.now();
+  if (sync) syncAudioControlUI();
+}
+
+function setKokoroVoiceStudioOpen(open, { clearPing = true } = {}) {
+  audioState.kokoroPanelOpen = open === true;
+  if (audioState.kokoroPanelOpen && clearPing) {
+    clearKokoroNarratorPeerPing({ sync: false });
+  }
+  syncAudioControlUI();
+}
+
+function getKokoroNarratorCollapsedSummaryText() {
+  const narratorId = normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+  const narratorLabel = getKokoroNarratorLabelById(narratorId);
+  const queuedBy = String(audioState.kokoroNarratorQueuedBy || '').trim();
+  const queuedAt = Number(audioState.kokoroNarratorQueuedAt) || 0;
+  if (queuedAt > 0 && queuedBy) {
+    const ageMs = Date.now() - queuedAt;
+    if (ageMs < 120000) {
+      const byText = queuedBy === String(player && player.name || '') ? 'you' : queuedBy;
+      return `Narrator: ${narratorLabel} (queued by ${byText})`;
+    }
+  }
+  return `Narrator: ${narratorLabel}`;
+}
+
+function applyQueuedKokoroNarratorVoice(payload = {}, { local = false } = {}) {
+  const narratorVoiceId = normalizeKokoroVoiceId(payload && payload.narratorVoiceId) || DEFAULT_NARRATOR_VOICE_ID;
+  const queuedBy = String(payload && payload.queuedBy || '').trim();
+  const queuedAt = Number(payload && payload.queuedAt) || Date.now();
+  const sig = `${narratorVoiceId}|${queuedBy}|${queuedAt}`;
+  if (sig && sig === String(audioState.kokoroNarratorQueuedSig || '')) {
+    return;
+  }
+  audioState.kokoroNarratorQueuedSig = sig;
+  audioState.kokoroNarratorQueuedVoiceId = narratorVoiceId;
+  audioState.kokoroNarratorQueuedBy = queuedBy;
+  audioState.kokoroNarratorQueuedAt = queuedAt;
+  audioState.kokoroNarratorQueuedPulseUntil = Date.now() + 9000;
+  setKokoroVoiceChoice('narrator', narratorVoiceId, { persist: true });
+
+  if (!audioState.kokoroWarmupDone && !audioState.kokoroWarmupLoading) {
+    void ensureKokoroStartupWarmup({ source: local ? 'host-change' : 'room-sync' })
+      .then(() => ensureKokoroHostPreviewClipWarmup({ source: local ? 'host-change-preview' : 'room-sync-preview', deferIfBusy: false }))
+      .catch(() => {});
+  } else {
+    void ensureKokoroHostPreviewClipWarmup({ source: local ? 'host-change' : 'room-sync', deferIfBusy: true });
+  }
+
+  const narratorLabel = getKokoroNarratorLabelById(narratorVoiceId);
+  const myName = String(player && player.name || '');
+  const isSelf = queuedBy && queuedBy === myName;
+
+  if (!local && !isSelf && queuedBy) {
+    audioState.kokoroNarratorPeerPingCount = Math.min(9, (Number(audioState.kokoroNarratorPeerPingCount) || 0) + 1);
+    showToast(`🎙️ ${queuedBy} queued narrator voice: ${narratorLabel}`, 'info', 3200);
+    try { playMessageSound(); } catch (error) {}
+  }
+
+  if (isSelf || local) {
+    setKokoroStatus(`Queued narrator for this room: ${narratorLabel}`, 'active');
+    setVoiceStatus(`Narrator queued: ${narratorLabel}`, 'active');
+  } else if (queuedBy) {
+    setKokoroStatus(`Host queued narrator: ${narratorLabel} (${queuedBy})`, 'active');
+  }
+  syncAudioControlUI();
+}
+
+function queueRoomKokoroNarratorVoice(narratorVoiceId = '') {
+  const voiceId = normalizeKokoroVoiceId(narratorVoiceId) || DEFAULT_NARRATOR_VOICE_ID;
+  const queuedBy = String(player && player.name || '').trim();
+  const queuedAt = Date.now();
+  applyQueuedKokoroNarratorVoice({ narratorVoiceId: voiceId, queuedBy, queuedAt }, { local: true });
+  if (socket && socket.connected && player && player.room && isCurrentPlayerHost()) {
+    socket.emit('queueNarratorVoice', { voiceId });
+  }
+}
+
+let kokoroVoiceEngineInstance = null;
+let kokoroStatusResetTimer = null;
+let kokoroStartupWarmupPromise = null;
+let kokoroFullCastWarmupPromise = null;
+let kokoroHostPreviewWarmupPromise = null;
+let kokoroCastWarmupScheduled = false;
+let kokoroGesturePrimeAt = 0;
+const kokoroPreparedVoiceIds = new Set();
+const kokoroPreviewClipWarmedVoiceIds = new Set();
+
+function setKokoroStatus(text = '', tone = '') {
+  audioState.kokoroStatusText = String(text || '').trim();
+  audioState.kokoroStatusTone = String(tone || '').trim().toLowerCase();
+  if (kokoroStatusResetTimer) {
+    window.clearTimeout(kokoroStatusResetTimer);
+    kokoroStatusResetTimer = null;
+  }
+  if (audioState.kokoroStatusText) {
+    kokoroStatusResetTimer = window.setTimeout(() => {
+      audioState.kokoroStatusText = '';
+      audioState.kokoroStatusTone = '';
+      syncAudioControlUI();
+    }, 5200);
+  }
+  syncAudioControlUI();
+}
+
+function buildKokoroCatalogSignature(entries = []) {
+  if (!Array.isArray(entries) || !entries.length) return '';
+  return entries
+    .map((entry) => `${String(entry && entry.id || '')}|${String(entry && entry.name || '')}|${String(entry && entry.overallGrade || '')}`)
+    .join('||');
+}
+
+function buildKokoroFallbackCatalogEntry(id = '') {
+  const voiceId = String(id || '').trim();
+  const meta = KOKORO_VOICE_PRESET_META[voiceId] || null;
+  const isUk = voiceId.startsWith('bf_') || voiceId.startsWith('bm_');
+  return {
+    id: voiceId,
+    name: meta && meta.shortName ? meta.shortName : (voiceId || 'Voice'),
+    language: isUk ? 'en-gb' : 'en-us',
+    overallGrade: '',
+    roleHint: meta && meta.roleHint ? meta.roleHint : ''
+  };
+}
+
+function getKokoroPreparedVoiceCount() {
+  let count = 0;
+  KOKORO_CURATED_VOICE_IDS.forEach((id) => {
+    if (kokoroPreparedVoiceIds.has(id)) count += 1;
+  });
+  return count;
+}
+
+function markKokoroVoicesPrepared(results = []) {
+  if (!Array.isArray(results)) return 0;
+  results.forEach((entry) => {
+    if (!entry || entry.ok !== true) return;
+    const id = normalizeKokoroVoiceId(entry.voiceId || '');
+    if (id) kokoroPreparedVoiceIds.add(id);
+  });
+  const count = getKokoroPreparedVoiceCount();
+  audioState.kokoroWarmupWarmedCount = count;
+  audioState.kokoroCastWarmupDone = count >= KOKORO_CURATED_VOICE_IDS.length;
+  const narratorId = normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+  audioState.kokoroWarmupDone = kokoroPreparedVoiceIds.has(narratorId);
+  return count;
+}
+
+function getMissingKokoroVoiceIds(targetVoiceIds = []) {
+  const ids = Array.isArray(targetVoiceIds) ? targetVoiceIds : [];
+  const normalized = [];
+  const seen = new Set();
+  ids.forEach((id) => {
+    const voiceId = normalizeKokoroVoiceId(id);
+    if (!voiceId || seen.has(voiceId)) return;
+    seen.add(voiceId);
+    if (!kokoroPreparedVoiceIds.has(voiceId)) normalized.push(voiceId);
+  });
+  return normalized;
+}
+
+function getKokoroCatalogEntries() {
+  return Array.isArray(audioState.kokoroCatalog) ? audioState.kokoroCatalog : [];
+}
+
+function findKokoroCatalogEntryById(id = '') {
+  const target = String(id || '').trim();
+  if (!target) return null;
+  const catalog = getKokoroCatalogEntries();
+  for (let i = 0; i < catalog.length; i += 1) {
+    const item = catalog[i];
+    if (String(item && item.id || '') === target) return item;
+  }
+  return null;
+}
+
+function buildKokoroFallbackCatalog() {
+  return KOKORO_CURATED_VOICE_IDS.map((id) => buildKokoroFallbackCatalogEntry(id));
+}
+
+function formatKokoroCatalogLabel(entry = {}) {
+  const id = String(entry && entry.id || '').trim();
+  const preset = KOKORO_VOICE_PRESET_META[id];
+  if (preset && preset.menuLabel) return preset.menuLabel;
+  const name = String(entry && entry.name || id || 'Voice').trim();
+  const lang = String(entry && entry.language || '').trim();
+  const grade = String(entry && entry.overallGrade || '').trim();
+  const roleHint = String(entry && entry.roleHint || '').trim();
+  const parts = [name];
+  if (lang) parts.push(lang.toUpperCase());
+  if (grade) parts.push(grade);
+  if (roleHint) parts.push(roleHint);
+  return parts.join(' - ');
+}
+
+function normalizeKokoroVoiceId(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (!KOKORO_CURATED_VOICE_IDS.includes(raw)) return '';
+  if (findKokoroCatalogEntryById(raw)) return raw;
+  if (KOKORO_CURATED_VOICE_IDS.includes(raw)) return raw;
+  return '';
+}
+
+function refreshKokoroCatalogFromEngine(engine = null) {
+  const target = engine || kokoroVoiceEngineInstance;
+  let catalog = [];
+  if (target && typeof target.getCatalog === 'function') {
+    try {
+      catalog = target.getCatalog() || [];
+    } catch (error) {
+      catalog = [];
+    }
+  }
+  if (!Array.isArray(catalog) || !catalog.length) {
+    catalog = buildKokoroFallbackCatalog();
+  } else {
+    const byId = new Map();
+    catalog.forEach((entry) => {
+      const id = String(entry && entry.id || '').trim();
+      if (!id) return;
+      byId.set(id, {
+        ...entry,
+        roleHint: (KOKORO_VOICE_PRESET_META[id] && KOKORO_VOICE_PRESET_META[id].roleHint) || ''
+      });
+    });
+    catalog = KOKORO_CURATED_VOICE_IDS.map((id) => byId.get(id) || buildKokoroFallbackCatalogEntry(id));
+  }
+  const sig = buildKokoroCatalogSignature(catalog);
+  const changed = sig !== audioState.kokoroCatalogSignature;
+  audioState.kokoroCatalog = catalog;
+  audioState.kokoroCatalogSignature = sig;
+
+  let prefsChanged = false;
+  if (audioState.kokoroNarratorVoiceId && !findKokoroCatalogEntryById(audioState.kokoroNarratorVoiceId)) {
+    audioState.kokoroNarratorVoiceId = DEFAULT_NARRATOR_VOICE_ID;
+    prefsChanged = true;
+  }
+  if (audioState.kokoroCharacterVoiceId && !findKokoroCatalogEntryById(audioState.kokoroCharacterVoiceId)) {
+    audioState.kokoroCharacterVoiceId = '';
+    prefsChanged = true;
+  }
+  if (prefsChanged) saveAudioPreferences();
+  return changed || prefsChanged;
+}
+
+function getKokoroStatusText() {
+  if (audioState.kokoroEnabled !== true) return 'Adaptive voice backend standby';
+  if (audioState.kokoroLoading) {
+    const progressPct = Math.round(Math.max(0, Math.min(100, Number(audioState.kokoroLoadProgressPct) || 0)));
+    const progressText = String(audioState.kokoroLoadProgressText || '').trim();
+    return progressText
+      ? `${progressText}${progressPct > 0 && progressPct < 100 && !progressText.includes('%') ? ` (${progressPct}%)` : ''}`
+      : 'Loading adaptive voice router... neural providers are warming while browser fallback stays available.';
+  }
+  if (audioState.kokoroCastWarmupLoading) return `Neural narration ready. Background cache warmup running (${Math.max(0, Number(audioState.kokoroWarmupWarmedCount) || 0)}/4 prepared)...`;
+  if (audioState.kokoroHostPreviewWarmupLoading) return 'Neural narration ready. Caching narrator preview clip...';
+  if (audioState.kokoroWarmupLoading) return 'Adaptive voice loaded. Pre-warming narrator voice for instant lobby narration...';
+  if (audioState.kokoroReady) {
+    const narrator = findKokoroCatalogEntryById(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID);
+    const narratorLabel = narrator ? formatKokoroCatalogLabel(narrator) : (audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID);
+    const detail = audioState.kokoroLastLoadMs > 0 ? ` (cold setup ${Math.round(audioState.kokoroLastLoadMs)}ms)` : '';
+    const preparedCount = Math.max(0, Number(audioState.kokoroWarmupWarmedCount) || 0);
+    const warmDetail = audioState.kokoroCastWarmupDone
+      ? ` • cast ${preparedCount}/4 prepared`
+      : (audioState.kokoroWarmupDone ? ` • host ready (${preparedCount}/4 prepared)` : '');
+    return `Adaptive voice ready • Narrator ${narratorLabel}${detail}${warmDetail}`;
+  }
+  if (audioState.kokoroError) return `Adaptive voice unavailable: ${audioState.kokoroError}`;
+  return 'Adaptive voice queued for startup auto-load';
+}
+
+function syncKokoroVoiceSelectControl(selectEl, {
+  autoLabel = '',
+  selectedId = ''
+} = {}) {
+  if (!selectEl) return;
+  const catalog = getKokoroCatalogEntries();
+  const optionsData = [];
+  if (autoLabel) optionsData.push({ id: '', label: autoLabel });
+  catalog.forEach((entry) => {
+    optionsData.push({
+      id: String(entry && entry.id || ''),
+      label: formatKokoroCatalogLabel(entry)
+    });
+  });
+  const sig = optionsData.map((item) => `${item.id}|${item.label}`).join('||');
+  if (selectEl.dataset.kokoroOptionsSig !== sig) {
+    const frag = document.createDocumentFragment();
+    optionsData.forEach((item) => {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = item.label;
+      option.title = item.label;
+      frag.appendChild(option);
+    });
+    selectEl.innerHTML = '';
+    selectEl.appendChild(frag);
+    selectEl.dataset.kokoroOptionsSig = sig;
+  }
+  const safeSelectedId = optionsData.some((item) => item.id === selectedId) ? selectedId : (optionsData[0] ? optionsData[0].id : '');
+  if (document.activeElement !== selectEl && selectEl.value !== safeSelectedId) {
+    selectEl.value = safeSelectedId;
+  }
+  const selectedOption = selectEl.options && selectEl.selectedIndex >= 0 ? selectEl.options[selectEl.selectedIndex] : null;
+  if (selectedOption) {
+    selectEl.title = String(selectedOption.textContent || '');
+  }
+}
+
+function setKokoroEnabled(nextEnabled, { persist = true, eagerLoad = false } = {}) {
+  audioState.kokoroEnabled = KOKORO_ONLY_VOICE_SYSTEM ? true : (nextEnabled === true);
+  if (persist) saveAudioPreferences();
+  syncAudioControlUI();
+  if (audioState.kokoroEnabled && (eagerLoad || audioState.kokoroAutoLoad !== false)) {
+    void ensureKokoroStartupWarmup({ source: 'toggle' });
+  }
+}
+
+function toggleKokoroEnabled() {
+  if (KOKORO_ONLY_VOICE_SYSTEM) {
+    setKokoroStatus('Adaptive neural voice is the live backend in this build.', 'active');
+    void ensureKokoroStartupWarmup({ source: 'toggle' });
+    return;
+  }
+  setKokoroEnabled(!(audioState.kokoroEnabled === true), { eagerLoad: true });
+}
+
+function setKokoroVoiceChoice(kind = 'narrator', voiceId = '', { persist = true } = {}) {
+  const key = String(kind || '').toLowerCase() === 'character' ? 'kokoroCharacterVoiceId' : 'kokoroNarratorVoiceId';
+  const prev = String(audioState[key] || '');
+  audioState[key] = normalizeKokoroVoiceId(voiceId);
+  if (key === 'kokoroNarratorVoiceId' && String(audioState[key] || '') !== prev) {
+    const nextNarratorId = normalizeKokoroVoiceId(audioState[key]) || DEFAULT_NARRATOR_VOICE_ID;
+    audioState.kokoroHostPreviewWarmupDone = kokoroPreviewClipWarmedVoiceIds.has(nextNarratorId);
+    kokoroHostPreviewWarmupPromise = null;
+  }
+  const narratorId = normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+  audioState.kokoroWarmupDone = kokoroPreparedVoiceIds.has(narratorId);
+  audioState.kokoroWarmupWarmedCount = getKokoroPreparedVoiceCount();
+  syncAudioControlUI();
+  if (persist) saveAudioPreferences();
+}
+
+function getKokoroVoiceEngine() {
+  if (kokoroVoiceEngineInstance) return kokoroVoiceEngineInstance;
+  kokoroVoiceEngineInstance = new KokoroVoiceEngine({
+    maxCacheEntries: 20,
+    allowedVoiceIds: KOKORO_CURATED_VOICE_IDS,
+    dtype: 'q4f16',
+    device: 'wasm',
+    onStateChange(state) {
+      audioState.kokoroLoading = Boolean(state && state.loading);
+      audioState.kokoroReady = Boolean(state && state.ready);
+      audioState.kokoroError = String(state && state.error || '');
+      audioState.kokoroLastLoadMs = Number(state && state.lastLoadMs) || audioState.kokoroLastLoadMs || 0;
+      audioState.kokoroDevice = String(state && state.device || '');
+      audioState.kokoroDtype = String(state && state.dtype || '');
+      const progress = state && state.loadProgress && typeof state.loadProgress === 'object' ? state.loadProgress : null;
+      audioState.kokoroLoadPhase = String(progress && progress.phase || '');
+      audioState.kokoroLoadProgressPct = Math.max(0, Math.min(100, Number(progress && progress.pct) || 0));
+      audioState.kokoroLoadProgressFile = String(progress && progress.file || '');
+      const progressLabel = String(progress && progress.label || '').trim();
+      const progressFile = String(progress && progress.file || '').trim();
+      const progressPct = Math.max(0, Math.min(100, Number(progress && progress.pct) || 0));
+      audioState.kokoroLoadProgressText = progressLabel
+        ? `${progressLabel}${progressFile ? ` • ${progressFile}` : ''}${progressPct > 0 && progressPct < 100 ? ` • ${Math.round(progressPct)}%` : ''}`
+        : '';
+      refreshKokoroCatalogFromEngine(kokoroVoiceEngineInstance);
+      syncAudioControlUI();
+      try {
+        if (startupBootstrapState && startupBootstrapState.started) {
+          const liveDetail = String(audioState.kokoroLoadProgressText || '').trim();
+          if (liveDetail) {
+            setStartupBootstrapTaskStatus('kokoro-host', 'active', liveDetail);
+            renderStartupBootstrapTasks();
+          }
+          updateStartupBootstrapUi(
+            startupBootstrapState.done,
+            startupBootstrapState.total,
+            startupBootstrapState.currentLabel || '',
+            ''
+          );
+        }
+      } catch (error) {
+      }
+    }
+  });
+  refreshKokoroCatalogFromEngine(kokoroVoiceEngineInstance);
+  return kokoroVoiceEngineInstance;
+}
+
+async function ensureKokoroVoiceEngineLoaded({ source = 'manual' } = {}) {
+  const engine = getKokoroVoiceEngine();
+  if (!engine) return { ok: false, error: 'engine-missing' };
+  if (!audioState.kokoroLoading) {
+    setKokoroStatus(source === 'preview' ? 'Loading adaptive neural voice for preview...' : 'Loading adaptive neural voice routing...', 'warning');
+  }
+  const result = await engine.ensureLoaded();
+  refreshKokoroCatalogFromEngine(engine);
+  if (result && result.ok) {
+    const loadMs = Number(result.state && result.state.lastLoadMs) || 0;
+    const meta = [audioState.kokoroDevice, audioState.kokoroDtype].filter(Boolean).join('/');
+    setKokoroStatus(`Adaptive voice ready${meta ? ` (${meta})` : ''}${loadMs ? ` - ${Math.round(loadMs)}ms` : ''}`, 'active');
+  } else if (result && result.error) {
+    setKokoroStatus(`Adaptive voice failed to load. ${String(result.error).slice(0, 180)}`, 'warning');
+  }
+  return result;
+}
+
+async function ensureKokoroStartupWarmup({ source = 'startup-bootstrap' } = {}) {
+  if (audioState.voiceEnabled === false) return { ok: false, reason: 'voice-disabled' };
+  const narratorId = normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+  if (audioState.kokoroWarmupDone && kokoroPreparedVoiceIds.has(narratorId)) {
+    return {
+      ok: true,
+      warmed: getKokoroPreparedVoiceCount(),
+      cached: true
+    };
+  }
+  if (kokoroStartupWarmupPromise) return kokoroStartupWarmupPromise;
+
+  kokoroStartupWarmupPromise = (async () => {
+    audioState.kokoroWarmupLoading = true;
+    syncAudioControlUI();
+    let finalResult = null;
+    try {
+      const loadResult = await ensureKokoroVoiceEngineLoaded({ source });
+      if (!loadResult || loadResult.ok !== true) {
+        finalResult = { ok: false, error: (loadResult && loadResult.error) || 'load-failed' };
+        return finalResult;
+      }
+      audioState.kokoroWarmupDone = kokoroPreparedVoiceIds.has(narratorId);
+      audioState.kokoroWarmupWarmedCount = getKokoroPreparedVoiceCount();
+      setKokoroStatus('Adaptive voice ready. Caching narrator preview clip...', 'active');
+      finalResult = {
+        ok: true,
+        warmed: audioState.kokoroWarmupWarmedCount,
+        loadResult,
+        cached: audioState.kokoroWarmupDone
+      };
+      return finalResult;
+    } finally {
+      audioState.kokoroWarmupLoading = false;
+      if (!finalResult || finalResult.ok !== true) {
+        kokoroStartupWarmupPromise = null;
+      }
+      syncAudioControlUI();
+    }
+  })();
+
+  return kokoroStartupWarmupPromise;
+}
+
+async function ensureKokoroHostPreviewClipWarmup({ source = 'host-preview', deferIfBusy = false } = {}) {
+  if (audioState.voiceEnabled === false) return { ok: false, reason: 'voice-disabled' };
+  if (audioState.kokoroEnabled !== true) return { ok: false, reason: 'kokoro-disabled' };
+  const narratorId = normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+  const engine = getKokoroVoiceEngine();
+  const hasPreviewClipCached = engine && typeof engine.hasCachedClip === 'function'
+    ? engine.hasCachedClip({ text: KOKORO_HOST_PREVIEW_TEXT, voiceId: narratorId, speed: KOKORO_HOST_PREVIEW_SPEED })
+    : false;
+  if ((kokoroPreviewClipWarmedVoiceIds.has(narratorId) || hasPreviewClipCached) && kokoroPreparedVoiceIds.has(narratorId)) {
+    kokoroPreviewClipWarmedVoiceIds.add(narratorId);
+    audioState.kokoroHostPreviewWarmupDone = true;
+    return { ok: true, cached: true, warmed: getKokoroPreparedVoiceCount() };
+  }
+  if (deferIfBusy && (audioState.kokoroLoading || audioState.kokoroWarmupLoading)) {
+    return { ok: false, reason: 'startup-warmup-active' };
+  }
+  if (kokoroHostPreviewWarmupPromise) return kokoroHostPreviewWarmupPromise;
+
+  kokoroHostPreviewWarmupPromise = (async () => {
+    audioState.kokoroHostPreviewWarmupLoading = true;
+    syncAudioControlUI();
+    let finalResult = null;
+    try {
+      const core = await ensureKokoroStartupWarmup({ source });
+      if (!core || core.ok !== true) {
+        finalResult = { ok: false, error: (core && core.error) || 'host-core-warmup-failed' };
+        return finalResult;
+      }
+      const previewVoiceIds = [narratorId];
+      const warmResult = await engine.prewarmVoices({
+        voiceIds: previewVoiceIds,
+        textByVoiceId: { [narratorId]: KOKORO_HOST_PREVIEW_TEXT },
+        speedByVoiceId: { [narratorId]: KOKORO_HOST_PREVIEW_SPEED },
+        mode: 'cache-clips'
+      });
+      markKokoroVoicesPrepared(warmResult && warmResult.results ? warmResult.results : []);
+      if (warmResult && Array.isArray(warmResult.results)) {
+        warmResult.results.forEach((entry) => {
+          if (!entry || entry.ok !== true) return;
+          const id = normalizeKokoroVoiceId(entry.voiceId || '');
+          if (id) kokoroPreviewClipWarmedVoiceIds.add(id);
+        });
+      }
+      const currentNarratorId = normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+      audioState.kokoroHostPreviewWarmupDone = kokoroPreviewClipWarmedVoiceIds.has(currentNarratorId);
+      if (warmResult && warmResult.ok) {
+        setKokoroStatus(`Narrator preview cached: ${getKokoroNarratorLabelById(narratorId)}`, 'active');
+      } else {
+        const errEntry = warmResult && Array.isArray(warmResult.results)
+          ? warmResult.results.find((entry) => entry && entry.ok !== true)
+          : null;
+        const errText = String((errEntry && errEntry.error) || (warmResult && warmResult.error) || 'preview-warmup-failed').slice(0, 140);
+        setKokoroStatus(`Narrator preview cache failed for ${getKokoroNarratorLabelById(narratorId)}: ${errText}`, 'warning');
+      }
+      finalResult = {
+        ok: Boolean(warmResult && warmResult.ok),
+        warmResult,
+        warmed: getKokoroPreparedVoiceCount()
+      };
+      return finalResult;
+    } finally {
+      audioState.kokoroHostPreviewWarmupLoading = false;
+      if (!finalResult || finalResult.ok !== true) {
+        kokoroHostPreviewWarmupPromise = null;
+      }
+      syncAudioControlUI();
+    }
+  })();
+
+  return kokoroHostPreviewWarmupPromise;
+}
+
+async function ensureKokoroFullCastWarmup({ source = 'startup-deferred' } = {}) {
+  if (audioState.voiceEnabled === false) return { ok: false, reason: 'voice-disabled' };
+  if (audioState.kokoroCastWarmupDone) {
+    return { ok: true, warmed: getKokoroPreparedVoiceCount(), cached: true };
+  }
+  if (kokoroFullCastWarmupPromise) return kokoroFullCastWarmupPromise;
+
+  kokoroFullCastWarmupPromise = (async () => {
+    audioState.kokoroCastWarmupLoading = true;
+    syncAudioControlUI();
+    let finalResult = null;
+    try {
+      const core = await ensureKokoroStartupWarmup({ source });
+      if (!core || core.ok !== true) {
+        finalResult = { ok: false, error: (core && core.error) || 'core-warmup-failed' };
+        return finalResult;
+      }
+      const missingVoiceIds = getMissingKokoroVoiceIds(KOKORO_CURATED_VOICE_IDS);
+      if (!missingVoiceIds.length) {
+        audioState.kokoroCastWarmupDone = true;
+        audioState.kokoroWarmupWarmedCount = getKokoroPreparedVoiceCount();
+        finalResult = { ok: true, warmed: audioState.kokoroWarmupWarmedCount, cached: true };
+        return finalResult;
+      }
+      const engine = getKokoroVoiceEngine();
+      const warmResult = await engine.prewarmVoices({
+        voiceIds: missingVoiceIds,
+        textByVoiceId: KOKORO_VOICE_PREWARM_TEXT_BY_ID,
+        speedByVoiceId: KOKORO_VOICE_PREWARM_SPEED_BY_ID,
+        mode: 'cache-clips',
+        yieldMs: 180
+      });
+      const warmed = markKokoroVoicesPrepared(warmResult && warmResult.results ? warmResult.results : []);
+      if (warmResult && Array.isArray(warmResult.results)) {
+        warmResult.results.forEach((entry) => {
+          if (!entry || entry.ok !== true) return;
+          const id = normalizeKokoroVoiceId(entry.voiceId || '');
+          if (id) kokoroPreviewClipWarmedVoiceIds.add(id);
+        });
+      }
+      if (warmResult && warmResult.ok) {
+        setKokoroStatus(`Adaptive voice cache preparation complete (${warmed}/4 voices prepared).`, 'active');
+      } else if (warmResult && warmResult.error) {
+        setKokoroStatus(`Adaptive voice warmup partial. ${String(warmResult.error).slice(0, 160)}`, 'warning');
+      }
+      finalResult = { ok: Boolean(warmResult && warmResult.ok), warmed, warmResult };
+      return finalResult;
+    } finally {
+      audioState.kokoroCastWarmupLoading = false;
+      if (!finalResult || finalResult.ok !== true) {
+        kokoroFullCastWarmupPromise = null;
+      }
+      syncAudioControlUI();
+    }
+  })();
+
+  return kokoroFullCastWarmupPromise;
+}
+
+function scheduleKokoroFullCastWarmup({ source = 'on-demand', delayMs = 300 } = {}) {
+  if (audioState.voiceEnabled === false) return;
+  if (audioState.kokoroEnabled !== true) return;
+  if (audioState.kokoroCastWarmupDone || audioState.kokoroCastWarmupLoading || kokoroFullCastWarmupPromise) return;
+  if (kokoroCastWarmupScheduled) return;
+  kokoroCastWarmupScheduled = true;
+  const run = async () => {
+    try {
+      await ensureKokoroFullCastWarmup({ source });
+    } catch (error) {
+    } finally {
+      kokoroCastWarmupScheduled = false;
+    }
+  };
+  const start = () => { void run(); };
+  if (typeof window.requestIdleCallback === 'function') {
+    window.setTimeout(() => {
+      try {
+        window.requestIdleCallback(() => start(), { timeout: 2500 });
+      } catch (error) {
+        start();
+      }
+    }, Math.max(0, Number(delayMs) || 0));
+    return;
+  }
+  window.setTimeout(start, Math.max(0, Number(delayMs) || 0) + 150);
+}
+
+function resolveKokoroVoiceIdForCue(cue = {}, plan = {}) {
+  const type = String(cue && cue.type || '').toLowerCase();
+  const cueIdText = String(cue && cue.id || '').toLowerCase();
+  const explicitNarrator = normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId) || DEFAULT_NARRATOR_VOICE_ID;
+  const explicitCharacter = KOKORO_ONLY_VOICE_SYSTEM ? '' : normalizeKokoroVoiceId(audioState.kokoroCharacterVoiceId);
+  if (type !== 'entry') {
+    if (type === 'round4') {
+      if (cueIdText.includes('reveal-announcer')) {
+        return 'bm_george';
+      }
+      if (cueIdText.includes('final') || cueIdText.includes('game-ended') || cueIdText.includes('winner')) {
+        return 'bm_george';
+      }
+      if (cueIdText.includes('brief') || cueIdText.includes('start')) {
+        return explicitNarrator || DEFAULT_NARRATOR_VOICE_ID;
+      }
+    }
+    return explicitNarrator;
+  }
+  if (explicitCharacter) return explicitCharacter;
+  const previewProfile = normalizeCharacterVoiceProfile(audioState.voiceCharacterProfile || 'auto_archetype');
+  if (isVoicePreviewCue(cue) && previewProfile && previewProfile !== 'auto_archetype') {
+    const previewMap = {
+      villain: 'bm_george',
+      heroic: 'am_michael',
+      cartoon: 'af_bella',
+      robotic: 'am_michael',
+      spooky: 'bm_george',
+      chaotic: 'af_bella'
+    };
+    if (previewMap[previewProfile]) return previewMap[previewProfile];
+  }
+  const archetype = String(plan && plan.archetype || cue && cue.archetype || '').toUpperCase();
+  // Gold-standard archetype cast mapping (4 universal narration voices):
+  // Ryan = villain/spooky/regal, Guy = heroic/command/robotic, Aria = cartoon/chaotic/cute, Jenny = narrator/cosmic/warm neutral.
+  const map = {
+    [ARCHETYPES.VILLAIN]: 'bm_george',
+    [ARCHETYPES.MYSTERIOUS]: 'bm_george',
+    [ARCHETYPES.SPOOKY]: 'bm_george',
+    [ARCHETYPES.MONSTER]: 'bm_george',
+    [ARCHETYPES.REGAL]: 'bm_george',
+    [ARCHETYPES.ANCIENT]: 'bm_george',
+    [ARCHETYPES.PIRATE]: 'bm_george',
+    [ARCHETYPES.STEALTHY]: 'bm_george',
+    [ARCHETYPES.DETECTIVE]: 'bm_george',
+    [ARCHETYPES.HEROIC]: 'am_michael',
+    [ARCHETYPES.GRUFF]: 'am_michael',
+    [ARCHETYPES.COMMANDER]: 'am_michael',
+    [ARCHETYPES.MENTOR]: 'am_michael',
+    [ARCHETYPES.WESTERN]: 'am_michael',
+    [ARCHETYPES.ROBOTIC]: 'am_michael',
+    [ARCHETYPES.CORPORATE]: 'am_michael',
+    [ARCHETYPES.SCIENTIST]: 'am_michael',
+    [ARCHETYPES.OBJECT]: 'am_michael',
+    [ARCHETYPES.SPORTY]: 'am_michael',
+    [ARCHETYPES.KID_CARTOON]: 'af_bella',
+    [ARCHETYPES.CUTE]: 'af_bella',
+    [ARCHETYPES.CHAOTIC]: 'af_bella',
+    [ARCHETYPES.ABSURD]: 'af_bella',
+    [ARCHETYPES.MEME]: 'af_bella',
+    [ARCHETYPES.CREATURE]: 'af_bella',
+    [ARCHETYPES.TRICKSTER]: 'af_bella',
+    [ARCHETYPES.COSMIC]: 'af_heart',
+    [ARCHETYPES.MAGICAL]: 'af_heart',
+    [ARCHETYPES.SWEET]: 'af_heart',
+    [ARCHETYPES.CELEBRITY]: 'af_heart',
+    [ARCHETYPES.ANNOUNCER]: 'af_heart',
+    [ARCHETYPES.NARRATOR]: 'af_heart'
+  };
+  return map[archetype] || explicitNarrator || DEFAULT_NARRATOR_VOICE_ID;
+}
+
+function resolveKokoroSpeedForCue(cue = {}, plan = {}) {
+  const cueType = String(cue && cue.type || '').toLowerCase();
+  const cueIdText = String(cue && cue.id || '').toLowerCase();
+  const isRevealAnnouncerCue = cueType === 'round4' && cueIdText.includes('reveal-announcer');
+  if (cueType === 'narration' && String(cue && cue.id || '').startsWith('voice-preview-narrator-')) {
+    return KOKORO_HOST_PREVIEW_SPEED;
+  }
+  const baseRate = clampAudioRate(plan && plan.rate, 1);
+  let speed = 0.98 + ((baseRate - 1) * 0.82);
+  if (cueType === 'entry') {
+    speed = 1 + ((baseRate - 1) * 0.95);
+  } else if (cueType === 'twist') {
+    speed += 0.02;
+  } else if (cueType === 'round4') {
+    speed += (isRevealAnnouncerCue ? 0.02 : -0.06);
+  }
+  const archetype = String(plan && plan.archetype || cue && cue.archetype || '').toUpperCase();
+  if (cueType === 'entry') {
+    const archetypeDeltaMap = {
+      [ARCHETYPES.VILLAIN]: -0.03,
+      [ARCHETYPES.MYSTERIOUS]: -0.12,
+      [ARCHETYPES.SPOOKY]: 0.01,
+      [ARCHETYPES.MONSTER]: -0.08,
+      [ARCHETYPES.REGAL]: -0.1,
+      [ARCHETYPES.ANCIENT]: -0.12,
+      [ARCHETYPES.PIRATE]: -0.06,
+      [ARCHETYPES.STEALTHY]: -0.12,
+      [ARCHETYPES.HEROIC]: -0.06,
+      [ARCHETYPES.GRUFF]: -0.05,
+      [ARCHETYPES.COMMANDER]: -0.07,
+      [ARCHETYPES.DETECTIVE]: -0.07,
+      [ARCHETYPES.MENTOR]: -0.06,
+      [ARCHETYPES.WESTERN]: -0.04,
+      [ARCHETYPES.ROBOTIC]: -0.09,
+      [ARCHETYPES.CORPORATE]: -0.03,
+      [ARCHETYPES.SCIENTIST]: -0.01,
+      [ARCHETYPES.OBJECT]: -0.07,
+      [ARCHETYPES.KID_CARTOON]: 0.09,
+      [ARCHETYPES.CUTE]: 0.08,
+      [ARCHETYPES.CHAOTIC]: 0.07,
+      [ARCHETYPES.MEME]: 0.22,
+      [ARCHETYPES.CREATURE]: 0.06,
+      [ARCHETYPES.MAGICAL]: 0.03,
+      [ARCHETYPES.TRICKSTER]: 0.14,
+      [ARCHETYPES.COSMIC]: -0.04,
+      [ARCHETYPES.ANNOUNCER]: -0.03,
+      [ARCHETYPES.NARRATOR]: -0.05
+    };
+    speed += Number(archetypeDeltaMap[archetype] || 0);
+  }
+  if (cueType === 'round4') {
+    const intensity = Math.max(0, Math.min(1, Number(cue && cue.intensity) || 0.6));
+    if (isRevealAnnouncerCue) {
+      // Reveal announcer should feel like a highlight commentator: fast sweep for low/mid, slightly slower for huge pulls.
+      speed += intensity < 0.68 ? 0.13 : intensity < 0.84 ? 0.08 : intensity < 0.94 ? 0.03 : -0.01;
+      const textLen = String(cue && cue.text || '').trim().length;
+      if (textLen <= 18) speed += 0.04;
+      else if (textLen <= 28) speed += 0.02;
+      else if (textLen >= 46) speed -= 0.03;
+    } else {
+      speed += ((intensity - 0.55) * 0.08);
+      if (cueIdText.includes('brief')) speed -= 0.03;
+      if (cueIdText.includes('game-ended')) speed -= 0.04;
+    }
+  }
+  return Math.max(0.78, Math.min(isRevealAnnouncerCue ? 1.48 : 1.35, speed));
+}
+
+function resolveKokoroPitchForCue(cue = {}, plan = {}) {
+  const cueType = String(cue && cue.type || '').toLowerCase();
+  const cueIdText = String(cue && cue.id || '').toLowerCase();
+  const isRevealAnnouncerCue = cueType === 'round4' && cueIdText.includes('reveal-announcer');
+  // Keep narration/round cues on a stable server-prewarmed pitch for cache consistency, except reveal announcer.
+  if (cueType !== 'entry' && !isRevealAnnouncerCue) return 1;
+  if (isRevealAnnouncerCue) {
+    const basePitch = clampAudioRate(plan && plan.pitch, 1);
+    let pitch = 1 + ((basePitch - 1) * 0.85);
+    const intensity = Math.max(0, Math.min(1, Number(cue && cue.intensity) || 0.7));
+    if (intensity < 0.68) pitch += 0.03;
+    else if (intensity >= 0.92) pitch -= 0.03;
+    return Math.max(0.78, Math.min(1.18, pitch));
+  }
+  const basePitch = clampAudioRate(plan && plan.pitch, 1);
+  let pitch = 1 + ((basePitch - 1) * 0.95);
+  const archetype = String(plan && plan.archetype || cue && cue.archetype || '').toUpperCase();
+  const archetypeDeltaMap = {
+    [ARCHETYPES.VILLAIN]: 0.01,
+    [ARCHETYPES.SPOOKY]: 0.01,
+    [ARCHETYPES.MONSTER]: -0.06,
+    [ARCHETYPES.REGAL]: -0.05,
+    [ARCHETYPES.ROBOTIC]: -0.02,
+    [ARCHETYPES.OBJECT]: -0.04,
+    [ARCHETYPES.HEROIC]: 0,
+    [ARCHETYPES.COMMANDER]: -0.04,
+    [ARCHETYPES.GRUFF]: -0.05,
+    [ARCHETYPES.KID_CARTOON]: 0.01,
+    [ARCHETYPES.CUTE]: 0.1,
+    [ARCHETYPES.CHAOTIC]: 0.03,
+    [ARCHETYPES.MEME]: 0.1,
+    [ARCHETYPES.TRICKSTER]: 0.06,
+    [ARCHETYPES.CREATURE]: 0.07,
+    [ARCHETYPES.MAGICAL]: 0.05
+  };
+  pitch += Number(archetypeDeltaMap[archetype] || 0);
+  return Math.max(0.72, Math.min(1.35, pitch));
+}
+
+function trimKokoroCueTextForLatency(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  const maxLen = 110;
+  if (collapsed.length <= maxLen) return collapsed;
+  const cut = collapsed.slice(0, maxLen);
+  const splitAt = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '), cut.lastIndexOf(', '));
+  if (splitAt >= 48) {
+    return cut.slice(0, splitAt + 1).trim();
+  }
+  return `${cut.slice(0, maxLen - 3).trim()}...`;
+}
+
+function isVoicePreviewCue(cue = {}) {
+  const id = String(cue && cue.id || '');
+  return id.startsWith('voice-preview-');
+}
+
+function isInteractiveEntryVoiceCue(cue = {}) {
+  const type = String(cue && cue.type || '').toLowerCase();
+  if (type !== 'entry') return false;
+  if (cue && cue.allowLiveGenerate === true) return true;
+  if (cue && cue.preempt === true) return true;
+  const subtitle = String(cue && cue.subtitleText || '').toLowerCase();
+  return subtitle.includes('ovr') || subtitle.includes('preview');
+}
+
+function shouldAllowLiveKokoroGenerateForCue(cue = {}) {
+  const type = String(cue && cue.type || '').toLowerCase();
+  if (cue && cue.allowLiveGenerate === true) return true;
+  if (isVoicePreviewCue(cue)) return true;
+  if (type === 'narration' || type === 'twist' || type === 'round4') return true;
+  if (isInteractiveEntryVoiceCue(cue)) return true;
+  return false;
+}
+
+function buildKokoroCuePlaybackSpec(cue = {}, plan = null) {
+  const safeCue = cue && typeof cue === 'object' ? cue : null;
+  if (!safeCue) return null;
+  let computedPlan = plan;
+  if (!computedPlan) {
+    const manager = getVoiceManager();
+    if (manager && typeof manager._buildSpeakingPlan === 'function') {
+      try {
+        computedPlan = manager._buildSpeakingPlan(safeCue);
+      } catch (error) {
+        computedPlan = null;
+      }
+    }
+  }
+  const text = trimKokoroCueTextForLatency(computedPlan && computedPlan.stylizedText ? computedPlan.stylizedText : (safeCue.text || ''));
+  if (!text) return null;
+  const voiceId = resolveKokoroVoiceIdForCue(safeCue, computedPlan || {});
+  const speed = resolveKokoroSpeedForCue(safeCue, computedPlan || {});
+  const pitch = resolveKokoroPitchForCue(safeCue, computedPlan || {});
+  if (!voiceId) return null;
+  return {
+    cue: safeCue,
+    plan: computedPlan || null,
+    text,
+    voiceId,
+    speed,
+    pitch
+  };
+}
+
+function getKokoroCuePrefetchKey(spec = null) {
+  if (!spec || !spec.voiceId || !spec.text) return '';
+  return `${String(spec.voiceId)}|${Number(spec.speed || 1).toFixed(2)}|${Number(spec.pitch || 1).toFixed(2)}|${String(spec.text).toLowerCase()}`;
+}
+
+async function prefetchKokoroCueClipNow(cue = {}, { source = 'cue-prefetch' } = {}) {
+  if (audioState.kokoroEnabled !== true || audioState.voiceEnabled === false) {
+    return { ok: false, reason: 'voice-disabled' };
+  }
+  const spec = buildKokoroCuePlaybackSpec(cue);
+  if (!spec) return { ok: false, reason: 'invalid-spec' };
+  const engine = getKokoroVoiceEngine();
+  if (!engine) return { ok: false, reason: 'engine-missing' };
+
+  if (typeof engine.hasCachedClip === 'function' && engine.hasCachedClip(spec)) {
+    return { ok: true, cached: true, spec };
+  }
+
+  if (!audioState.kokoroReady) {
+    const load = await ensureKokoroStartupWarmup({ source });
+    if (!load || load.ok !== true) {
+      return { ok: false, reason: (load && load.error) || 'kokoro-not-ready', spec };
+    }
+  }
+
+  const warm = await engine.prewarmVoices({
+    voiceIds: [spec.voiceId],
+    textByVoiceId: { [spec.voiceId]: spec.text },
+    speedByVoiceId: { [spec.voiceId]: spec.speed },
+    pitchByVoiceId: { [spec.voiceId]: spec.pitch },
+    mode: 'cache-clips'
+  });
+
+  return {
+    ok: Boolean(warm && warm.ok),
+    warm,
+    spec
+  };
+}
+
+function scheduleKokoroVoiceCuePrefetch(cues = [], { source = 'voice-cues', delayMs = 0 } = {}) {
+  if (audioState.kokoroEnabled !== true || audioState.voiceEnabled === false) return false;
+  const list = Array.isArray(cues) ? cues : [cues];
+  if (!list.length) return false;
+  let added = 0;
+  list.forEach((cue) => {
+    if (!cue || typeof cue !== 'object') return;
+    const spec = buildKokoroCuePlaybackSpec(cue);
+    if (!spec) return;
+    const key = getKokoroCuePrefetchKey(spec);
+    if (!key) return;
+    const engine = kokoroVoiceEngineInstance;
+    if (engine && typeof engine.hasCachedClip === 'function' && engine.hasCachedClip(spec)) return;
+    if (voiceCuePrefetchState.queuedKeys.has(key)) return;
+    voiceCuePrefetchState.queuedKeys.add(key);
+    voiceCuePrefetchState.queue.push({
+      key,
+      cue: { ...cue, text: cue.text, subtitleText: cue.subtitleText },
+      source,
+      priority: Number(cue.priority) || 0,
+      enqueuedAt: Date.now()
+    });
+    added += 1;
+  });
+  if (!added) return false;
+  voiceCuePrefetchState.queue.sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0));
+  if (voiceCuePrefetchState.queue.length > 48) {
+    const overflow = voiceCuePrefetchState.queue.splice(48);
+    overflow.forEach((entry) => voiceCuePrefetchState.queuedKeys.delete(entry.key));
+  }
+  if (voiceCuePrefetchState.timerId || voiceCuePrefetchState.inFlight) return true;
+  const run = () => {
+    voiceCuePrefetchState.timerId = null;
+    void drainKokoroVoiceCuePrefetchQueue();
+  };
+  if (typeof window.requestIdleCallback === 'function') {
+    voiceCuePrefetchState.timerId = window.setTimeout(() => {
+      try {
+        window.requestIdleCallback(run, { timeout: 1200 });
+      } catch (error) {
+        run();
+      }
+    }, Math.max(0, Number(delayMs) || 0));
+  } else {
+    voiceCuePrefetchState.timerId = window.setTimeout(run, Math.max(0, Number(delayMs) || 0) + 60);
+  }
+  return true;
+}
+
+async function warmKokoroVoiceCuesNow(cues = [], {
+  source = 'voice-cues-warm',
+  limit = 12,
+  concurrency = 3,
+  onProgress = null,
+  preserveOrder = false
+} = {}) {
+  if (audioState.kokoroEnabled !== true || audioState.voiceEnabled === false) {
+    return { ok: false, reason: 'voice-disabled', requested: 0, unique: 0, warmed: 0, cached: 0, failed: 0 };
+  }
+  const list = Array.isArray(cues) ? cues : [cues];
+  if (!list.length) {
+    return { ok: true, requested: 0, unique: 0, warmed: 0, cached: 0, failed: 0 };
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  list.forEach((cue) => {
+    if (!cue || typeof cue !== 'object') return;
+    const spec = buildKokoroCuePlaybackSpec(cue);
+    if (!spec) return;
+    const key = getKokoroCuePrefetchKey(spec);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    deduped.push({ cue, priority: Number(cue.priority) || 0 });
+  });
+  if (!preserveOrder) {
+    deduped.sort((a, b) => Number(b.priority) - Number(a.priority));
+  }
+  const dedupedCues = deduped.map((entry) => entry.cue);
+
+  if (!dedupedCues.length) {
+    return { ok: false, reason: 'no-valid-cues', requested: list.length, unique: 0, warmed: 0, cached: 0, failed: 0 };
+  }
+
+  scheduleKokoroVoiceCuePrefetch(dedupedCues, { source, delayMs: 0 });
+
+  const warmTarget = Math.max(0, Math.min(dedupedCues.length, Number(limit) || dedupedCues.length));
+  const selected = dedupedCues.slice(0, warmTarget);
+  const safeConcurrency = Math.max(1, Math.min(Number(concurrency) || 1, selected.length || 1));
+  const progressCb = typeof onProgress === 'function' ? onProgress : null;
+  const stats = {
+    ok: true,
+    requested: list.length,
+    unique: dedupedCues.length,
+    selected: selected.length,
+    warmed: 0,
+    cached: 0,
+    failed: 0,
+    done: 0
+  };
+
+  const emitProgress = () => {
+    if (!progressCb) return;
+    try {
+      progressCb({ ...stats, total: selected.length });
+    } catch (error) {
+    }
+  };
+  emitProgress();
+
+  if (!selected.length) return { ...stats };
+
+  let index = 0;
+  await Promise.all(Array.from({ length: safeConcurrency }, async (_, workerIndex) => {
+    while (index < selected.length) {
+      const currentIndex = index;
+      index += 1;
+      const cue = selected[currentIndex];
+      try {
+        const warmResult = await prefetchKokoroCueClipNow(cue, { source });
+        if (warmResult && warmResult.ok) {
+          if (warmResult.cached) stats.cached += 1;
+          else stats.warmed += 1;
+        } else {
+          stats.failed += 1;
+        }
+      } catch (error) {
+        stats.failed += 1;
+      } finally {
+        stats.done += 1;
+        emitProgress();
+      }
+      if (workerIndex < safeConcurrency - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 14));
+      }
+    }
+  }));
+
+  return { ...stats };
+}
+
+async function drainKokoroVoiceCuePrefetchQueue() {
+  if (voiceCuePrefetchState.inFlight) return;
+  if (!voiceCuePrefetchState.queue.length) return;
+  voiceCuePrefetchState.inFlight = true;
+  try {
+    const batch = voiceCuePrefetchState.queue.splice(0, 6);
+    for (let i = 0; i < batch.length; i += 1) {
+      const task = batch[i];
+      if (!task) continue;
+      voiceCuePrefetchState.queuedKeys.delete(task.key);
+      try {
+        await prefetchKokoroCueClipNow(task.cue, { source: task.source || 'voice-prefetch' });
+      } catch (error) {
+      }
+      if (i < batch.length - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+      }
+    }
+  } finally {
+    voiceCuePrefetchState.inFlight = false;
+    if (voiceCuePrefetchState.queue.length) {
+      if (typeof window.requestIdleCallback === 'function') {
+        voiceCuePrefetchState.timerId = window.setTimeout(() => {
+          try {
+            window.requestIdleCallback(() => {
+              voiceCuePrefetchState.timerId = null;
+              void drainKokoroVoiceCuePrefetchQueue();
+            }, { timeout: 1800 });
+          } catch (error) {
+            voiceCuePrefetchState.timerId = null;
+            void drainKokoroVoiceCuePrefetchQueue();
+          }
+        }, 120);
+      } else {
+        voiceCuePrefetchState.timerId = window.setTimeout(() => {
+          voiceCuePrefetchState.timerId = null;
+          void drainKokoroVoiceCuePrefetchQueue();
+        }, 180);
+      }
+    }
+  }
+}
+
+function trySpeakVoiceCueWithKokoro({ cue, plan, volume, start, end } = {}) {
+  const finishNoop = (status = 'end') => {
+    if (typeof end === 'function') {
+      window.setTimeout(() => end(status), 0);
+    }
+    return { handled: true, cancel: () => {}, started: false };
+  };
+  if (audioState.kokoroEnabled !== true) {
+    if (KOKORO_ONLY_VOICE_SYSTEM) {
+      return finishNoop('error');
+    }
+    return { handled: false, reason: 'kokoro-disabled' };
+  }
+  if (audioState.voiceEnabled === false) return finishNoop('cancelled');
+  if (audioState.muted) return finishNoop('muted');
+  if (!audioState.unlocked || !audioState.voiceUnlocked) return finishNoop('cancelled');
+  if (!audioState.htmlMediaUnlocked) {
+    tryUnlockHtmlMediaStack();
+  }
+
+  const text = trimKokoroCueTextForLatency(plan && plan.stylizedText ? plan.stylizedText : (cue && cue.text ? cue.text : ''));
+  if (!text) {
+    return finishNoop('cancelled');
+  }
+  const engine = getKokoroVoiceEngine();
+  if (!engine) {
+    return finishNoop('error');
+  }
+
+  if (!audioState.kokoroReady && !audioState.kokoroLoading) {
+    setKokoroStatus('Loading adaptive neural voice in background for voice cues...', 'warning');
+  }
+
+  const voiceId = resolveKokoroVoiceIdForCue(cue, plan);
+  const speed = resolveKokoroSpeedForCue(cue, plan);
+  const pitch = resolveKokoroPitchForCue(cue, plan);
+  const allowLiveGenerate = shouldAllowLiveKokoroGenerateForCue(cue);
+  const hasCachedClip = typeof engine.hasCachedClip === 'function'
+    ? engine.hasCachedClip({ text, voiceId, speed, pitch })
+    : false;
+  if (!allowLiveGenerate && !hasCachedClip) {
+    scheduleKokoroVoiceCuePrefetch([cue], { source: 'playback-cache-miss', delayMs: 0 });
+    if (!audioState.kokoroReady && !audioState.kokoroLoading) {
+      void ensureKokoroStartupWarmup({ source: 'cue-prefetch' });
+    }
+    return finishNoop('deferred');
+  }
+  const voiceMeta = findKokoroCatalogEntryById(voiceId);
+  const voiceLabel = voiceMeta ? formatKokoroCatalogLabel(voiceMeta) : voiceId;
+  const handle = engine.speakText({
+    text,
+    voiceId,
+    speed,
+    pitch,
+    volume: clampAudioLevel(volume, 1),
+    onStart: () => {
+      audioState.voiceBackendLastLabel = `Adaptive • ${voiceLabel}`;
+      if (typeof start === 'function') start();
+      syncAudioControlUI();
+    },
+    onEnd: (status) => {
+      if (typeof end === 'function') end(status);
+      window.setTimeout(() => {
+        if (!audioState.voiceSpeaking) {
+          audioState.voiceBackendLastLabel = '';
+          syncAudioControlUI();
+        }
+      }, 0);
+    }
+  });
+  if (!handle || handle.handled !== true) {
+    return finishNoop('error');
+  }
+  return handle;
+}
+
+function buildVoiceCatalogSignature(entries = []) {
+  if (!Array.isArray(entries) || !entries.length) return '';
+  return entries
+    .map((entry) => `${entry && entry.id ? entry.id : ''}|${entry && entry.qualityScore != null ? entry.qualityScore : ''}`)
+    .join('||');
+}
+
+function getVoiceCatalogEntries() {
+  return Array.isArray(audioState.voiceCatalog) ? audioState.voiceCatalog : [];
+}
+
+function findVoiceCatalogEntryById(id = '') {
+  const target = normalizeVoiceChoiceId(id);
+  if (!target) return null;
+  const catalog = getVoiceCatalogEntries();
+  for (let i = 0; i < catalog.length; i += 1) {
+    const entry = catalog[i];
+    if (String(entry && entry.id || '') === target) return entry;
+  }
+  return null;
+}
+
+function formatVoiceCatalogLabel(entry = {}) {
+  const name = String(entry && entry.name || '').trim() || 'Unknown Voice';
+  const lang = String(entry && entry.lang || '').trim();
+  const parts = [name];
+  if (lang) parts.push(lang);
+  if (entry && entry.default) parts.push('Default');
+  if (entry && entry.qualityScore >= 28) {
+    parts.push('HQ');
+  } else if (entry && entry.qualityScore >= 20) {
+    parts.push('Good');
+  }
+  return parts.join(' • ');
+}
+
+function refreshVoiceCatalogFromManager(manager = null) {
+  const target = manager || voiceManagerInstance;
+  if (!target || typeof target.getVoicesCatalog !== 'function') return false;
+  let catalog = [];
+  try {
+    catalog = target.getVoicesCatalog() || [];
+  } catch (error) {
+    catalog = [];
+  }
+  if (!Array.isArray(catalog)) catalog = [];
+  const sorted = catalog.slice().sort((a, b) => {
+    const scoreDiff = Number(b && b.qualityScore || 0) - Number(a && a.qualityScore || 0);
+    if (scoreDiff) return scoreDiff;
+    return String(a && a.name || '').localeCompare(String(b && b.name || ''));
+  });
+  const sig = buildVoiceCatalogSignature(sorted);
+  const changed = sig !== audioState.voiceCatalogSignature;
+  audioState.voiceCatalog = sorted;
+  audioState.voiceCatalogSignature = sig;
+
+  const narratorValid = !audioState.voiceNarratorVoiceId || !!findVoiceCatalogEntryById(audioState.voiceNarratorVoiceId);
+  const characterValid = !audioState.voiceCharacterVoiceId || !!findVoiceCatalogEntryById(audioState.voiceCharacterVoiceId);
+  let prefsChanged = false;
+  if (!narratorValid) {
+    audioState.voiceNarratorVoiceId = '';
+    prefsChanged = true;
+  }
+  if (!characterValid) {
+    audioState.voiceCharacterVoiceId = '';
+    prefsChanged = true;
+  }
+  if (prefsChanged) saveAudioPreferences();
+  return changed || prefsChanged;
+}
+
+function setVoiceChoice(kind, voiceId, { persist = true } = {}) {
+  const key = String(kind || '').toLowerCase() === 'character' ? 'voiceCharacterVoiceId' : 'voiceNarratorVoiceId';
+  audioState[key] = normalizeVoiceChoiceId(voiceId);
+  const manager = getVoiceManager();
+  if (manager && typeof manager.refreshVoices === 'function') {
+    refreshVoiceCatalogFromManager(manager);
+  }
+  syncAudioControlUI();
+  if (persist) saveAudioPreferences();
+}
+
+function syncCharacterVoiceProfileSelect(selectEl, selectedProfile = 'auto_archetype') {
+  if (!selectEl) return;
+  if (selectEl.dataset && selectEl.dataset.kokoroOptionsSig) {
+    delete selectEl.dataset.kokoroOptionsSig;
+  }
+  const optionsData = CHARACTER_VOICE_PROFILE_OPTIONS.map((item) => ({
+    id: item.id,
+    label: item.label
+  }));
+  const sig = optionsData.map((item) => `${item.id}|${item.label}`).join('||');
+  if (selectEl.dataset.characterProfileSig !== sig) {
+    const frag = document.createDocumentFragment();
+    optionsData.forEach((item) => {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = item.label;
+      const profileMeta = getCharacterVoiceProfileOption(item.id);
+      if (profileMeta && profileMeta.description) option.title = `${item.label} - ${profileMeta.description}`;
+      frag.appendChild(option);
+    });
+    selectEl.innerHTML = '';
+    selectEl.appendChild(frag);
+    selectEl.dataset.characterProfileSig = sig;
+  }
+  const safeSelectedId = normalizeCharacterVoiceProfile(selectedProfile);
+  if (document.activeElement !== selectEl && selectEl.value !== safeSelectedId) {
+    selectEl.value = safeSelectedId;
+  }
+  const selected = selectEl.options && selectEl.selectedIndex >= 0 ? selectEl.options[selectEl.selectedIndex] : null;
+  if (selected) selectEl.title = String(selected.title || selected.textContent || '');
+}
+
+function emitVoiceCueLifecycleEvent(kind = '', payload = {}) {
+  try {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function' || typeof window.CustomEvent !== 'function') return;
+    const safeKind = String(kind || '').trim();
+    if (!safeKind) return;
+    window.dispatchEvent(new CustomEvent(`lobby:voice-cue-${safeKind}`, {
+      detail: payload && typeof payload === 'object' ? payload : {}
+    }));
+  } catch (error) {
+  }
+}
+
+function getVoiceManager() {
+  if (voiceManagerInstance) return voiceManagerInstance;
+  voiceManagerInstance = new VoiceManager({
+    maxQueue: 20,
+    dedupeTtlMs: 14000,
+    disableBrowserSpeech: KOKORO_ONLY_VOICE_SYSTEM,
+    getVolumeForCue(cue) {
+      return getVoiceCueCategoryVolume(cue);
+    },
+    getPreferredVoiceIdForCue(cue) {
+      return getPreferredVoiceIdForCue(cue);
+    },
+    customSpeak(payload) {
+      return trySpeakVoiceCueWithKokoro(payload);
+    },
+    onStateChange(state) {
+      audioState.voiceSupported = state && typeof state.supported === 'boolean' ? state.supported : audioState.voiceSupported;
+      audioState.voiceReady = Boolean(state && state.ready);
+      audioState.voiceUnlocked = Boolean(state && state.unlocked);
+      audioState.voiceQueueLength = Number(state && state.queued) || 0;
+      audioState.voiceSpeaking = Boolean(state && state.speaking);
+      if (!audioState.voiceSpeaking && !(state && state.activeCueText)) {
+        audioState.voiceActiveCueText = '';
+      }
+      if (!KOKORO_ONLY_VOICE_SYSTEM) {
+        refreshVoiceCatalogFromManager(voiceManagerInstance);
+      }
+      syncAudioControlUI();
+    },
+    onCueStart(payload) {
+      const cue = payload && payload.cue ? payload.cue : {};
+      const plan = payload && payload.plan ? payload.plan : {};
+      emitVoiceCueLifecycleEvent('start', {
+        id: String(cue && cue.id || ''),
+        type: String(cue && cue.type || ''),
+        dedupeKey: String(cue && cue.dedupeKey || ''),
+        text: String(cue && (cue.subtitleText || cue.text) || '').trim()
+      });
+      audioState.voiceActiveCueText = String(plan && plan.subtitleText || cue && cue.subtitleText || cue && cue.text || '').trim();
+      const kokoroLabel = String(audioState.voiceBackendLastLabel || '').trim();
+      const localVoiceName = String(plan && plan.voice && (plan.voice.name || plan.voice.voiceURI) || '').trim();
+      const voiceName = kokoroLabel || localVoiceName;
+      if (voiceName) {
+        audioState.voiceStatusText = `Speaking via ${voiceName}`;
+        audioState.voiceStatusTone = 'active';
+      }
+      const subtitle = String(cue && cue.subtitleText || cue && cue.text || '').trim();
+      if (subtitle) {
+        setVoiceStatus(voiceName ? `${subtitle} • ${voiceName}` : subtitle, 'active');
+      } else {
+        syncAudioControlUI();
+      }
+    },
+    onCueEnd(payload) {
+      const cue = payload && payload.cue ? payload.cue : {};
+      emitVoiceCueLifecycleEvent('end', {
+        id: String(cue && cue.id || ''),
+        type: String(cue && cue.type || ''),
+        dedupeKey: String(cue && cue.dedupeKey || ''),
+        status: String(payload && payload.status || ''),
+        text: String(cue && (cue.subtitleText || cue.text) || '').trim()
+      });
+      if (!audioState.voiceSpeaking) {
+        audioState.voiceActiveCueText = '';
+        audioState.voiceBackendLastLabel = '';
+      }
+      syncAudioControlUI();
+    }
+  });
+  voiceManagerInstance.setEnabled(audioState.voiceEnabled !== false);
+  voiceManagerInstance.setExpressiveMode(KOKORO_ONLY_VOICE_SYSTEM ? true : (audioState.voiceExpressiveMode !== false));
+  voiceManagerInstance.setMuted(audioState.muted === true);
+  if (!KOKORO_ONLY_VOICE_SYSTEM) {
+    refreshVoiceCatalogFromManager(voiceManagerInstance);
+  }
+  return voiceManagerInstance;
+}
+
+function ensureVoiceManagerInitialized() {
+  const manager = getVoiceManager();
+  if (!manager) return Promise.resolve(null);
+  return manager.init().then((state) => {
+    if (!KOKORO_ONLY_VOICE_SYSTEM) {
+      refreshVoiceCatalogFromManager(manager);
+    }
+    syncAudioControlUI();
+    return state;
+  });
+}
+
+function syncVoiceManagerState() {
+  const manager = getVoiceManager();
+  if (!manager) return;
+  manager.setEnabled(audioState.voiceEnabled !== false);
+  manager.setExpressiveMode(KOKORO_ONLY_VOICE_SYSTEM ? true : (audioState.voiceExpressiveMode !== false));
+  manager.setMuted(audioState.muted === true);
+}
+
+function setVoiceEnabled(nextEnabled, { persist = true } = {}) {
+  audioState.voiceEnabled = nextEnabled !== false;
+  syncVoiceManagerState();
+  if (!audioState.voiceEnabled) {
+    const manager = getVoiceManager();
+    if (manager) {
+      manager.clearQueue('voice-disabled', { includeActive: true });
+    }
+  }
+  syncAudioControlUI();
+  if (persist) saveAudioPreferences();
+}
+
+function toggleVoiceEnabled() {
+  setVoiceEnabled(!(audioState.voiceEnabled !== false));
+}
+
+function getQuickVoiceBundleState() {
+  const narrationEnabled = audioState.voiceEnabled !== false;
+  const calloutsEnabled = audioState.cardEnabled === true;
+  return {
+    narrationEnabled,
+    calloutsEnabled,
+    enabled: narrationEnabled && calloutsEnabled,
+    mixed: narrationEnabled !== calloutsEnabled
+  };
+}
+
+function setQuickVoiceBundleEnabled(nextEnabled, { persist = true } = {}) {
+  const enabled = nextEnabled !== false;
+  if (enabled && audioState.muted) {
+    setAudioMuted(false, { persist: false });
+  }
+  setVoiceEnabled(enabled, { persist: false });
+  setAudioCategoryEnabled('card', enabled, { persist: false });
+  syncAudioControlUI();
+  if (persist) saveAudioPreferences();
+}
+
+function toggleQuickVoiceBundleEnabled() {
+  const state = getQuickVoiceBundleState();
+  if (audioState.muted) {
+    setQuickVoiceBundleEnabled(true);
+    return;
+  }
+  setQuickVoiceBundleEnabled(!(state && state.enabled));
+}
+
+function setVoiceExpressiveMode(nextEnabled, { persist = true } = {}) {
+  if (KOKORO_ONLY_VOICE_SYSTEM) {
+    audioState.voiceExpressiveMode = true;
+    syncVoiceManagerState();
+    syncAudioControlUI();
+    if (persist) saveAudioPreferences();
+    setVoiceStatus('Entry voices always use automatic archetype routing in adaptive mode.', 'active');
+    return;
+  }
+  audioState.voiceExpressiveMode = nextEnabled !== false;
+  syncVoiceManagerState();
+  syncAudioControlUI();
+  if (persist) saveAudioPreferences();
+}
+
+function toggleVoiceExpressiveMode() {
+  setVoiceExpressiveMode(!(audioState.voiceExpressiveMode !== false));
+}
+
+function ensureVoiceCatalogReadyForUi() {
+  if (!voiceManagerInstance) return;
+  refreshVoiceCatalogFromManager(voiceManagerInstance);
+}
+
+function syncVoiceSelectControl(selectEl, {
+  autoLabel = 'Auto',
+  selectedId = ''
+} = {}) {
+  if (!selectEl) return;
+  const catalog = getVoiceCatalogEntries();
+  const optionsData = [{ id: '', label: autoLabel }, ...catalog.map((entry) => ({
+    id: String(entry && entry.id || ''),
+    label: formatVoiceCatalogLabel(entry)
+  }))];
+  const sig = optionsData.map((item) => `${item.id}|${item.label}`).join('||');
+  if (selectEl.dataset.voiceOptionsSig !== sig) {
+    const frag = document.createDocumentFragment();
+    optionsData.forEach((item) => {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = item.label;
+      frag.appendChild(option);
+    });
+    selectEl.innerHTML = '';
+    selectEl.appendChild(frag);
+    selectEl.dataset.voiceOptionsSig = sig;
+  }
+
+  const safeSelectedId = optionsData.some((item) => item.id === selectedId) ? selectedId : '';
+  if (document.activeElement !== selectEl && selectEl.value !== safeSelectedId) {
+    selectEl.value = safeSelectedId;
+  }
+}
+
+function syncVoiceStudioUi() {
+  if (!KOKORO_ONLY_VOICE_SYSTEM) {
+    ensureVoiceCatalogReadyForUi();
+  }
+  refreshKokoroCatalogFromEngine();
+  const narratorSelect = document.getElementById('audioVoiceNarratorSelect');
+  const characterSelect = document.getElementById('audioVoiceCharacterSelect');
+  const localNarratorPicker = document.getElementById('audioVoiceLocalNarratorPicker');
+  const localCharacterPicker = document.getElementById('audioVoiceLocalCharacterPicker');
+  const voiceCount = getVoiceCatalogEntries().length;
+  if (!KOKORO_ONLY_VOICE_SYSTEM) {
+    syncVoiceSelectControl(narratorSelect, {
+      autoLabel: 'Auto (Best Local Voice)',
+      selectedId: normalizeVoiceChoiceId(audioState.voiceNarratorVoiceId)
+    });
+    syncCharacterVoiceProfileSelect(characterSelect, audioState.voiceCharacterProfile);
+    if (narratorSelect) narratorSelect.disabled = audioState.voiceSupported === false || voiceCount === 0;
+    if (characterSelect) characterSelect.disabled = audioState.voiceSupported === false;
+  }
+  if (localNarratorPicker) localNarratorPicker.hidden = KOKORO_ONLY_VOICE_SYSTEM;
+  if (localCharacterPicker) localCharacterPicker.hidden = KOKORO_ONLY_VOICE_SYSTEM;
+
+  const previewNarratorBtn = document.getElementById('audioVoicePreviewNarratorBtn');
+  const previewCharacterBtn = document.getElementById('audioVoicePreviewCharacterBtn');
+  const kokoroPreviewNarratorBtn = document.getElementById('audioKokoroPreviewNarratorBtn');
+  const kokoroPreviewCharacterBtn = document.getElementById('audioKokoroPreviewCharacterBtn');
+  const disabledPreview = audioState.voiceEnabled === false;
+  if (previewNarratorBtn) previewNarratorBtn.disabled = disabledPreview;
+  if (previewCharacterBtn) previewCharacterBtn.disabled = disabledPreview;
+  if (previewNarratorBtn) previewNarratorBtn.hidden = KOKORO_ONLY_VOICE_SYSTEM;
+  if (previewCharacterBtn) previewCharacterBtn.hidden = KOKORO_ONLY_VOICE_SYSTEM;
+  if (kokoroPreviewNarratorBtn) {
+    kokoroPreviewNarratorBtn.disabled = audioState.voiceEnabled === false || audioState.kokoroHostPreviewWarmupLoading === true;
+    kokoroPreviewNarratorBtn.textContent = audioState.kokoroHostPreviewWarmupLoading ? 'Preparing Narrator...' : 'Preview Narration';
+  }
+  if (kokoroPreviewCharacterBtn) kokoroPreviewCharacterBtn.disabled = audioState.voiceEnabled === false;
+
+  const kokoroNarratorSelect = document.getElementById('audioKokoroNarratorSelect');
+  const kokoroCharacterSelect = document.getElementById('audioKokoroCharacterSelect');
+  const kokoroStatus = document.getElementById('audioKokoroStatus');
+  const kokoroPanelShell = document.getElementById('audioKokoroPanelShell');
+  const kokoroPanel = document.getElementById('audioKokoroPanel');
+  const kokoroPanelToggleBtn = document.getElementById('audioKokoroPanelToggleBtn');
+  const kokoroPanelToggleSummary = document.getElementById('audioKokoroPanelToggleSummary');
+  const kokoroPanelPing = document.getElementById('audioKokoroPanelPing');
+  const kokoroQueuedBanner = document.getElementById('audioKokoroQueuedBanner');
+  const kokoroQueuedBannerText = document.getElementById('audioKokoroQueuedBannerText');
+  const kokoroQueuedBannerMeta = document.getElementById('audioKokoroQueuedBannerMeta');
+  syncKokoroVoiceSelectControl(kokoroNarratorSelect, {
+    selectedId: normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID
+  });
+  syncCharacterVoiceProfileSelect(kokoroCharacterSelect, audioState.voiceCharacterProfile);
+  const inRoom = Boolean(player && player.room);
+  const hasHost = Boolean(roomState && roomState.host);
+  const isHost = isCurrentPlayerHost();
+  const narratorLockedToHost = inRoom && hasHost && !isHost;
+  if (kokoroNarratorSelect) kokoroNarratorSelect.disabled = audioState.voiceEnabled === false || narratorLockedToHost;
+  if (kokoroCharacterSelect) kokoroCharacterSelect.disabled = audioState.voiceEnabled === false;
+  if (kokoroPanelShell) kokoroPanelShell.hidden = !audioState.kokoroPanelOpen;
+  if (kokoroPanelToggleSummary) {
+    kokoroPanelToggleSummary.hidden = audioState.kokoroPanelOpen;
+    kokoroPanelToggleSummary.textContent = getKokoroNarratorCollapsedSummaryText();
+  }
+  if (kokoroPanelToggleBtn) {
+    kokoroPanelToggleBtn.setAttribute('aria-expanded', audioState.kokoroPanelOpen ? 'true' : 'false');
+    kokoroPanelToggleBtn.classList.toggle('is-open', audioState.kokoroPanelOpen);
+    kokoroPanelToggleBtn.classList.toggle('has-ping', (Number(audioState.kokoroNarratorPeerPingCount) || 0) > 0);
+    kokoroPanelToggleBtn.title = narratorLockedToHost
+      ? 'Host controls narration voice. Open to preview and view current narrator.'
+      : 'Open adaptive narrator controls';
+  }
+  if (kokoroPanelPing) {
+    const pingCount = Math.max(0, Number(audioState.kokoroNarratorPeerPingCount) || 0);
+    kokoroPanelPing.hidden = pingCount <= 0;
+    kokoroPanelPing.textContent = pingCount > 9 ? '9+' : String(pingCount);
+    kokoroPanelPing.setAttribute('aria-label', pingCount > 0 ? `${pingCount} narrator updates` : 'No narrator updates');
+  }
+  const hasQueuedEvent = Boolean(Number(audioState.kokoroNarratorQueuedAt) || 0);
+  const queuedFresh = hasQueuedEvent && ((Date.now() - (Number(audioState.kokoroNarratorQueuedAt) || 0)) < 180000);
+  if (kokoroQueuedBanner) {
+    kokoroQueuedBanner.hidden = !queuedFresh;
+    const hostPulse = (Number(audioState.kokoroNarratorQueuedPulseUntil) || 0) > Date.now();
+    kokoroQueuedBanner.classList.toggle('is-pulse', hostPulse);
+    kokoroQueuedBanner.classList.toggle('is-host', String(audioState.kokoroNarratorQueuedBy || '') === String(player && player.name || ''));
+  }
+  if (queuedFresh) {
+    const queuedVoiceId = normalizeKokoroVoiceId(audioState.kokoroNarratorQueuedVoiceId || audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+    const queuedVoiceLabel = getKokoroNarratorLabelById(queuedVoiceId);
+    if (kokoroQueuedBannerText) kokoroQueuedBannerText.textContent = `Queued narrator: ${queuedVoiceLabel}`;
+    if (kokoroQueuedBannerMeta) {
+      const by = String(audioState.kokoroNarratorQueuedBy || '').trim();
+      const byText = by ? (by === String(player && player.name || '') ? 'Queued by you' : `Queued by host ${by}`) : 'Queued for this room';
+      kokoroQueuedBannerMeta.textContent = byText;
+    }
+  }
+  if (kokoroPanel) {
+    kokoroPanel.classList.toggle('is-queued-highlight', (Number(audioState.kokoroNarratorQueuedPulseUntil) || 0) > Date.now());
+    kokoroPanel.classList.toggle('is-locked-to-host', narratorLockedToHost);
+  }
+  if (kokoroStatus) {
+    kokoroStatus.textContent = audioState.kokoroStatusText || getKokoroStatusText();
+    kokoroStatus.classList.toggle('is-warning', audioState.kokoroStatusTone === 'warning' || (!!audioState.kokoroError && !audioState.kokoroReady));
+    kokoroStatus.classList.toggle('is-active', audioState.kokoroStatusTone === 'active' || audioState.kokoroReady === true);
+  }
+
+  const hint = document.getElementById('audioVoiceSelectionHint');
+  if (hint) {
+    const narrator = findKokoroCatalogEntryById(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID);
+    const narratorLabel = narrator ? formatKokoroCatalogLabel(narrator) : (audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID);
+    const characterProfile = getCharacterVoiceProfileOption(audioState.voiceCharacterProfile);
+    const previewMode = `${characterProfile.label}`;
+    let text = `Adaptive neural voice backend (4 curated narration voices: 2 female + 2 male). Host voice selection controls narration throughout the game: ${narratorLabel}. Character dropdown previews gold-standard archetype shaping (${previewMode}). `;
+    if (narratorLockedToHost) {
+      text += `Host ${roomState.host} controls narrator changes. You will receive a ping when they queue a new narrator. `;
+    } else if (inRoom && isHost) {
+      text += 'You are the host. Changing narrator queues a room-wide narrator update and pings everyone else. ';
+    }
+    text += audioState.kokoroReady
+      ? `Model ready (${getKokoroCatalogEntries().length}/4 cast voices visible${audioState.kokoroWarmupWarmedCount ? `, ${audioState.kokoroWarmupWarmedCount}/4 prepared` : ''}).`
+      : (audioState.kokoroLoading || audioState.kokoroWarmupLoading || audioState.kokoroCastWarmupLoading ? 'Adaptive voice routing is loading/warming now. Narration/round cues are allowed to speak immediately and fall back to local voice if neural clips are not cached yet.' : 'Adaptive voice router auto-loads during startup.');
+    text += ` ${getCharacterRuntimeModeText()}`;
+    hint.textContent = text;
+    hint.classList.toggle('is-warning', audioState.kokoroLoading === true || audioState.kokoroError || !audioState.kokoroReady);
+  }
+}
+
+function buildVoiceStudioPreviewCue(kind = 'narrator') {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  if (String(kind || '').toLowerCase() === 'character') {
+    const samples = [
+      {
+        archetype: ARCHETYPES.VILLAIN,
+        label: 'Villain',
+        text: 'Doctor Doom: Despair.',
+        speechSpec: { voiceStyle: 'villain', rate: 0.82, pitch: 0.78, gain: 0.95 },
+        intensity: 0.92
+      },
+      {
+        archetype: ARCHETYPES.KID_CARTOON,
+        label: 'Cartoon',
+        text: "SpongeBob: I'm ready!",
+        speechSpec: { voiceStyle: 'cartoon', rate: 1.26, pitch: 1.24, gain: 0.95 },
+        intensity: 0.88
+      },
+      {
+        archetype: ARCHETYPES.ROBOTIC,
+        label: 'Robotic',
+        text: 'Unit Seven online.',
+        speechSpec: { voiceStyle: 'robotic', rate: 0.9, pitch: 0.84, gain: 0.95 },
+        intensity: 0.76
+      },
+      {
+        archetype: ARCHETYPES.HEROIC,
+        label: 'Heroic',
+        text: 'Batman: I am vengeance.',
+        speechSpec: { voiceStyle: 'heroic', rate: 0.87, pitch: 0.89, gain: 0.95 },
+        intensity: 0.84
+      },
+      {
+        archetype: ARCHETYPES.SPOOKY,
+        label: 'Spooky',
+        text: 'Ghost signal: the hallway whispers back.',
+        speechSpec: { voiceStyle: 'spooky', rate: 0.84, pitch: 0.8, gain: 0.92 },
+        intensity: 0.9
+      },
+      {
+        archetype: ARCHETYPES.CHAOTIC,
+        label: 'Chaotic',
+        text: "Chaos mode: go, go, go, we're doing this live!",
+        speechSpec: { voiceStyle: 'chaotic', rate: 1.27, pitch: 1.18, gain: 0.96 },
+        intensity: 0.94
+      }
+    ];
+    const profile = normalizeCharacterVoiceProfile(audioState.voiceCharacterProfile);
+    const profileMatchMap = {
+      villain: 'Villain',
+      heroic: 'Heroic',
+      cartoon: 'Cartoon',
+      robotic: 'Robotic',
+      spooky: 'Spooky',
+      chaotic: 'Chaotic'
+    };
+    let chosen = null;
+    if (profile !== 'auto_archetype' && profile !== 'host_voice') {
+      const targetLabel = profileMatchMap[profile] || '';
+      chosen = samples.find((sample) => sample.label === targetLabel) || null;
+    }
+    if (!chosen) {
+      const idx = Math.abs(Number(audioState.voicePreviewCharacterIndex) || 0) % samples.length;
+      chosen = samples[idx];
+      audioState.voicePreviewCharacterIndex = (idx + 1) % samples.length;
+    }
+    return {
+      id: `voice-preview-character-${suffix}`,
+      type: 'entry',
+      text: chosen.text,
+      subtitleText: `Voice Studio: Character Preview (${chosen.label})`,
+      archetype: chosen.archetype,
+      intensity: chosen.intensity,
+      priority: 98,
+      preempt: true,
+      allowLiveGenerate: true,
+      dedupeKey: `voice-preview-character:${suffix}`,
+      speechSpec: { ...(chosen.speechSpec || {}) }
+    };
+  }
+  return {
+    id: `voice-preview-narrator-${suffix}`,
+    type: 'narration',
+    text: KOKORO_HOST_PREVIEW_TEXT,
+    subtitleText: 'Voice Studio: Host Preview',
+    archetype: ARCHETYPES.ANNOUNCER,
+    intensity: 0.76,
+    priority: 98,
+    preempt: true,
+    allowLiveGenerate: true,
+    dedupeKey: `voice-preview-narrator:${suffix}`,
+    speechSpec: {
+      voiceStyle: 'cinematic',
+      rate: 1.0,
+      pitch: 1.02,
+      gain: 0.95
+    }
+  };
+}
+
+function getVoiceStudioPreviewWarmupCues() {
+  return [
+    {
+      id: 'voice-preview-warmup-narrator',
+      type: 'narration',
+      text: KOKORO_HOST_PREVIEW_TEXT,
+      subtitleText: 'Voice Studio: Host Preview',
+      archetype: ARCHETYPES.ANNOUNCER,
+      intensity: 0.76,
+      priority: 72,
+      preempt: false,
+      allowLiveGenerate: true,
+      dedupeKey: 'voice-preview-warmup:narrator',
+      speechSpec: { voiceStyle: 'cinematic', rate: 1.0, pitch: 1.02, gain: 0.95 }
+    },
+    {
+      id: 'voice-preview-warmup-villain',
+      type: 'entry',
+      text: 'Doctor Doom: Despair.',
+      subtitleText: 'Voice Studio: Character Preview (Villain)',
+      archetype: ARCHETYPES.VILLAIN,
+      intensity: 0.92,
+      priority: 72,
+      preempt: false,
+      allowLiveGenerate: true,
+      dedupeKey: 'voice-preview-warmup:villain',
+      speechSpec: { voiceStyle: 'villain', rate: 0.82, pitch: 0.78, gain: 0.95 }
+    },
+    {
+      id: 'voice-preview-warmup-cartoon',
+      type: 'entry',
+      text: "SpongeBob: I'm ready!",
+      subtitleText: 'Voice Studio: Character Preview (Cartoon)',
+      archetype: ARCHETYPES.KID_CARTOON,
+      intensity: 0.88,
+      priority: 72,
+      preempt: false,
+      allowLiveGenerate: true,
+      dedupeKey: 'voice-preview-warmup:cartoon',
+      speechSpec: { voiceStyle: 'cartoon', rate: 1.26, pitch: 1.24, gain: 0.95 }
+    },
+    {
+      id: 'voice-preview-warmup-robotic',
+      type: 'entry',
+      text: 'Unit Seven online.',
+      subtitleText: 'Voice Studio: Character Preview (Robotic)',
+      archetype: ARCHETYPES.ROBOTIC,
+      intensity: 0.76,
+      priority: 72,
+      preempt: false,
+      allowLiveGenerate: true,
+      dedupeKey: 'voice-preview-warmup:robotic',
+      speechSpec: { voiceStyle: 'robotic', rate: 0.9, pitch: 0.84, gain: 0.95 }
+    },
+    {
+      id: 'voice-preview-warmup-heroic',
+      type: 'entry',
+      text: 'Batman: I am vengeance.',
+      subtitleText: 'Voice Studio: Character Preview (Heroic)',
+      archetype: ARCHETYPES.HEROIC,
+      intensity: 0.84,
+      priority: 72,
+      preempt: false,
+      allowLiveGenerate: true,
+      dedupeKey: 'voice-preview-warmup:heroic',
+      speechSpec: { voiceStyle: 'heroic', rate: 0.87, pitch: 0.89, gain: 0.95 }
+    },
+    {
+      id: 'voice-preview-warmup-spooky',
+      type: 'entry',
+      text: 'Ghost signal: the hallway whispers back.',
+      subtitleText: 'Voice Studio: Character Preview (Spooky)',
+      archetype: ARCHETYPES.SPOOKY,
+      intensity: 0.9,
+      priority: 72,
+      preempt: false,
+      allowLiveGenerate: true,
+      dedupeKey: 'voice-preview-warmup:spooky',
+      speechSpec: { voiceStyle: 'spooky', rate: 0.84, pitch: 0.8, gain: 0.92 }
+    },
+    {
+      id: 'voice-preview-warmup-chaotic',
+      type: 'entry',
+      text: "Chaos mode: go, go, go, we're doing this live!",
+      subtitleText: 'Voice Studio: Character Preview (Chaotic)',
+      archetype: ARCHETYPES.CHAOTIC,
+      intensity: 0.94,
+      priority: 72,
+      preempt: false,
+      allowLiveGenerate: true,
+      dedupeKey: 'voice-preview-warmup:chaotic',
+      speechSpec: { voiceStyle: 'chaotic', rate: 1.27, pitch: 1.18, gain: 0.96 }
+    }
+  ];
+}
+
+function ensureVoicePreviewUnlocked() {
+  try {
+    unlockAudioFromGesture({ type: 'voice-preview' });
+  } catch (error) {
+  }
+  try {
+    tryUnlockHtmlMediaStack();
+  } catch (error) {
+  }
+  try {
+    const manager = getVoiceManager();
+    if (manager) {
+      void manager.init();
+      manager.unlock();
+      if (!KOKORO_ONLY_VOICE_SYSTEM && typeof manager.refreshVoices === 'function') {
+        manager.refreshVoices();
+      }
+    }
+  } catch (error) {
+  }
+  if (
+    audioState.kokoroEnabled === true
+    && audioState.kokoroAutoLoad !== false
+    && (!audioState.kokoroReady || !audioState.kokoroWarmupDone)
+    && !audioState.kokoroLoading
+    && !audioState.kokoroWarmupLoading
+  ) {
+    void ensureKokoroStartupWarmup({ source: 'preview' });
+  }
+}
+
+async function playVoiceStudioPreview(kind = 'narrator') {
+  ensureVoicePreviewUnlocked();
+  const normalizedKind = String(kind || '').toLowerCase();
+  if (audioState.kokoroEnabled === true && (!audioState.kokoroReady || !audioState.kokoroWarmupDone)) {
+    const loadResult = await ensureKokoroStartupWarmup({ source: 'preview' });
+    if (!loadResult || loadResult.ok !== true) {
+      setVoiceStatus('Neural preview unavailable right now. Check voice status and try again.', 'warning');
+    }
+  }
+  if (audioState.kokoroEnabled === true && normalizedKind === 'narrator') {
+    const narratorLabel = getKokoroNarratorLabelById(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID);
+    setVoiceStatus(`Preparing narrator preview: ${narratorLabel}...`, 'active');
+    const warmResult = await ensureKokoroHostPreviewClipWarmup({ source: 'preview-click', deferIfBusy: false });
+    if (!warmResult || warmResult.ok !== true) {
+      setVoiceStatus(`Narrator preview cache missed for ${narratorLabel}. Generating live preview...`, 'warning');
+    }
+  }
+  const cue = buildVoiceStudioPreviewCue(kind);
+  const result = enqueueVoiceCue(cue);
+  if (result && result.enqueued) {
+    setVoiceStatus(
+      normalizedKind === 'character'
+        ? `${cue.subtitleText || 'Character archetype preview'} queued (preview only)`
+        : 'Narration voice preview queued',
+      'active'
+    );
+  } else if (result && result.reason === 'unsupported') {
+    setVoiceStatus('Voice preview unavailable in this browser.', 'warning');
+  } else if (result && result.reason === 'disabled') {
+    setVoiceStatus('Voice cues are disabled. Turn Voice On to preview.', 'warning');
+  } else {
+    setVoiceStatus('Voice preview could not start yet. Try tapping Enable Voice first.', 'warning');
+  }
+}
+
+function normalizeVoiceCuePayload(cue = {}, defaults = {}) {
+  const raw = cue && typeof cue === 'object' ? cue : {};
+  const text = String(raw.text || defaults.text || '').trim();
+  if (!text) return null;
+  const type = String(raw.type || defaults.type || 'narration').trim() || 'narration';
+  return {
+    id: String(raw.id || defaults.id || `${type}-${hashAudioSeed(`${text}|${type}`)}`),
+    type,
+    text,
+    subtitleText: String(raw.subtitleText || defaults.subtitleText || text).trim() || text,
+    archetype: raw.archetype ? String(raw.archetype) : (defaults.archetype ? String(defaults.archetype) : undefined),
+    intensity: Number.isFinite(Number(raw.intensity)) ? Math.max(0, Math.min(1, Number(raw.intensity))) : (defaults.intensity != null ? defaults.intensity : undefined),
+    priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : (Number(defaults.priority) || 50),
+    dedupeKey: String(raw.dedupeKey || defaults.dedupeKey || `${type}:${text.toLowerCase()}`),
+    delayMs: Number.isFinite(Number(raw.delayMs)) ? Math.max(0, Number(raw.delayMs)) : (Number(defaults.delayMs) || 0),
+    allowLiveGenerate: raw.allowLiveGenerate === true || defaults.allowLiveGenerate === true,
+    speechSpec: raw.speechSpec && typeof raw.speechSpec === 'object' ? { ...raw.speechSpec } : (defaults.speechSpec ? { ...defaults.speechSpec } : undefined)
+  };
+}
+
+function enqueueVoiceCue(cue = {}, defaults = {}) {
+  const manager = getVoiceManager();
+  if (!manager) return { enqueued: false, reason: 'manager-missing' };
+  void ensureVoiceManagerInitialized();
+  const normalized = normalizeVoiceCuePayload(cue, defaults);
+  if (!normalized) return { enqueued: false, reason: 'invalid' };
+  if (!shouldAllowLiveKokoroGenerateForCue(normalized)) {
+    scheduleKokoroVoiceCuePrefetch([normalized], { source: 'single-cue', delayMs: 0 });
+  }
+  return manager.enqueue(normalized);
+}
+
+function enqueueVoiceCues(cues = [], { fallback = null, clear = false, clearTypes = null } = {}) {
+  const list = Array.isArray(cues) ? cues : [];
+  const fallbackList = typeof fallback === 'function' ? (fallback() || []) : (Array.isArray(fallback) ? fallback : []);
+  const target = list.length ? list : fallbackList;
+  if (!target.length) return { total: 0, enqueued: 0 };
+  const manager = getVoiceManager();
+  if (!manager) return { total: target.length, enqueued: 0 };
+  if (clear) {
+    manager.clearQueue('voice-cue-replace', {
+      includeActive: true,
+      types: Array.isArray(clearTypes) && clearTypes.length ? clearTypes : null
+    });
+  }
+  const normalizedTarget = target
+    .map((cue) => normalizeVoiceCuePayload(cue))
+    .filter(Boolean)
+    .map((cue) => {
+      if (shouldAllowLiveKokoroGenerateForCue(cue)) return cue;
+      if (Number(cue.delayMs) > 0) return cue;
+      const spec = buildKokoroCuePlaybackSpec(cue);
+      const engine = kokoroVoiceEngineInstance;
+      const hasMemCache = Boolean(spec && engine && typeof engine.hasCachedClip === 'function' && engine.hasCachedClip(spec));
+      if (hasMemCache) return cue;
+      const type = String(cue.type || '').toLowerCase();
+      if (type === 'narration' || type === 'twist' || type === 'round4') {
+        return { ...cue, delayMs: 260 };
+      }
+      return cue;
+    });
+  scheduleKokoroVoiceCuePrefetch(normalizedTarget, { source: 'event-cues', delayMs: 0 });
+  let enqueued = 0;
+  normalizedTarget.forEach((cue) => {
+    const result = enqueueVoiceCue(cue);
+    if (result && result.enqueued) enqueued += 1;
+  });
+  return { total: normalizedTarget.length, enqueued };
+}
+
+function clearVoiceCues(reason = 'phase-change', { types = null, includeActive = true } = {}) {
+  const manager = getVoiceManager();
+  if (!manager) return;
+  manager.clearQueue(reason, {
+    includeActive,
+    types: Array.isArray(types) ? types : null
+  });
+}
+
+function hashVoiceCueSeed(input = '') {
+  const text = String(input || '');
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash >>> 0);
+}
+
+function pickVoiceCueVariant(list = [], seed = '') {
+  const options = (Array.isArray(list) ? list : []).filter(Boolean);
+  if (!options.length) return '';
+  return String(options[hashVoiceCueSeed(seed) % options.length] || '');
+}
+
+function detectTwistConnectorPhrase(twist = '') {
+  const raw = String(twist || '').trim();
+  if (!raw) return { connector: '', remainder: '' };
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const connector = String(parts[0] || '').toUpperCase();
+  const known = new Set(['WITH', 'UNDER', 'DURING', 'WHILE', 'USING', 'WITHOUT', 'AS', 'ON', 'IN', 'BY', 'THROUGH', 'AMID', 'AGAINST', 'AFTER', 'BEFORE', 'INSIDE', 'OUTSIDE', 'NO', 'ONLY', 'BUT']);
+  if (!known.has(connector)) return { connector: '', remainder: raw };
+  return { connector, remainder: parts.slice(1).join(' ').trim() };
+}
+
+function buildFallbackRoundStartLead(roundNumber, scenario = '', twist = '') {
+  return pickVoiceCueVariant([
+    `Round ${roundNumber}!`,
+    `Round ${roundNumber}... let's go!`,
+    `Round ${roundNumber}! Here we go!`,
+    `Round ${roundNumber} is live!`
+  ], `roundstart:${roundNumber}:${scenario}:${twist}`);
+}
+
+function buildFallbackScenarioLead(roundNumber, scenario = '') {
+  const variantsByRound = {
+    1: ['The scenario?', 'Your scenario?', 'Scenario check!'],
+    2: ["This round's scenario?", 'Your challenge?', 'Scenario drop!'],
+    3: ['Scenario time!', "Here's the scenario!", 'The setup?']
+  };
+  const pool = variantsByRound[roundNumber] || ['The scenario?', 'Scenario check!', "Here's the scenario!"];
+  return pickVoiceCueVariant(pool, `scenario:${roundNumber}:${scenario}`);
+}
+
+function buildFallbackTwistLine(twist = '', roundNumber = 0) {
+  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
+  const spokenTwist = String(safeTwist || '').split('|')[0].trim();
+  if (!spokenTwist) return '';
+  const { connector, remainder } = detectTwistConnectorPhrase(spokenTwist);
+  if (connector) {
+    if (remainder) {
+      if (connector === 'BUT') {
+        const flourish = pickVoiceCueVariant(['...', '!', '!!'], `twist-flourish:${roundNumber}:${spokenTwist}`);
+        return `${connector}${flourish} ${remainder}!`;
+      }
+      return `${connector} ${remainder}!`;
+    }
+    return `${connector}!`;
+  }
+  const prefix = pickVoiceCueVariant(['BUT...', 'AND...', 'NOW...'], `twist-prefix:${roundNumber}:${spokenTwist}`);
+  return `${prefix} ${spokenTwist}!`;
+}
+
+function buildFallbackRound4PreludeLine(scenario = '', twist = '') {
+  const safeScenario = String(scenario || '').trim().replace(/[.]+$/g, '');
+  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
+  if (!safeScenario && !safeTwist) {
+    return pickVoiceCueVariant([
+      'Round 4! Full team final check!',
+      'Round 4! Final team evaluation incoming!',
+      'Final check! The full team is up next!'
+    ], 'round4-prelude:fallback');
+  }
+  const twistLine = buildFallbackTwistLine(safeTwist, 4);
+  const mission = safeScenario || 'face the final evaluation';
+  return pickVoiceCueVariant([
+    `Round 4! Your full team has to ${mission}${twistLine ? `. ${twistLine}` : '!'}`,
+    `So... your full team now has to ${mission}${twistLine ? `. ${twistLine}` : '!'}`,
+    `Final brief! Full squad mission: ${mission}${twistLine ? `. ${twistLine}` : '!'}`,
+    `Here we go... full team task: ${mission}${twistLine ? `. ${twistLine}` : '!'}`
+  ], `round4-prelude:${safeScenario}:${safeTwist}`);
+}
+
+function buildFallbackRound4BriefLine(scenario = '', twist = '') {
+  const safeScenario = String(scenario || '').trim().replace(/[.]+$/g, '');
+  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
+  const parts = [];
+  if (safeScenario) {
+    const lead = pickVoiceCueVariant(['Scenario locked:', 'Mission:', 'Target objective:'], `round4-scenario-lead:${safeScenario}`);
+    parts.push(`${lead} ${safeScenario}.`);
+  }
+  if (safeTwist) {
+    parts.push(buildFallbackTwistLine(safeTwist, 4));
+  }
+  return parts.length ? parts.join(' ').replace(/\s+/g, ' ').trim() : 'Final brief incoming!';
+}
+
+function buildPhaseVoiceCues(kind = '', data = {}) {
+  const safe = data && typeof data === 'object' ? data : {};
+  const roundNumber = Number(safe.roundNumber) || Number(gameState.currentRound) || 0;
+  const scenario = String(safe.scenario || gameState.currentScenario || '').trim();
+  const twist = String(safe.twist || gameState.currentTwist || '').trim();
+  const kindKey = String(kind || '').toLowerCase();
+
+  if (kindKey === 'roundstart') {
+    if (safe.isFinalRound === true || roundNumber === 4) {
+      const finaleLead = buildFallbackRound4PreludeLine(scenario, twist);
+      return [{
+        type: 'round4',
+        text: finaleLead,
+        subtitleText: finaleLead,
+        archetype: ARCHETYPES.NARRATOR,
+        intensity: 0.62,
+        priority: 78,
+        dedupeKey: `phase:round4:start:${roundNumber}`
+      }];
+    }
+    return [{
+      type: 'narration',
+      text: buildFallbackRoundStartLead(roundNumber, scenario, twist),
+      subtitleText: `Round ${roundNumber}!`,
+      archetype: ARCHETYPES.ANNOUNCER,
+      intensity: 0.58,
+      priority: 62,
+      dedupeKey: `phase:round:start:${roundNumber}`
+    }];
+  }
+
+  if (kindKey === 'scenario') {
+    if (!scenario) return [];
+    return [{
+      type: 'narration',
+      text: `${buildFallbackScenarioLead(roundNumber, scenario)} ${scenario}${pickVoiceCueVariant(['.', '!', '...'], `scenario-punct:${roundNumber}:${scenario}`)}`,
+      subtitleText: `Scenario: ${scenario}`,
+      archetype: ARCHETYPES.NARRATOR,
+      intensity: 0.6,
+      priority: 70,
+      dedupeKey: `phase:scenario:${roundNumber}:${scenario.toLowerCase()}`
+    }];
+  }
+
+  if (kindKey === 'twist') {
+    if (!twist) return [];
+    return [{
+      type: 'twist',
+      text: buildFallbackTwistLine(twist, roundNumber),
+      subtitleText: `Twist: ${twist}`,
+      archetype: ARCHETYPES.ANNOUNCER,
+      intensity: 0.74,
+      priority: 76,
+      dedupeKey: `phase:twist:${roundNumber}:${twist.toLowerCase()}`
+    }];
+  }
+
+  if (kindKey === 'round4start') {
+    const cues = [];
+    if (scenario) {
+      cues.push({
+        type: 'round4',
+        text: `Scenario: ${scenario}.`,
+        subtitleText: `Scenario: ${scenario}`,
+        archetype: ARCHETYPES.NARRATOR,
+        intensity: 0.62,
+        priority: 84,
+        dedupeKey: `round4:start:scenario:${(scenario || '').toLowerCase()}`
+      });
+    }
+    if (twist) {
+      const spokenTwist = String(twist || '').split('|')[0].trim();
+      if (spokenTwist) {
+        cues.push({
+          type: 'round4',
+          text: `Twist: ${spokenTwist}.`,
+          subtitleText: `Twist: ${twist}`,
+          archetype: ARCHETYPES.NARRATOR,
+          intensity: 0.62,
+          priority: 84,
+          dedupeKey: `round4:start:twist:${String(twist || '').toLowerCase()}`
+        });
+      }
+    }
+    return cues;
+  }
+
+  if (kindKey === 'round4evaluated') {
+    return [{
+      type: 'round4',
+      text: 'Round four results are in.',
+      subtitleText: 'Round 4 complete - reveal starting',
+      archetype: ARCHETYPES.ANNOUNCER,
+      intensity: 0.62,
+      priority: 80,
+      dedupeKey: `round4:evaluated:${safe.isTie === true ? 'tie' : 'clear'}:${String(safe.evaluationId || '')}`
+    }];
+  }
+
+  if (kindKey === 'finalresults') {
+    return [{
+      type: 'round4',
+      text: safe && safe.isTie ? 'Final round tally locked. Tie result.' : 'Final round tally locked.',
+      subtitleText: safe && safe.isTie ? 'Final round tie locked' : 'Final round tally locked',
+      archetype: ARCHETYPES.ANNOUNCER,
+      intensity: 0.55,
+      priority: 60,
+      dedupeKey: `round4:finalresults:${safe && safe.isTie ? 'tie' : 'normal'}`
+    }];
+  }
+
+  if (kindKey === 'gameended') {
+    const winnerName = String(safe && safe.winner && safe.winner.name || '').trim();
+    return [{
+      type: 'round4',
+      text: winnerName ? `${winnerName} wins the match.` : 'Match complete. Final results are live.',
+      subtitleText: winnerName ? `${winnerName} wins the match` : 'Match complete',
+      archetype: ARCHETYPES.ANNOUNCER,
+      intensity: 0.66,
+      priority: 72,
+      dedupeKey: `game:end:${winnerName.toLowerCase()}`
+    }];
+  }
+
+  return [];
+}
+
 function writeAsciiToView(view, offset, text) {
   for (let idx = 0; idx < text.length; idx += 1) {
     view.setUint8(offset + idx, text.charCodeAt(idx));
@@ -747,7 +3131,7 @@ function getAudioCategoryMeta(category = 'sfx') {
   const key = String(category || 'sfx').toLowerCase();
   if (key === 'music') return { enabledKey: 'musicEnabled', volumeKey: 'musicVolume', gainKey: 'musicGain', label: 'Music' };
   if (key === 'reveal') return { enabledKey: 'revealEnabled', volumeKey: 'revealVolume', gainKey: 'revealGain', label: 'Reveal' };
-  if (key === 'card' || key === 'cards' || key === 'blurb' || key === 'voice') return { enabledKey: 'cardEnabled', volumeKey: 'cardVolume', gainKey: 'cardGain', label: 'Cards' };
+  if (key === 'card' || key === 'cards' || key === 'blurb' || key === 'voice') return { enabledKey: 'cardEnabled', volumeKey: 'cardVolume', gainKey: 'cardGain', label: 'Callouts' };
   return { enabledKey: 'sfxEnabled', volumeKey: 'sfxVolume', gainKey: 'sfxGain', label: 'UI' };
 }
 
@@ -767,9 +3151,21 @@ function getAudioStatusText() {
   if (audioState.muted) return 'Muted (master)';
 
   const enabled = AUDIO_CATEGORY_KEYS.filter((key) => audioState[`${key}Enabled`] === true)
-    .map((key) => (key === 'sfx' ? 'UI' : (key === 'card' ? 'Cards' : key[0].toUpperCase() + key.slice(1))));
+    .map((key) => (key === 'sfx' ? 'UI' : (key === 'card' ? 'Callouts' : key[0].toUpperCase() + key.slice(1))));
   if (!enabled.length) return 'All categories disabled';
   return `Ready • ${enabled.join(' / ')}`;
+}
+
+function getAudioQuickPanelStatusText() {
+  if (audioState.muted) return 'Muted';
+  const music = audioState.musicEnabled ? 'Music on' : 'Music off';
+  const voiceBundle = getQuickVoiceBundleState();
+  let voice = voiceBundle && voiceBundle.enabled ? 'Voice on' : 'Voice off';
+  if (voiceBundle && voiceBundle.mixed) {
+    voice = voiceBundle.narrationEnabled ? 'Narration only' : 'Callouts only';
+  }
+  if (!audioState.unlocked) return `${music} / ${voice}`;
+  return `${music} • ${voice}`;
 }
 
 function setAudioPreviewStatus(text = '', tone = '') {
@@ -797,6 +3193,16 @@ function loadAudioPreferences() {
     audioState.musicEnabled = parsed.musicEnabled !== false;
     audioState.revealEnabled = parsed.revealEnabled !== false;
     audioState.cardEnabled = parsed.cardEnabled !== false;
+    audioState.voiceEnabled = parsed.voiceEnabled !== false;
+    audioState.voiceExpressiveMode = KOKORO_ONLY_VOICE_SYSTEM ? true : (parsed.voiceExpressiveMode !== false);
+    audioState.voiceNarratorVoiceId = normalizeVoiceChoiceId(parsed.voiceNarratorVoiceId);
+    audioState.voiceCharacterVoiceId = normalizeVoiceChoiceId(parsed.voiceCharacterVoiceId);
+    audioState.voiceCharacterProfile = normalizeCharacterVoiceProfile(parsed.voiceCharacterProfile);
+    audioState.kokoroEnabled = KOKORO_ONLY_VOICE_SYSTEM ? true : (parsed.kokoroEnabled === true);
+    audioState.kokoroAutoLoad = parsed.kokoroAutoLoad !== false;
+    audioState.kokoroNarratorVoiceId = normalizeKokoroVoiceId(parsed.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+    audioState.kokoroCharacterVoiceId = normalizeKokoroVoiceId(parsed.kokoroCharacterVoiceId || '');
+    audioState.kokoroPanelOpen = false;
     audioState.quickFabDotDismissed = parsed.quickFabDotDismissed === true;
     // Always start compact/collapsed; expanded state should not persist between sessions.
     audioState.audioDeckExpanded = false;
@@ -821,6 +3227,15 @@ function saveAudioPreferences() {
       musicEnabled: audioState.musicEnabled,
       revealEnabled: audioState.revealEnabled,
       cardEnabled: audioState.cardEnabled,
+      voiceEnabled: audioState.voiceEnabled !== false,
+      voiceExpressiveMode: (KOKORO_ONLY_VOICE_SYSTEM ? true : (audioState.voiceExpressiveMode !== false)),
+      voiceNarratorVoiceId: normalizeVoiceChoiceId(audioState.voiceNarratorVoiceId),
+      voiceCharacterVoiceId: normalizeVoiceChoiceId(audioState.voiceCharacterVoiceId),
+      voiceCharacterProfile: normalizeCharacterVoiceProfile(audioState.voiceCharacterProfile),
+      kokoroEnabled: (KOKORO_ONLY_VOICE_SYSTEM ? true : (audioState.kokoroEnabled === true)),
+      kokoroAutoLoad: audioState.kokoroAutoLoad !== false,
+      kokoroNarratorVoiceId: normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID,
+      kokoroCharacterVoiceId: normalizeKokoroVoiceId(audioState.kokoroCharacterVoiceId || ''),
       quickFabDotDismissed: audioState.quickFabDotDismissed === true,
       previewSceneSelection: resolveMusicSceneKey(audioState.previewSceneSelection || 'join')
     }));
@@ -846,11 +3261,36 @@ function syncAudioControlUI() {
   setAudioButtonPressed(document.getElementById('audioUiToggle'), audioState.sfxEnabled, { on: 'On', off: 'Off' });
   setAudioButtonPressed(document.getElementById('audioRevealToggle'), audioState.revealEnabled, { on: 'On', off: 'Off' });
   setAudioButtonPressed(document.getElementById('audioCardToggle'), audioState.cardEnabled, { on: 'On', off: 'Off' });
+  setAudioButtonPressed(document.getElementById('audioVoiceToggle'), audioState.voiceEnabled !== false, { on: 'On', off: 'Off' });
+  if (!KOKORO_ONLY_VOICE_SYSTEM) {
+    setAudioButtonPressed(document.getElementById('audioVoiceExpressiveToggle'), audioState.voiceExpressiveMode !== false, {
+      on: 'Expressive',
+      off: 'Neutral'
+    });
+  }
 
-  setAudioButtonPressed(document.getElementById('audioQuickMusicToggleBtn'), audioState.musicEnabled, {
+  setAudioButtonPressed(document.getElementById('audioQuickMusicToggleBtn'), (audioState.muted ? false : audioState.musicEnabled), {
     on: 'Music On',
     off: 'Music Off'
   });
+  {
+    const quickVoiceToggleBtn = document.getElementById('audioQuickVoiceToggleBtn');
+    const bundleState = getQuickVoiceBundleState();
+    if (audioState.muted) {
+      setAudioButtonPressed(quickVoiceToggleBtn, false, {
+        on: 'Voice On',
+        off: 'Voice Off'
+      });
+    } else if (quickVoiceToggleBtn && bundleState && bundleState.mixed) {
+      quickVoiceToggleBtn.setAttribute('aria-pressed', 'mixed');
+      quickVoiceToggleBtn.textContent = 'Voice Mixed';
+    } else {
+      setAudioButtonPressed(quickVoiceToggleBtn, Boolean(bundleState && bundleState.enabled), {
+        on: 'Voice On',
+        off: 'Voice Off'
+      });
+    }
+  }
 
   const statusText = getAudioStatusText();
   const unlockStatus = document.getElementById('audioUnlockStatus');
@@ -860,7 +3300,7 @@ function syncAudioControlUI() {
     unlockStatus.classList.toggle('is-ready', audioState.unlocked && !audioState.muted);
   }
   const quickStatus = document.getElementById('audioQuickPanelStatus');
-  if (quickStatus) quickStatus.textContent = statusText;
+  if (quickStatus) quickStatus.textContent = getAudioQuickPanelStatusText();
 
   const deck = document.querySelector('.audio-control-deck');
   const deckBody = document.getElementById('audioControlDeckBody');
@@ -875,6 +3315,12 @@ function syncAudioControlUI() {
     deckToggleBtn.setAttribute('aria-expanded', audioState.audioDeckExpanded ? 'true' : 'false');
     deckToggleBtn.setAttribute('aria-label', audioState.audioDeckExpanded ? 'Collapse audio controls' : 'Expand audio controls');
     deckToggleBtn.textContent = audioState.audioDeckExpanded ? 'v' : '>';
+  }
+
+  const voiceExpressiveBtn = document.getElementById('audioVoiceExpressiveToggle');
+  if (voiceExpressiveBtn && KOKORO_ONLY_VOICE_SYSTEM) {
+    voiceExpressiveBtn.hidden = true;
+    voiceExpressiveBtn.closest('.audio-control-row')?.classList.add('voice-row-kokoro-only');
   }
 
   const quickFab = document.getElementById('audioQuickFab');
@@ -930,6 +3376,22 @@ function syncAudioControlUI() {
     previewStatus.classList.toggle('is-warning', audioState.musicPreviewStatusTone === 'warning');
     previewStatus.classList.toggle('is-active', audioState.musicPreviewActive === true);
   }
+
+  const voiceStatus = document.getElementById('audioVoiceStatus');
+  if (voiceStatus) {
+    voiceStatus.textContent = audioState.voiceStatusText || getVoiceStatusText();
+    voiceStatus.classList.toggle('is-warning', audioState.voiceStatusTone === 'warning' || (!audioState.voiceUnlocked && audioState.voiceEnabled !== false));
+    voiceStatus.classList.toggle('is-active', audioState.voiceStatusTone === 'active' || audioState.voiceSpeaking === true);
+  }
+
+  const voiceUnlockBtn = document.getElementById('audioVoiceUnlockBtn');
+  if (voiceUnlockBtn) {
+    const shouldShowUnlock = audioState.voiceEnabled !== false && audioState.voiceSupported !== false && !audioState.voiceUnlocked;
+    voiceUnlockBtn.hidden = !shouldShowUnlock;
+    voiceUnlockBtn.disabled = audioState.voiceSupported === false;
+  }
+
+  syncVoiceStudioUi();
 }
 
 function applyAudioLevels() {
@@ -950,6 +3412,7 @@ function applyAudioLevels() {
   }
 
   syncManagedMediaAudioLevels();
+  syncVoiceManagerState();
   syncAudioControlUI();
 }
 
@@ -970,6 +3433,9 @@ function setAudioCategoryEnabled(category, enabled, { persist = true } = {}) {
   const meta = getAudioCategoryMeta(category);
   audioState[meta.enabledKey] = enabled === true;
   applyAudioLevels();
+  if (meta.gainKey === 'cardGain' && audioState.cardEnabled !== true) {
+    clearVoiceCues('card-audio-disabled', { types: ['entry'], includeActive: true });
+  }
   if (meta.gainKey === 'musicGain') {
     syncMusicLoopState();
   }
@@ -979,6 +3445,11 @@ function setAudioCategoryEnabled(category, enabled, { persist = true } = {}) {
 function toggleAudioCategory(category) {
   const meta = getAudioCategoryMeta(category);
   setAudioCategoryEnabled(category, !Boolean(audioState[meta.enabledKey]));
+}
+
+function enableQuickAudioCategoryFromMuted(category) {
+  setAudioMuted(false, { persist: false });
+  setAudioCategoryEnabled(category, true, { persist: true });
 }
 
 function setAudioCategoryVolume(category, value, { persist = true } = {}) {
@@ -1178,16 +3649,6 @@ function syncManagedMediaAudioLevels() {
     }
   });
 
-  if (audioState.cardPlaybackElement) {
-    try {
-      const cardScalar = (audioState.unlocked && !audioState.muted && audioState.cardEnabled)
-        ? (clampAudioLevel(audioState.masterVolume, 0.9) * clampAudioLevel(audioState.cardVolume, AUDIO_CATEGORY_DEFAULTS.card.volume))
-        : 0;
-      const clipGain = clampAudioLevel(audioState.cardPlaybackGainScalar, 1);
-      audioState.cardPlaybackElement.volume = Math.max(0, Math.min(1, cardScalar * clipGain));
-    } catch (error) {
-    }
-  }
 }
 
 function getMusicFadeCurveValue(progress, curve = 'easeInOutSine') {
@@ -1654,6 +4115,14 @@ function setupAudioControls() {
 
   const ensureUnlockedByControlGesture = () => {
     unlockAudioFromGesture({ type: 'audio-control' });
+    try {
+      const manager = getVoiceManager();
+      if (manager) {
+        void manager.init();
+        manager.unlock();
+      }
+    } catch (error) {
+    }
   };
 
   const toggleMasterMute = () => {
@@ -1707,7 +4176,155 @@ function setupAudioControls() {
   bindToggleBtn('audioUiToggle', 'sfx');
   bindToggleBtn('audioRevealToggle', 'reveal');
   bindToggleBtn('audioCardToggle', 'card');
-  bindToggleBtn('audioQuickMusicToggleBtn', 'music');
+  const quickMusicToggleBtn = document.getElementById('audioQuickMusicToggleBtn');
+  if (quickMusicToggleBtn) {
+    quickMusicToggleBtn.addEventListener('click', () => {
+      ensureUnlockedByControlGesture();
+      if (audioState.muted) {
+        enableQuickAudioCategoryFromMuted('music');
+        return;
+      }
+      toggleAudioCategory('music');
+    });
+  }
+
+  const voiceToggleBtn = document.getElementById('audioVoiceToggle');
+  if (voiceToggleBtn) {
+    voiceToggleBtn.addEventListener('click', () => {
+      ensureUnlockedByControlGesture();
+      toggleVoiceEnabled();
+    });
+  }
+  const quickVoiceToggleBtn = document.getElementById('audioQuickVoiceToggleBtn');
+  if (quickVoiceToggleBtn) {
+    quickVoiceToggleBtn.addEventListener('click', () => {
+      ensureUnlockedByControlGesture();
+      if (audioState.muted) {
+        setQuickVoiceBundleEnabled(true);
+        return;
+      }
+      toggleQuickVoiceBundleEnabled();
+    });
+  }
+
+  const voiceExpressiveBtn = document.getElementById('audioVoiceExpressiveToggle');
+  if (voiceExpressiveBtn) {
+    if (KOKORO_ONLY_VOICE_SYSTEM) {
+      voiceExpressiveBtn.hidden = true;
+      voiceExpressiveBtn.setAttribute('aria-hidden', 'true');
+    } else {
+      voiceExpressiveBtn.addEventListener('click', () => {
+        ensureUnlockedByControlGesture();
+        toggleVoiceExpressiveMode();
+      });
+    }
+  }
+
+  const voiceUnlockBtn = document.getElementById('audioVoiceUnlockBtn');
+  if (voiceUnlockBtn) {
+    voiceUnlockBtn.addEventListener('click', () => {
+      ensureUnlockedByControlGesture();
+      setVoiceStatus('Voice unlocked on this device.', 'active');
+    });
+  }
+
+  const kokoroPanelToggleBtn = document.getElementById('audioKokoroPanelToggleBtn');
+  if (kokoroPanelToggleBtn) {
+    kokoroPanelToggleBtn.addEventListener('click', () => {
+      ensureUnlockedByControlGesture();
+      setKokoroVoiceStudioOpen(!audioState.kokoroPanelOpen);
+      if (audioState.kokoroPanelOpen) {
+        setKokoroStatus('Adaptive voice panel opened. Host narrator changes queue for the whole room.', 'active');
+      }
+    });
+  }
+
+  const voiceNarratorSelect = document.getElementById('audioVoiceNarratorSelect');
+  if (voiceNarratorSelect) {
+    voiceNarratorSelect.addEventListener('change', () => {
+      ensureUnlockedByControlGesture();
+      setVoiceChoice('narrator', voiceNarratorSelect.value || '');
+      setVoiceStatus(
+        voiceNarratorSelect.value
+          ? 'Narrator voice updated.'
+          : 'Narrator voice set to Auto.',
+        'active'
+      );
+    });
+  }
+
+  const voiceCharacterSelect = document.getElementById('audioVoiceCharacterSelect');
+  if (voiceCharacterSelect) {
+    voiceCharacterSelect.addEventListener('change', () => {
+      ensureUnlockedByControlGesture();
+      setVoiceCharacterProfile(voiceCharacterSelect.value || 'auto_archetype');
+      const selectedProfile = getCharacterVoiceProfileOption(voiceCharacterSelect.value || 'auto_archetype');
+      setVoiceStatus(
+        selectedProfile ? `Character archetype preview: ${selectedProfile.label} (preview only)` : 'Character archetype preview updated.',
+        'active'
+      );
+    });
+  }
+
+  const voicePreviewNarratorBtn = document.getElementById('audioVoicePreviewNarratorBtn');
+  if (voicePreviewNarratorBtn) {
+    voicePreviewNarratorBtn.addEventListener('click', () => {
+      playVoiceStudioPreview('narrator');
+    });
+  }
+
+  const voicePreviewCharacterBtn = document.getElementById('audioVoicePreviewCharacterBtn');
+  if (voicePreviewCharacterBtn) {
+    voicePreviewCharacterBtn.addEventListener('click', () => {
+      playVoiceStudioPreview('character');
+    });
+  }
+
+  const kokoroPreviewNarratorBtn = document.getElementById('audioKokoroPreviewNarratorBtn');
+  if (kokoroPreviewNarratorBtn) {
+    kokoroPreviewNarratorBtn.addEventListener('click', () => {
+      playVoiceStudioPreview('narrator');
+    });
+  }
+
+  const kokoroPreviewCharacterBtn = document.getElementById('audioKokoroPreviewCharacterBtn');
+  if (kokoroPreviewCharacterBtn) {
+    kokoroPreviewCharacterBtn.addEventListener('click', () => {
+      playVoiceStudioPreview('character');
+    });
+  }
+
+  const kokoroNarratorSelect = document.getElementById('audioKokoroNarratorSelect');
+  if (kokoroNarratorSelect) {
+    kokoroNarratorSelect.addEventListener('change', () => {
+      ensureUnlockedByControlGesture();
+      const chosen = findKokoroCatalogEntryById(kokoroNarratorSelect.value || DEFAULT_NARRATOR_VOICE_ID);
+      const narratorLabel = chosen ? formatKokoroCatalogLabel(chosen) : (kokoroNarratorSelect.value || DEFAULT_NARRATOR_VOICE_ID);
+      if (isCurrentPlayerHost()) {
+        queueRoomKokoroNarratorVoice(kokoroNarratorSelect.value || DEFAULT_NARRATOR_VOICE_ID);
+        setKokoroVoiceStudioOpen(true, { clearPing: true });
+        setKokoroStatus(`Queued narrator for room: ${narratorLabel}`, 'active');
+      } else {
+        setKokoroStatus(`Only the host can queue narrator voice changes. Current narrator remains room-controlled.`, 'warning');
+        syncAudioControlUI();
+      }
+    });
+  }
+
+  const kokoroCharacterSelect = document.getElementById('audioKokoroCharacterSelect');
+  if (kokoroCharacterSelect) {
+    kokoroCharacterSelect.addEventListener('change', () => {
+      ensureUnlockedByControlGesture();
+      setVoiceCharacterProfile(kokoroCharacterSelect.value || 'auto_archetype');
+      const selectedProfile = getCharacterVoiceProfileOption(kokoroCharacterSelect.value || 'auto_archetype');
+      setKokoroStatus(
+        selectedProfile
+          ? `Preview archetype sample: ${selectedProfile.label}${selectedProfile.description ? ` - ${selectedProfile.description}` : ''}`
+          : 'Preview archetype sample updated.',
+        'active'
+      );
+    });
+  }
 
   const previewSceneBtn = document.getElementById('audioPreviewSceneBtn');
   const previewSceneSelect = document.getElementById('audioPreviewSceneSelect');
@@ -1795,22 +4412,99 @@ function setupAudioControls() {
   audioState.controlsInitialized = true;
   applyAudioLevels();
   syncMusicLoopState();
-  ensureSpeechVoicesLoadedSoon();
-  // Warm clip metadata so the server-side resolver and status UI are ready before Round 4.
-  void loadCardSnippetManifest();
-  void loadCardClipStats();
+  void ensureVoiceManagerInitialized();
+  syncVoiceManagerState();
+  if (!KOKORO_ONLY_VOICE_SYSTEM) {
+    ensureSpeechVoicesLoadedSoon();
+  }
 }
 
 const startupBootstrapState = {
   started: false,
   completed: false,
+  deferredStarted: false,
   total: 0,
-  done: 0
+  done: 0,
+  currentLabel: '',
+  detail: '',
+  taskIndex: new Map(),
+  tasks: []
 };
 
-function updateStartupBootstrapUi(done = 0, total = 0, label = '') {
+function resetStartupBootstrapTasks(taskDefs = []) {
+  startupBootstrapState.tasks = [];
+  startupBootstrapState.taskIndex = new Map();
+  (Array.isArray(taskDefs) ? taskDefs : []).forEach((task, index) => {
+    const key = String(task && task.key || `task-${index}`);
+    const entry = {
+      key,
+      label: String(task && task.label || key),
+      phase: String(task && task.phase || 'blocking'),
+      status: 'pending',
+      detail: ''
+    };
+    startupBootstrapState.taskIndex.set(key, startupBootstrapState.tasks.length);
+    startupBootstrapState.tasks.push(entry);
+  });
+}
+
+function setStartupBootstrapTaskStatus(taskKey = '', status = 'pending', detail = '') {
+  const key = String(taskKey || '');
+  if (!key || !(startupBootstrapState.taskIndex instanceof Map)) return;
+  const idx = startupBootstrapState.taskIndex.get(key);
+  if (!Number.isFinite(idx)) return;
+  const current = startupBootstrapState.tasks[idx];
+  if (!current) return;
+  startupBootstrapState.tasks[idx] = {
+    ...current,
+    status: String(status || 'pending'),
+    detail: String(detail || '')
+  };
+}
+
+function renderStartupBootstrapTasks() {
+  const listEl = document.getElementById('startupBootstrapSteps');
+  if (!listEl) return;
+  const tasks = Array.isArray(startupBootstrapState.tasks) ? startupBootstrapState.tasks : [];
+  const sig = tasks.map((task) => `${task.key}|${task.status}|${task.detail}`).join('||');
+  if (listEl.dataset.sig === sig) return;
+  const frag = document.createDocumentFragment();
+  tasks.forEach((task) => {
+    const li = document.createElement('li');
+    li.className = `startup-bootstrap-step is-${String(task.status || 'pending')}`;
+    const badge = document.createElement('span');
+    badge.className = 'startup-bootstrap-step-badge';
+    badge.textContent = task.phase === 'deferred' ? 'BG' : 'NOW';
+    const label = document.createElement('span');
+    label.className = 'startup-bootstrap-step-label';
+    label.textContent = task.label;
+    li.appendChild(badge);
+    li.appendChild(label);
+    if (task.detail) {
+      const detail = document.createElement('span');
+      detail.className = 'startup-bootstrap-step-detail';
+      detail.textContent = task.detail;
+      li.appendChild(detail);
+    }
+    frag.appendChild(li);
+  });
+  listEl.innerHTML = '';
+  listEl.appendChild(frag);
+  listEl.dataset.sig = sig;
+}
+
+function setStartupBootstrapLock(active = false) {
+  const on = active === true;
+  try {
+    document.body.classList.toggle('startup-preflight-active', on);
+  } catch (error) {
+  }
+}
+
+function updateStartupBootstrapUi(done = 0, total = 0, label = '', detail = '') {
   const panel = document.getElementById('startupBootstrapPanel');
   const status = document.getElementById('startupBootstrapStatus');
+  const detailEl = document.getElementById('startupBootstrapDetail');
   const fill = document.getElementById('startupBootstrapFill');
   const count = document.getElementById('startupBootstrapCount');
   const bar = document.querySelector('#startupBootstrapPanel .startup-bootstrap-bar');
@@ -1819,20 +4513,34 @@ function updateStartupBootstrapUi(done = 0, total = 0, label = '') {
   const safeTotal = Math.max(1, Number(total) || 1);
   const safeDone = Math.max(0, Math.min(safeTotal, Number(done) || 0));
   const pct = Math.round((safeDone / safeTotal) * 100);
+  startupBootstrapState.currentLabel = String(label || startupBootstrapState.currentLabel || '');
+  const kokoroLoadingDetail = audioState.kokoroLoading ? String(audioState.kokoroLoadProgressText || '').trim() : '';
+  startupBootstrapState.detail = String(detail || kokoroLoadingDetail || '');
 
   panel.hidden = false;
+  setStartupBootstrapLock(true);
   panel.classList.toggle('is-done', safeDone >= safeTotal);
   if (status) status.textContent = label || (safeDone >= safeTotal ? 'Startup ready. Join anytime.' : 'Warming local game services...');
+  if (detailEl) {
+    detailEl.textContent = startupBootstrapState.detail || (safeDone >= safeTotal
+      ? 'Non-critical warmups continue in the background with low priority.'
+      : 'Preparing local audio, music, and voice systems for fast first interaction.');
+  }
   if (fill) fill.style.width = `${pct}%`;
   if (bar) bar.setAttribute('aria-valuenow', String(pct));
   if (count) count.textContent = `${safeDone}/${safeTotal}`;
+  renderStartupBootstrapTasks();
 }
 
 function hideStartupBootstrapUiSoon() {
   const panel = document.getElementById('startupBootstrapPanel');
-  if (!panel) return;
+  if (!panel) {
+    setStartupBootstrapLock(false);
+    return;
+  }
   window.setTimeout(() => {
     panel.hidden = true;
+    setStartupBootstrapLock(false);
   }, 900);
 }
 
@@ -1851,58 +4559,256 @@ function seedAudioSceneFromActiveScreen({ syncUi = false } = {}) {
 async function runStartupBootstrapPreflight() {
   if (startupBootstrapState.started) return;
   startupBootstrapState.started = true;
+  setStartupBootstrapLock(true);
 
-  const taskList = [
+  const runWithSoftTimeout = (promiseFactory, {
+    timeoutMs = 2500,
+    timeoutCode = 'timeout'
+  } = {}) => new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ ok: false, softTimeout: true, code: timeoutCode, timeoutMs });
+    }, Math.max(250, Number(timeoutMs) || 2500));
+    Promise.resolve()
+      .then(() => promiseFactory())
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+
+  const blockingTaskList = [
     {
+      key: 'kokoro-core',
+      label: 'Adaptive voice router',
+      run: async () => {
+        if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
+        return runWithSoftTimeout(
+          async () => {
+            await ensureVoiceManagerInitialized().catch(() => null);
+            return ensureKokoroStartupWarmup({ source: 'startup-blocking-core' });
+          },
+          { timeoutMs: 3200, timeoutCode: 'voice-core-soft-timeout' }
+        );
+      }
+    },
+    {
+      key: 'kokoro-cast',
+      label: 'Voice cast prep (4 voices)',
+      run: async () => {
+        if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
+        return runWithSoftTimeout(async () => {
+          await ensureKokoroStartupWarmup({ source: 'startup-blocking-cast-core' });
+          const [castResult, previewResult] = await Promise.allSettled([
+            ensureKokoroFullCastWarmup({ source: 'startup-blocking-cast' }),
+            ensureKokoroHostPreviewClipWarmup({ source: 'startup-blocking-preview', deferIfBusy: false })
+          ]);
+          return {
+            ok: true,
+            castResult: castResult.status === 'fulfilled' ? castResult.value : { ok: false, error: String(castResult.reason && castResult.reason.message || castResult.reason || 'cast-failed') },
+            previewResult: previewResult.status === 'fulfilled' ? previewResult.value : { ok: false, error: String(previewResult.reason && previewResult.reason.message || previewResult.reason || 'preview-failed') }
+          };
+        }, { timeoutMs: 4500, timeoutCode: 'voice-cast-soft-timeout' });
+      }
+    },
+    {
+      key: 'kokoro-preview-clips',
+      label: 'Lobby voice previews',
+      run: async () => {
+        if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
+        return runWithSoftTimeout(async () => {
+          await ensureKokoroStartupWarmup({ source: 'startup-preview-cues-core' });
+          const cues = getVoiceStudioPreviewWarmupCues();
+          let warmed = 0;
+          for (let i = 0; i < cues.length; i += 1) {
+            const result = await prefetchKokoroCueClipNow(cues[i], { source: 'startup-lobby-preview-cues' });
+            if (result && result.ok) warmed += 1;
+            if (i < cues.length - 1) {
+              await new Promise((resolve) => window.setTimeout(resolve, 16));
+            }
+          }
+          return { ok: warmed > 0, warmed, total: cues.length };
+        }, { timeoutMs: 2800, timeoutCode: 'voice-preview-cues-soft-timeout' });
+      }
+    },
+    {
+      key: 'music-tracks',
+      label: 'Join + lobby music paths',
+      run: async () => Promise.all([
+        probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('DeepUrbanHouse - Join.mp3')}`),
+        probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('HipHop - Lobby.mp3')}`)
+      ])
+    }
+  ];
+
+  const deferredTaskList = [
+    {
+      key: 'kokoro-cast-topoff',
+      label: 'Voice cache top-off',
+      run: async () => {
+        if (audioState.voiceEnabled === false) return null;
+        await ensureKokoroStartupWarmup({ source: 'startup-deferred-core-topoff' });
+        const [cast, preview] = await Promise.allSettled([
+          ensureKokoroFullCastWarmup({ source: 'startup-deferred-cast-topoff' }),
+          ensureKokoroHostPreviewClipWarmup({ source: 'startup-deferred-preview-topoff', deferIfBusy: false })
+        ]);
+        return { cast, preview };
+      }
+    },
+    {
+      key: 'kokoro-preview-topoff',
+      label: 'Lobby preview cache top-off',
+      run: async () => {
+        if (audioState.voiceEnabled === false) return null;
+        const cues = getVoiceStudioPreviewWarmupCues();
+        for (let i = 0; i < cues.length; i += 1) {
+          try {
+            await prefetchKokoroCueClipNow(cues[i], { source: 'startup-lobby-preview-topoff' });
+          } catch (error) {
+          }
+          if (i < cues.length - 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, 20));
+          }
+        }
+        return { warmed: cues.length };
+      }
+    },
+    {
+      key: 'pack-catalog',
       label: 'Pack catalog',
       run: async () => fetch('/api/packs', { cache: 'force-cache' }).then((r) => r && r.ok ? r.json() : null)
     },
     {
+      key: 'pack-metrics',
       label: 'Pack metrics',
       run: async () => fetch('/api/packs/metrics', { cache: 'force-cache' }).then((r) => r && r.ok ? r.json() : null)
     },
     {
-      label: 'Clip manifest',
-      run: async () => loadCardSnippetManifest()
+      key: 'clip-manifest',
+      label: 'Callout phrase rules',
+      run: async () => ({ mode: 'phrase-association', version: 1 })
     },
     {
-      label: 'Clip resolver',
-      run: async () => loadCardClipStats().then((stats) => {
-        const total = Number(stats && (stats.totalResolvableSources || stats.indexedClipCount)) || 0;
-        setAudioPreviewStatus(total > 0
-          ? `Clip library indexed (${total} local clips ready).`
-          : 'Clip library is empty right now. Add quote clips to audio/clips/ for OVR/finale blurbs.', total > 0 ? 'info' : 'warning');
-        return stats;
-      })
+      key: 'clip-resolver',
+      label: 'Callout phrase engine',
+      run: async () => {
+        setAudioPreviewStatus('Character callouts use instant category phrases with archetype voice shaping.', 'info');
+        return { mode: 'phrase-association', ready: true };
+      }
     },
-    {
-      label: 'Join track',
-      run: async () => probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('DeepUrbanHouse - Join.mp3')}`)
-    },
-    {
-      label: 'Lobby track',
-      run: async () => probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('HipHop - Lobby.mp3')}`)
-    }
   ];
 
-  startupBootstrapState.total = taskList.length;
-  startupBootstrapState.done = 0;
-  updateStartupBootstrapUi(0, taskList.length, 'Starting quick preflight...');
+  resetStartupBootstrapTasks([
+    ...blockingTaskList.map((task) => ({ key: task.key, label: task.label, phase: 'blocking' })),
+    ...deferredTaskList.map((task) => ({ key: task.key, label: task.label, phase: 'deferred' }))
+  ]);
 
-  await Promise.allSettled(taskList.map(async (task) => {
+  startupBootstrapState.total = blockingTaskList.length;
+  startupBootstrapState.done = 0;
+  updateStartupBootstrapUi(0, blockingTaskList.length, 'Preparing join screen...', 'Loading music and adaptive voice cast before the join screen opens. Non-critical caches continue in the background.');
+
+  for (let i = 0; i < blockingTaskList.length; i += 1) {
+    const task = blockingTaskList[i];
+    setStartupBootstrapTaskStatus(task.key, 'active');
+    updateStartupBootstrapUi(
+      startupBootstrapState.done,
+      blockingTaskList.length,
+      `Warming ${task.label}...`,
+      ''
+    );
     try {
-      await task.run();
+      const startedAt = Date.now();
+      const taskResult = await task.run();
+      const elapsedMs = Math.max(0, Date.now() - startedAt);
+      let detail = `${elapsedMs}ms`;
+      if (task.key === 'kokoro-core') {
+        const mode = audioState.kokoroDevice || 'adaptive';
+        const status = taskResult && taskResult.softTimeout
+          ? 'continuing in background'
+          : (audioState.kokoroReady ? 'router ready' : 'voice pending');
+        detail = `${status} (${mode}, ${elapsedMs}ms)`;
+      } else if (task.key === 'kokoro-cast') {
+        const prepared = Math.max(0, Number(audioState.kokoroWarmupWarmedCount) || 0);
+        const label = taskResult && taskResult.softTimeout
+          ? 'continuing in background'
+          : `${prepared}/4 prepared`;
+        detail = `${label} (${elapsedMs}ms)`;
+      } else if (task.key === 'kokoro-preview-clips') {
+        const warmed = Number(taskResult && taskResult.warmed) || 0;
+        const total = Math.max(1, Number(taskResult && taskResult.total) || 5);
+        const label = taskResult && taskResult.softTimeout
+          ? 'continuing in background'
+          : `${warmed}/${total} preview clips cached`;
+        detail = `${label} (${elapsedMs}ms)`;
+      } else if (task.key === 'music-tracks') {
+        detail = `verified local audio files (${elapsedMs}ms)`;
+      }
+      setStartupBootstrapTaskStatus(task.key, 'done', detail);
     } catch (error) {
+      setStartupBootstrapTaskStatus(task.key, 'error', String(error && (error.message || error) || 'failed'));
     } finally {
+      if ((startupBootstrapState.taskIndex.get(task.key) != null) && (!Array.isArray(startupBootstrapState.tasks) || startupBootstrapState.tasks[startupBootstrapState.taskIndex.get(task.key)]?.status !== 'error') && startupBootstrapState.tasks[startupBootstrapState.taskIndex.get(task.key)]?.status !== 'done') {
+        setStartupBootstrapTaskStatus(task.key, 'done');
+      }
       startupBootstrapState.done += 1;
-      updateStartupBootstrapUi(startupBootstrapState.done, taskList.length, startupBootstrapState.done >= taskList.length
-        ? 'Startup ready. Join screen is warm.'
-        : `Warming ${task.label}...`);
+      updateStartupBootstrapUi(startupBootstrapState.done, blockingTaskList.length, startupBootstrapState.done >= blockingTaskList.length
+        ? 'Join screen ready. Voice cast prepared and instant preview path armed.'
+        : `Warming ${task.label}...`, '');
     }
-  }));
+  }
 
   startupBootstrapState.completed = true;
   hideStartupBootstrapUiSoon();
+
+  if (!startupBootstrapState.deferredStarted) {
+    startupBootstrapState.deferredStarted = true;
+    const launchDeferred = () => {
+      (async () => {
+        for (let index = 0; index < deferredTaskList.length; index += 1) {
+          const task = deferredTaskList[index];
+          try {
+            setStartupBootstrapTaskStatus(task.key, 'active');
+            renderStartupBootstrapTasks();
+            if (index > 0) {
+              await new Promise((resolve) => window.setTimeout(resolve, 120));
+            }
+            await task.run();
+            if (task.key === 'kokoro-cast-topoff') {
+              const warmed = Number(audioState.kokoroWarmupWarmedCount) || 0;
+              setStartupBootstrapTaskStatus(task.key, 'done', `voice cast top-off complete (${warmed}/4 prepared)`);
+            } else {
+              setStartupBootstrapTaskStatus(task.key, 'done');
+            }
+          } catch (error) {
+            setStartupBootstrapTaskStatus(task.key, 'error', String(error && (error.message || error) || 'failed'));
+          } finally {
+            renderStartupBootstrapTasks();
+          }
+        }
+      })();
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.setTimeout(() => {
+        try {
+          window.requestIdleCallback(() => launchDeferred(), { timeout: 3000 });
+        } catch (error) {
+          launchDeferred();
+        }
+      }, 650);
+    } else {
+      window.setTimeout(() => launchDeferred(), 850);
+    }
+  }
 }
 
 loadAudioPreferences();
@@ -2350,8 +5256,38 @@ function maybeCleanupAudioUnlockHandlers() {
 }
 
 function unlockAudioFromGesture(event = null) {
+  if (
+    audioState.kokoroEnabled === true
+    && audioState.voiceEnabled !== false
+    && (Date.now() - Number(kokoroGesturePrimeAt || 0)) > 1200
+  ) {
+    kokoroGesturePrimeAt = Date.now();
+    try {
+      const engine = getKokoroVoiceEngine();
+      if (engine && typeof engine.prepareBrowserFallback === 'function') {
+        void engine.prepareBrowserFallback({
+          voiceIds: KOKORO_CURATED_VOICE_IDS,
+          primeUtterance: true,
+          timeoutMs: 900
+        }).catch(() => {});
+      }
+    } catch (_error) {}
+    void ensureKokoroFullCastWarmup({ source: 'gesture-unlock' }).catch(() => {});
+  }
+
   const ctx = getAudioContext();
-  if (!ctx) return;
+  try {
+    const manager = getVoiceManager();
+    if (manager) {
+      void manager.init();
+      manager.unlock();
+    }
+  } catch (voiceError) {
+  }
+  if (!ctx) {
+    syncAudioControlUI();
+    return;
+  }
 
   initializeAudioGraph();
   tryUnlockHtmlMediaStack();
@@ -2359,6 +5295,11 @@ function unlockAudioFromGesture(event = null) {
   primeManagedHtmlAudioElementsForUnlock({ markPrimed: false });
   const onUnlock = () => {
     audioState.unlocked = true;
+    try {
+      const manager = getVoiceManager();
+      if (manager) manager.unlock();
+    } catch (voiceError) {
+    }
     applyAudioLevels();
     scheduleTone({ frequency: 220, duration: 20, type: 'sine', volume: 0.0002, bus: 'sfx' });
     primeManagedHtmlAudioElementsForUnlock({ markPrimed: false });
@@ -2452,6 +5393,12 @@ function normalizeCharacterAudioMeta(input = {}) {
     .filter(Boolean)
     .map((value) => String(value).trim())
     .filter(Boolean);
+  const rawRiskFlags = []
+    .concat(Array.isArray(scoreMeta.riskFlags) ? scoreMeta.riskFlags : [])
+    .concat(Array.isArray(source.riskFlags) ? source.riskFlags : [])
+    .filter(Boolean)
+    .map((value) => String(value).trim())
+    .filter(Boolean);
   return {
     character: String(source.character || source.name || source.topPick || 'Unknown').trim() || 'Unknown',
     ownerName: String(source.ownerName || source.playerName || source.owner || '').trim(),
@@ -2460,9 +5407,18 @@ function normalizeCharacterAudioMeta(input = {}) {
     tier: String(source.ovrTierLabel || source.revealTier || source.tier || '').trim(),
     resolvedTitle: String(scoreMeta.resolvedTitle || source.resolvedTitle || '').trim(),
     resolvedSource: String(scoreMeta.resolvedSource || source.infoSource || '').trim(),
+    description: String(
+      scoreMeta.resolvedDescriptionSnippet
+      || source.resolvedDescriptionSnippet
+      || source.description
+      || (source.breakdown && source.breakdown.characterSummary)
+      || ''
+    ).replace(/\s+/g, ' ').trim().slice(0, 700),
     infoConfidence: Number.isFinite(infoConfidence) ? Math.max(0, Math.min(1, infoConfidence)) : 0,
     resolverConfidence: Number.isFinite(resolverConfidence) ? Math.max(0, Math.min(1, resolverConfidence)) : 0,
-    aliases: Array.from(new Set(rawAliases)).slice(0, 12)
+    aliases: Array.from(new Set(rawAliases)).slice(0, 12),
+    riskFlags: Array.from(new Set(rawRiskFlags)).slice(0, 12),
+    imageSynthetic: Boolean(scoreMeta.imageSynthetic || source.imageSynthetic)
   };
 }
 
@@ -2471,36 +5427,20 @@ function buildCharacterAudioSignature(input = {}) {
   return `${meta.character}|${meta.resolvedTitle}|${meta.ownerName}|${meta.ovr}|${meta.rarity}|${meta.tier}`;
 }
 
-const AUDIO_CARD_CLIP_DIRS = ['/audio/clips', '/audio/card-clips', '/audio'];
-const AUDIO_CARD_CLIP_EXTS = ['mp3'];
-const AUDIO_CARD_CLIP_INDEX_URL = '/api/audio-clips/index';
-const AUDIO_CARD_CLIP_STATS_URL = '/api/audio-clips/stats';
-const AUDIO_CARD_CLIP_RESOLVE_BATCH_URL = '/api/audio-clips/resolve-batch';
-const AUDIO_CARD_BLURB_RESOLVE_BATCH_URL = '/api/audio-blurbs/resolve-batch';
-const AUDIO_CARD_SNIPPET_MANIFEST_URL = '/audio/clips/manifest.json';
-const AUDIO_CARD_NAME_ALIASES = {
-  '007': ['007', 'james-bond'],
-  spongebob: ['spongebob', 'spongebob-squarepants'],
-  'the-flash': ['the-flash', 'flash'],
-  'john-wick': ['john-wick', 'wick'],
-  'kim-jung-un': ['kim-jung-un', 'kim-jong-un']
-};
 
-function ensureCardPlaybackElement() {
-  if (audioState.cardPlaybackElement) return audioState.cardPlaybackElement;
-  const el = createManagedAudioElement('card');
-  el.loop = false;
-  el.preload = 'auto';
-  el.volume = 0;
-  audioState.cardPlaybackElement = el;
-  return el;
-}
+const AUDIO_CARD_CALLOUT_RESOLVE_BATCH_URL = '/api/audio-callouts/resolve-batch';
 
-function clearCardPlaybackStopTimer() {
-  if (audioState.cardPlaybackStopTimer) {
-    window.clearTimeout(audioState.cardPlaybackStopTimer);
-    audioState.cardPlaybackStopTimer = null;
-  }
+function buildCalloutEngineStatus() {
+  return {
+    version: 1,
+    mode: 'phrase-association',
+    indexedClipCount: 0,
+    manifestClipCount: 0,
+    totalResolvableSources: 0,
+    libraryEmpty: true,
+    librarySignature: String(audioState.cardClipLibrarySignature || 'phrase-association-v4'),
+    generatedAt: new Date().toISOString()
+  };
 }
 
 function sanitizeCardAudioSlug(text = '') {
@@ -2513,7 +5453,7 @@ function sanitizeCardAudioSlug(text = '') {
   return normalized
     .toLowerCase()
     .replace(/&/g, ' and ')
-    .replace(/['’`]/g, '')
+    .replace(/[\u2019'`]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-');
@@ -2527,7 +5467,6 @@ function getCardAudioCandidateSlugs(meta) {
     ...(Array.isArray(safeMeta.aliases) ? safeMeta.aliases : [])
   ];
   const slugs = new Set();
-  const aliasHits = new Set();
   rawCandidates.filter(Boolean).forEach((candidate) => {
     const text = String(candidate).trim();
     if (!text) return;
@@ -2535,57 +5474,19 @@ function getCardAudioCandidateSlugs(meta) {
     const noArticle = base.replace(/^(a|an|the)\s+/i, '').trim();
     [text, base, noArticle].forEach((variantText) => {
       const slug = sanitizeCardAudioSlug(variantText);
-      if (!slug) return;
-      slugs.add(slug);
-      const aliases = AUDIO_CARD_NAME_ALIASES[slug] || [];
-      aliases.forEach((alias) => aliasHits.add(sanitizeCardAudioSlug(alias)));
+      if (slug) slugs.add(slug);
     });
-  });
-  aliasHits.forEach((slug) => {
-    if (slug) slugs.add(slug);
   });
   return Array.from(slugs);
 }
 
-function buildCardAudioClipCandidateUrls(meta) {
-  const slugs = getCardAudioCandidateSlugs(meta);
-  const urls = [];
-  slugs.forEach((slug) => {
-    AUDIO_CARD_CLIP_DIRS.forEach((dir) => {
-      AUDIO_CARD_CLIP_EXTS.forEach((ext) => {
-        urls.push(`${dir}/${encodeAudioPathSegment(`${slug}.${ext}`)}`);
-      });
-    });
-  });
-  return urls;
-}
-
-async function resolveCharacterCardClipUrl(meta) {
-  const key = `cardclip:${getCardAudioCandidateSlugs(meta).join('|') || 'unknown'}`;
-  if (audioState.cardClipProbeCache.has(key)) {
-    return audioState.cardClipProbeCache.get(key);
-  }
-
-  const pending = (async () => {
-    const index = await loadCardClipIndex().catch(() => null);
-    if (index && Array.isArray(index.clips) && index.clips.length === 0) {
-      return '';
-    }
-    const candidates = buildCardAudioClipCandidateUrls(meta).slice(0, 8);
-    for (let idx = 0; idx < candidates.length; idx += 1) {
-      const url = candidates[idx];
-      const exists = await probeManagedMediaUrl(url);
-      if (exists) return url;
-    }
-    return '';
-  })();
-
-  audioState.cardClipProbeCache.set(key, pending);
-  return pending;
-}
-
 function stopCardSpeechFallback() {
   audioState.cardSpeechToken += 1;
+  try {
+    clearVoiceCues('card-stop', { types: ['entry'], includeActive: true });
+  } catch (error) {
+  }
+  if (voiceManagerInstance) return;
   try {
     if (window.speechSynthesis && typeof window.speechSynthesis.cancel === 'function') {
       window.speechSynthesis.cancel();
@@ -2595,169 +5496,15 @@ function stopCardSpeechFallback() {
 }
 
 function stopCardPlaybackElement() {
-  clearCardPlaybackStopTimer();
   audioState.cardPlaybackGainScalar = 1;
-  if (!audioState.cardPlaybackElement) return;
-  safePauseManagedAudioElement(audioState.cardPlaybackElement);
-  try {
-    audioState.cardPlaybackElement.currentTime = 0;
-  } catch (error) {
-  }
+  audioState.cardPlaybackToken += 1;
 }
 
-async function loadCardSnippetManifest() {
-  if (audioState.cardSnippetManifest) return audioState.cardSnippetManifest;
-  if (audioState.cardSnippetManifestPromise) return audioState.cardSnippetManifestPromise;
-
-  audioState.cardSnippetManifestPromise = (async () => {
-    try {
-      const response = await fetch(AUDIO_CARD_SNIPPET_MANIFEST_URL, { cache: 'no-cache' });
-      if (!response || !response.ok) {
-        audioState.cardSnippetManifest = { version: 1, clips: [] };
-        return audioState.cardSnippetManifest;
-      }
-      const parsed = await response.json();
-      const clips = Array.isArray(parsed && parsed.clips) ? parsed.clips : [];
-      audioState.cardSnippetManifest = {
-        version: Number(parsed && parsed.version) || 1,
-        clips
-      };
-      return audioState.cardSnippetManifest;
-    } catch (error) {
-      audioState.cardSnippetManifest = { version: 1, clips: [] };
-      return audioState.cardSnippetManifest;
-    } finally {
-      audioState.cardSnippetManifestPromise = null;
-    }
-  })();
-
-  return audioState.cardSnippetManifestPromise;
-}
-
-async function loadCardClipStats() {
-  if (audioState.cardClipStats) return audioState.cardClipStats;
-  if (audioState.cardClipStatsPromise) return audioState.cardClipStatsPromise;
-
-  const syncCardClipLibrarySignature = (statsObj = {}) => {
-    const nextSig = String(statsObj && statsObj.librarySignature || '').trim();
-    if (!nextSig) return;
-    if (audioState.cardClipLibrarySignature && audioState.cardClipLibrarySignature !== nextSig) {
-      audioState.cardSnippetMatchCache.clear();
-      audioState.cardSnippetBatchMetaCache.clear();
-      audioState.cardClipProbeCache.clear();
-      audioState.cardClipWarmUrlCache.clear();
-    }
-    audioState.cardClipLibrarySignature = nextSig;
-  };
-
-  audioState.cardClipStatsPromise = (async () => {
-    try {
-      const response = await fetch(AUDIO_CARD_CLIP_STATS_URL, { cache: 'no-cache' });
-      if (!response || !response.ok) {
-        audioState.cardClipStats = {
-          version: 1,
-          indexedClipCount: 0,
-          manifestClipCount: 0,
-          totalResolvableSources: 0,
-          libraryEmpty: true
-        };
-        return audioState.cardClipStats;
-      }
-      const parsed = await response.json();
-      audioState.cardClipStats = {
-        version: Number(parsed && parsed.version) || 1,
-        indexedClipCount: Number(parsed && parsed.indexedClipCount) || 0,
-        manifestClipCount: Number(parsed && parsed.manifestClipCount) || 0,
-        totalResolvableSources: Number(parsed && parsed.totalResolvableSources) || 0,
-        libraryEmpty: parsed && parsed.libraryEmpty === true,
-        librarySignature: String(parsed && parsed.librarySignature || ''),
-        generatedAt: String(parsed && parsed.generatedAt || '')
-      };
-      audioState.cardClipStatsFetchedAt = Date.now();
-      syncCardClipLibrarySignature(audioState.cardClipStats);
-      audioState.cardClipResolverApiAvailable = true;
-      return audioState.cardClipStats;
-    } catch (error) {
-      audioState.cardClipResolverApiAvailable = false;
-      audioState.cardClipResolverApiRetryAt = Date.now() + 12000;
-      audioState.cardClipStats = {
-        version: 1,
-        indexedClipCount: 0,
-        manifestClipCount: 0,
-        totalResolvableSources: 0,
-        libraryEmpty: true
-      };
-      audioState.cardClipStatsFetchedAt = Date.now();
-      return audioState.cardClipStats;
-    } finally {
-      audioState.cardClipStatsPromise = null;
-    }
-  })();
-
-  return audioState.cardClipStatsPromise;
-}
-
-function tokenizeCardAudioSearchText(value = '') {
-  const slug = sanitizeCardAudioSlug(value);
-  if (!slug) return [];
-  return slug.split('-').filter((token) => token && token.length >= 2);
-}
-
-async function loadCardClipIndex() {
-  if (audioState.cardClipIndex) return audioState.cardClipIndex;
-  if (audioState.cardClipIndexPromise) return audioState.cardClipIndexPromise;
-
-  audioState.cardClipIndexPromise = (async () => {
-    try {
-      const response = await fetch(AUDIO_CARD_CLIP_INDEX_URL, { cache: 'no-cache' });
-      if (!response || !response.ok) {
-        audioState.cardClipIndex = { version: 1, total: 0, clips: [] };
-        return audioState.cardClipIndex;
-      }
-      const parsed = await response.json();
-      const rawClips = Array.isArray(parsed && parsed.clips) ? parsed.clips : [];
-      const clips = rawClips
-        .filter((entry) => entry && typeof entry === 'object')
-        .map((entry) => {
-          const url = String(entry.url || '').trim();
-          const file = String(entry.file || '').trim();
-          const slug = sanitizeCardAudioSlug(entry.slug || file || entry.label || '');
-          const tokenSet = new Set();
-          tokenizeCardAudioSearchText(entry.label || '').forEach((t) => tokenSet.add(t));
-          tokenizeCardAudioSearchText(file).forEach((t) => tokenSet.add(t));
-          (Array.isArray(entry.tokens) ? entry.tokens : []).forEach((t) => {
-            tokenizeCardAudioSearchText(t).forEach((token) => tokenSet.add(token));
-          });
-          return {
-            ...entry,
-            url,
-            file,
-            slug,
-            tokens: Array.from(tokenSet)
-          };
-        })
-        .filter((entry) => entry.url && entry.slug);
-      audioState.cardClipIndex = {
-        version: Number(parsed && parsed.version) || 1,
-        total: Number(parsed && parsed.total) || clips.length,
-        clips
-      };
-      return audioState.cardClipIndex;
-    } catch (error) {
-      audioState.cardClipIndex = { version: 1, total: 0, clips: [] };
-      return audioState.cardClipIndex;
-    } finally {
-      audioState.cardClipIndexPromise = null;
-    }
-  })();
-
-  return audioState.cardClipIndexPromise;
-}
-
-function getCardSnippetCacheKey(meta = {}) {
+function getCardSnippetCacheKey(meta = {}, options = {}) {
   const slugs = getCardAudioCandidateSlugs(meta);
   const resolvedSlug = sanitizeCardAudioSlug(meta && meta.resolvedTitle ? meta.resolvedTitle : '');
-  return `snippet:${slugs.join('|')}|${resolvedSlug}`;
+  const purpose = String(options && options.purpose || 'entry-callout').toLowerCase();
+  return `snippet:${purpose}|${slugs.join('|')}|${resolvedSlug}`;
 }
 
 function buildCardClipResolveBatchRequestEntry(meta = {}) {
@@ -2766,42 +5513,34 @@ function buildCardClipResolveBatchRequestEntry(meta = {}) {
     character: String(safeMeta.character || '').trim(),
     resolvedTitle: String(safeMeta.resolvedTitle || '').trim(),
     aliases: Array.isArray(safeMeta.aliases) ? safeMeta.aliases.slice(0, 16) : [],
+    description: String(safeMeta.description || '').trim().slice(0, 700),
+    resolvedSource: String(safeMeta.resolvedSource || '').trim(),
+    riskFlags: Array.isArray(safeMeta.riskFlags) ? safeMeta.riskFlags.slice(0, 16) : [],
+    imageSynthetic: safeMeta.imageSynthetic === true,
     infoConfidence: Number.isFinite(Number(safeMeta.infoConfidence)) ? Number(safeMeta.infoConfidence) : 0,
     resolverConfidence: Number.isFinite(Number(safeMeta.resolverConfidence)) ? Number(safeMeta.resolverConfidence) : 0,
     ovr: Number.isFinite(Number(safeMeta.ovr)) ? Number(safeMeta.ovr) : 0
   };
 }
 
-function cacheCardSnippetMatchResult(meta = {}, resolvedRow = null) {
-  const cacheKey = getCardSnippetCacheKey(meta);
+function cacheCardSnippetMatchResult(meta = {}, resolvedRow = null, options = {}) {
+  const cacheKey = getCardSnippetCacheKey(meta, options);
   let payload = null;
   let mode = 'miss';
-  if (resolvedRow && resolvedRow.mode === 'library-empty') {
-    payload = { __libraryEmpty: true };
-    mode = 'library-empty';
-  } else if (resolvedRow && resolvedRow.speech && typeof resolvedRow.speech === 'object') {
+  if (resolvedRow && resolvedRow.speech && typeof resolvedRow.speech === 'object') {
     payload = {
       __speechQuote: true,
       ...resolvedRow.speech
     };
-    mode = String(resolvedRow.mode || 'speech-quote');
-  } else if (resolvedRow && resolvedRow.snippet) {
-    const snippet = normalizeSnippetSpec(resolvedRow.snippet, {
-      durationSec: 1.35,
-      playbackRate: 1,
-      gain: 1
-    });
-    if (snippet) {
-      payload = snippet;
-      mode = String(resolvedRow.mode || snippet.source || 'snippet');
-    }
+    mode = String(resolvedRow.mode || 'speech-fact');
   }
   audioState.cardSnippetMatchCache.set(cacheKey, Promise.resolve(payload));
   audioState.cardSnippetBatchMetaCache.set(cacheKey, {
     mode,
     source: resolvedRow && resolvedRow.matchSource ? String(resolvedRow.matchSource) : 'none',
     matchScore: Number(resolvedRow && resolvedRow.matchScore) || 0,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    purpose: String(options && options.purpose || 'entry-callout')
   });
   return payload;
 }
@@ -2819,7 +5558,7 @@ async function resolveCharacterCardSnippetsViaServerBatch(metaList = [], options
   const uniqueMetas = [];
   const seen = new Set();
   metas.forEach((meta) => {
-    const key = getCardSnippetCacheKey(meta);
+    const key = getCardSnippetCacheKey(meta, options);
     if (!key || seen.has(key)) return;
     seen.add(key);
     uniqueMetas.push(meta);
@@ -2827,14 +5566,16 @@ async function resolveCharacterCardSnippetsViaServerBatch(metaList = [], options
   if (!uniqueMetas.length) return null;
 
   const requestEntries = uniqueMetas.map((meta) => buildCardClipResolveBatchRequestEntry(meta));
-
   let parsed = null;
   try {
-    const response = await fetch(AUDIO_CARD_BLURB_RESOLVE_BATCH_URL, {
+    const response = await fetch(AUDIO_CARD_CALLOUT_RESOLVE_BATCH_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
-      body: JSON.stringify({ entries: requestEntries })
+      body: JSON.stringify({
+        entries: requestEntries,
+        purpose: String(options && options.purpose || 'entry-callout')
+      })
     });
     if (!response || !response.ok) {
       throw new Error(`blurb-batch-${response ? response.status : 'fail'}`);
@@ -2851,25 +5592,16 @@ async function resolveCharacterCardSnippetsViaServerBatch(metaList = [], options
   rows.forEach((row, index) => {
     const meta = uniqueMetas[index];
     if (!meta) return;
-    cacheCardSnippetMatchResult(meta, row || null);
+    cacheCardSnippetMatchResult(meta, row || null, options);
   });
 
-  if (parsed && parsed.library && typeof parsed.library === 'object') {
-    const mergedStats = {
-      ...(audioState.cardClipStats || {}),
-      ...parsed.library
-    };
-    audioState.cardClipStats = mergedStats;
-    audioState.cardClipStatsFetchedAt = Date.now();
-    const nextSig = String(mergedStats.librarySignature || '').trim();
-    if (nextSig && audioState.cardClipLibrarySignature && audioState.cardClipLibrarySignature !== nextSig) {
-      audioState.cardSnippetMatchCache.clear();
-      audioState.cardSnippetBatchMetaCache.clear();
-      audioState.cardClipProbeCache.clear();
-      audioState.cardClipWarmUrlCache.clear();
-    }
-    if (nextSig) audioState.cardClipLibrarySignature = nextSig;
-  }
+  const library = (parsed && parsed.library && typeof parsed.library === 'object')
+    ? { ...parsed.library }
+    : buildCalloutEngineStatus();
+  audioState.cardClipStats = library;
+  audioState.cardClipStatsFetchedAt = Date.now();
+  const nextSig = String(library.librarySignature || '').trim();
+  if (nextSig) audioState.cardClipLibrarySignature = nextSig;
 
   const shouldLog = options && options.log !== false;
   if (shouldLog) {
@@ -2877,13 +5609,12 @@ async function resolveCharacterCardSnippetsViaServerBatch(metaList = [], options
     if ((now - (audioState.cardClipPrefetchLastLogAt || 0)) > 1400) {
       audioState.cardClipPrefetchLastLogAt = now;
       const stats = parsed && parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : {};
+      const purpose = String(options && options.purpose || stats.purpose || 'entry-callout');
       console.info(
-        `[audio blurbs] batch resolve requested=${Number(stats.requested) || uniqueMetas.length}` +
-        ` clip=${Number(stats.audioClip) || 0}` +
-        ` speechQ=${Number(stats.speechQuote) || 0}` +
-        ` speechF=${Number(stats.speechFact) || 0}` +
+        `[audio callouts] batch resolve requested=${Number(stats.requested) || uniqueMetas.length}` +
+        ` purpose=${purpose}` +
+        ` speech=${Number(stats.speechAssociation || stats.speechFact) || 0}` +
         ` miss=${Number(stats.misses) || 0}` +
-        ` empty=${Number(stats.libraryEmpty) || 0}` +
         ` ${parsed && parsed.cacheHit ? 'cache=hit ' : ''}` +
         `ms=${Number(stats.elapsedMs || stats.quoteFetchMsAvg) || 0}`
       );
@@ -2897,329 +5628,33 @@ async function resolveCharacterCardSnippetsViaServerBatch(metaList = [], options
   };
 }
 
-async function resolveCharacterCardSnippetViaServer(meta = {}) {
+async function resolveCharacterCardSnippetViaServer(meta = {}, options = {}) {
   const safeMeta = normalizeCharacterAudioMeta(meta);
-  const result = await resolveCharacterCardSnippetsViaServerBatch([safeMeta], { log: false });
+  const result = await resolveCharacterCardSnippetsViaServerBatch([safeMeta], { ...options, log: false });
   if (!result || !result.endpointOk) {
     return { endpointOk: false, blurb: null, libraryEmpty: false };
   }
-  const cacheKey = getCardSnippetCacheKey(safeMeta);
+  const cacheKey = getCardSnippetCacheKey(safeMeta, options);
   const cached = audioState.cardSnippetMatchCache.get(cacheKey);
   if (cached && typeof cached.then === 'function') {
     const blurb = await cached;
-    if (blurb && blurb.__libraryEmpty) {
-      return { endpointOk: true, blurb: null, libraryEmpty: true };
-    }
     return { endpointOk: true, blurb: blurb || null, libraryEmpty: false };
   }
   return { endpointOk: true, blurb: null, libraryEmpty: false };
 }
 
-function getCardAudioCandidateTokens(meta) {
-  const values = []
-    .concat(meta && meta.character ? meta.character : '')
-    .concat(meta && meta.resolvedTitle ? meta.resolvedTitle : '')
-    .concat(Array.isArray(meta && meta.aliases) ? meta.aliases : []);
-  const tokenSet = new Set();
-  values.forEach((value) => {
-    tokenizeCardAudioSearchText(value).forEach((token) => tokenSet.add(token));
-  });
-  return Array.from(tokenSet);
-}
-
-function scoreIndexedCardClipCandidate(entry = {}, meta = {}) {
-  const entrySlug = sanitizeCardAudioSlug(entry.slug || entry.file || entry.label || '');
-  if (!entrySlug) return 0;
-
-  const metaSlugs = getCardAudioCandidateSlugs(meta);
-  if (!metaSlugs.length) return 0;
-  const resolvedSlug = sanitizeCardAudioSlug(meta && meta.resolvedTitle ? meta.resolvedTitle : '');
-  const characterSlug = sanitizeCardAudioSlug(meta && meta.character ? meta.character : '');
-  const entryCharacterHintSlug = sanitizeCardAudioSlug(entry && entry.characterHint ? entry.characterHint : '');
-  const entryFolderHintSlugs = Array.isArray(entry && entry.folderHints)
-    ? entry.folderHints.map((value) => sanitizeCardAudioSlug(value)).filter(Boolean)
-    : [];
-  const entryTokens = new Set(Array.isArray(entry.tokens) ? entry.tokens : tokenizeCardAudioSearchText(entrySlug));
-  const metaTokens = getCardAudioCandidateTokens(meta);
-
-  let score = 0;
-  metaSlugs.forEach((slug) => {
-    if (!slug) return;
-    if (entryCharacterHintSlug && slug === entryCharacterHintSlug) {
-      score += (resolvedSlug && slug === resolvedSlug) ? 180 : 150;
-    }
-    if (entryFolderHintSlugs.includes(slug)) {
-      score += (resolvedSlug && slug === resolvedSlug) ? 140 : 110;
-    }
-    if (slug === entrySlug) {
-      score += (resolvedSlug && slug === resolvedSlug) ? 240 : (characterSlug && slug === characterSlug) ? 210 : 175;
-      return;
-    }
-    if (entrySlug.startsWith(`${slug}-`)) {
-      score += (resolvedSlug && slug === resolvedSlug) ? 120 : 90;
-    }
-    if (entrySlug.includes(slug) || slug.includes(entrySlug)) {
-      score += 50;
-    }
-    const slugParts = slug.split('-').filter(Boolean);
-    slugParts.forEach((part) => {
-      if (part.length >= 3 && entryTokens.has(part)) score += 14;
-    });
-  });
-
-  metaTokens.forEach((token) => {
-    if (!token) return;
-    if (entryTokens.has(token)) score += 12;
-  });
-
-  if ((Number(meta.infoConfidence) || 0) >= 0.75 && resolvedSlug && entrySlug === resolvedSlug) {
-    score += 50;
-  }
-  if ((Number(meta.infoConfidence) || 0) >= 0.75 && characterSlug && entrySlug.startsWith(`${characterSlug}-`)) {
-    score += 30;
-  }
-  if ((Number(meta.infoConfidence) || 0) >= 0.75 && (Number(meta.resolverConfidence) || 0) >= 0.75) {
-    score += 20;
-  }
-
-  if (entryCharacterHintSlug && metaSlugs.length) {
-    const bestDistance = metaSlugs.reduce((best, slug) => Math.min(best, quickSlugDistance(entryCharacterHintSlug, slug)), 99);
-    if (bestDistance === 1) score += 34;
-    if (bestDistance === 2) score += 16;
-  }
-  return score;
-}
-
-function quickSlugDistance(a = '', b = '') {
-  const x = String(a || '');
-  const y = String(b || '');
-  if (!x || !y) return 99;
-  if (x === y) return 0;
-  if (Math.abs(x.length - y.length) > 3) return 99;
-  const rows = y.length + 1;
-  const cols = x.length + 1;
-  const dp = Array.from({ length: rows }, (_, r) => {
-    const row = new Array(cols).fill(0);
-    row[0] = r;
-    return row;
-  });
-  for (let c = 0; c < cols; c += 1) dp[0][c] = c;
-  for (let r = 1; r < rows; r += 1) {
-    let rowMin = dp[r][0];
-    for (let c = 1; c < cols; c += 1) {
-      const cost = y[r - 1] === x[c - 1] ? 0 : 1;
-      dp[r][c] = Math.min(
-        dp[r - 1][c] + 1,
-        dp[r][c - 1] + 1,
-        dp[r - 1][c - 1] + cost
-      );
-      if (dp[r][c] < rowMin) rowMin = dp[r][c];
-    }
-    if (rowMin > 3) return 99;
-  }
-  return dp[rows - 1][cols - 1];
-}
-
-async function resolveCharacterCardIndexedSnippetSpec(meta) {
-  const index = await loadCardClipIndex();
-  const clips = Array.isArray(index && index.clips) ? index.clips : [];
-  if (!clips.length) return null;
-
-  let best = null;
-  let bestScore = 0;
-  for (let idx = 0; idx < clips.length; idx += 1) {
-    const clip = clips[idx];
-    const score = scoreIndexedCardClipCandidate(clip, meta);
-    if (score <= 0) continue;
-    if (best == null || score > bestScore) {
-      best = clip;
-      bestScore = score;
-    }
-  }
-  if (!best || bestScore < 42) return null;
-
-  return normalizeSnippetSpec({
-    ...best,
-    url: best.url,
-    source: 'indexed-file',
-    startSec: Number.isFinite(Number(best.startSec)) ? Number(best.startSec) : 0.16,
-    durationSec: Number.isFinite(Number(best.durationSec)) ? Number(best.durationSec) : 1.35,
-    gain: Number.isFinite(Number(best.gain)) ? Number(best.gain) : 1
-  }, {
-    durationSec: 1.35,
-    playbackRate: 1,
-    gain: 1
-  });
-}
-
-function normalizeManifestClipUrl(rawEntry = {}) {
-  const entry = rawEntry && typeof rawEntry === 'object' ? rawEntry : {};
-  const explicitUrl = String(entry.url || '').trim();
-  if (explicitUrl) {
-    if (/^https?:\/\//i.test(explicitUrl) || explicitUrl.startsWith('/')) return explicitUrl;
-    return `/audio/clips/${encodeAudioPathSegment(explicitUrl)}`;
-  }
-  const file = String(entry.file || '').trim();
-  if (!file) return '';
-  return `/audio/clips/${encodeAudioPathSegment(file)}`;
-}
-
-function getManifestClipSearchSlugs(entry = {}) {
-  const safeEntry = entry && typeof entry === 'object' ? entry : {};
-  const values = []
-    .concat(safeEntry.id || '')
-    .concat(safeEntry.character || '')
-    .concat(safeEntry.name || '')
-    .concat(safeEntry.title || '')
-    .concat(Array.isArray(safeEntry.keys) ? safeEntry.keys : [])
-    .concat(Array.isArray(safeEntry.aliases) ? safeEntry.aliases : [])
-    .concat(Array.isArray(safeEntry.characters) ? safeEntry.characters : [])
-    .concat(Array.isArray(safeEntry.titles) ? safeEntry.titles : [])
-    .concat(Array.isArray(safeEntry.resolvedTitles) ? safeEntry.resolvedTitles : []);
-  const slugs = new Set();
-  values.forEach((value) => {
-    const slug = sanitizeCardAudioSlug(value);
-    if (slug) slugs.add(slug);
-  });
-  return Array.from(slugs);
-}
-
-function scoreManifestClipCandidate(entry = {}, meta = {}) {
-  const clipSlugs = new Set(getManifestClipSearchSlugs(entry));
-  if (!clipSlugs.size) return 0;
-
-  const metaSlugs = getCardAudioCandidateSlugs(meta);
-  if (!metaSlugs.length) return 0;
-  const resolvedSlug = sanitizeCardAudioSlug(meta && meta.resolvedTitle ? meta.resolvedTitle : '');
-  const characterSlug = sanitizeCardAudioSlug(meta && meta.character ? meta.character : '');
-  let score = 0;
-
-  metaSlugs.forEach((slug) => {
-    if (!slug) return;
-    if (clipSlugs.has(slug)) {
-      if (resolvedSlug && slug === resolvedSlug) score += 220;
-      else if (characterSlug && slug === characterSlug) score += 180;
-      else score += 120;
-      return;
-    }
-    clipSlugs.forEach((clipSlug) => {
-      if (!clipSlug) return;
-      if (clipSlug.includes(slug) || slug.includes(clipSlug)) {
-        score += 28;
-      }
-    });
-  });
-
-  const minConfidence = Number(entry.minInfoConfidence);
-  if (Number.isFinite(minConfidence) && (Number(meta.infoConfidence) || 0) < minConfidence) {
-    score -= 200;
-  }
-  if ((Number(meta.infoConfidence) || 0) >= 0.75 && resolvedSlug && clipSlugs.has(resolvedSlug)) {
-    score += 40;
-  }
-  return score;
-}
-
-function clampSnippetDurationSeconds(seconds, fallback = 1.35) {
-  const numeric = Number(seconds);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.max(0.85, Math.min(2.2, numeric));
-}
-
-function normalizeSnippetSpec(rawSpec = {}, defaults = {}) {
-  const raw = rawSpec && typeof rawSpec === 'object' ? rawSpec : {};
-  const url = String(raw.url || defaults.url || '').trim();
-  if (!url) return null;
-  const startSec = Math.max(0, Number.isFinite(Number(raw.startSec)) ? Number(raw.startSec)
-    : Number.isFinite(Number(raw.startMs)) ? (Number(raw.startMs) / 1000)
-      : Number.isFinite(Number(defaults.startSec)) ? Number(defaults.startSec) : 0);
-  const endSec = Number.isFinite(Number(raw.endSec)) ? Number(raw.endSec)
-    : Number.isFinite(Number(raw.endMs)) ? (Number(raw.endMs) / 1000) : null;
-  const rawDurationSec = Number.isFinite(Number(raw.durationSec)) ? Number(raw.durationSec)
-    : Number.isFinite(Number(raw.durationMs)) ? (Number(raw.durationMs) / 1000)
-      : (endSec != null ? Math.max(0.25, endSec - startSec) : (Number(defaults.durationSec) || 1.35));
-  const playbackRate = clampAudioRate(raw.playbackRate != null ? raw.playbackRate : defaults.playbackRate, 1);
-  return {
-    url,
-    startSec,
-    durationSec: clampSnippetDurationSeconds(rawDurationSec, Number(defaults.durationSec) || 1.35),
-    playbackRate,
-    gain: clampAudioLevel(raw.gain != null ? raw.gain : defaults.gain, 1),
-    id: String(raw.id || defaults.id || '').trim(),
-    source: String(raw.source || defaults.source || 'manifest').trim() || 'manifest'
-  };
-}
-
-async function resolveCharacterCardSnippetSpec(meta) {
-  const signatureKey = getCardSnippetCacheKey(meta);
+async function resolveCharacterCardSnippetSpec(meta, options = {}) {
+  const signatureKey = getCardSnippetCacheKey(meta, options);
   if (audioState.cardSnippetMatchCache.has(signatureKey)) {
     return audioState.cardSnippetMatchCache.get(signatureKey);
   }
 
   const pending = (async () => {
-    const serverResolved = await resolveCharacterCardSnippetViaServer(meta).catch(() => ({ endpointOk: false }));
+    const serverResolved = await resolveCharacterCardSnippetViaServer(meta, options).catch(() => ({ endpointOk: false }));
     if (serverResolved && serverResolved.endpointOk) {
-      if (serverResolved.libraryEmpty) return { __libraryEmpty: true };
       if (serverResolved.blurb) return serverResolved.blurb;
       return null;
     }
-
-    const manifest = await loadCardSnippetManifest();
-    const clips = Array.isArray(manifest && manifest.clips) ? manifest.clips : [];
-    let best = null;
-    let bestScore = 0;
-    for (let idx = 0; idx < clips.length; idx += 1) {
-      const clip = clips[idx];
-      const url = normalizeManifestClipUrl(clip);
-      if (!url) continue;
-      const score = scoreManifestClipCandidate(clip, meta);
-      if (score <= 0) continue;
-      if (best == null || score > bestScore) {
-        best = clip;
-        bestScore = score;
-      }
-    }
-
-    if (best) {
-      const bestUrl = normalizeManifestClipUrl(best);
-      const normalized = normalizeSnippetSpec({
-        ...best,
-        url: bestUrl,
-        source: 'manifest'
-      }, {
-        durationSec: 1.35,
-        playbackRate: 1,
-        gain: 1
-      });
-      if (normalized) return normalized;
-    }
-
-    const index = await loadCardClipIndex();
-    const indexedSnippet = Array.isArray(index && index.clips) && index.clips.length
-      ? await resolveCharacterCardIndexedSnippetSpec(meta)
-      : null;
-    if (indexedSnippet) {
-      return indexedSnippet;
-    }
-
-    if (Array.isArray(index && index.clips) && index.clips.length === 0) {
-      return { __libraryEmpty: true };
-    }
-
-    const directClipUrl = await resolveCharacterCardClipUrl(meta);
-    if (directClipUrl) {
-      return normalizeSnippetSpec({
-        url: directClipUrl,
-        source: 'direct-file',
-        startSec: 0,
-        durationSec: 1.35
-      }, {
-        durationSec: 1.35,
-        playbackRate: 1,
-        gain: 1
-      });
-    }
-
     return null;
   })();
 
@@ -3239,83 +5674,11 @@ function scoreCardClipPrefetchPriority(meta = {}, options = {}) {
   return (info * 120) + (resolver * 90) + (ovr * 0.35) + (hasResolved * 18) + (aliasBoost * 2.5) + contextBoost;
 }
 
-function getCachedSnippetForMeta(meta = {}) {
-  const cacheKey = getCardSnippetCacheKey(meta);
+function getCachedSnippetForMeta(meta = {}, options = {}) {
+  const cacheKey = getCardSnippetCacheKey(meta, options);
   const cached = audioState.cardSnippetMatchCache.get(cacheKey);
   if (!cached || typeof cached.then !== 'function') return null;
   return cached;
-}
-
-function warmCardClipMediaUrl(url = '', { force = false } = {}) {
-  const targetUrl = String(url || '').trim();
-  if (!targetUrl) return;
-  if (!force && audioState.cardClipWarmUrlCache.has(targetUrl)) return;
-  if (audioState.cardClipWarmQueuedUrls.has(targetUrl)) return;
-  audioState.cardClipWarmQueuedUrls.add(targetUrl);
-  audioState.cardClipWarmQueue.push(targetUrl);
-  drainCardClipWarmQueue();
-}
-
-function drainCardClipWarmQueue() {
-  const maxConcurrent = 2;
-  while (audioState.cardClipWarmActive < maxConcurrent && audioState.cardClipWarmQueue.length) {
-    const url = String(audioState.cardClipWarmQueue.shift() || '').trim();
-    if (!url) continue;
-    audioState.cardClipWarmQueuedUrls.delete(url);
-    if (audioState.cardClipWarmUrlCache.has(url)) continue;
-
-    audioState.cardClipWarmActive += 1;
-    const warmer = createManagedAudioElement('card-warm');
-    warmer.preload = 'metadata';
-    warmer.muted = true;
-    warmer.volume = 0;
-    warmer.src = url;
-    audioState.cardClipWarmers.push(warmer);
-
-    const cleanup = () => {
-      try {
-        warmer.pause();
-      } catch (error) {
-      }
-      try {
-        warmer.removeAttribute('src');
-        warmer.load();
-      } catch (error) {
-      }
-      audioState.cardClipWarmActive = Math.max(0, audioState.cardClipWarmActive - 1);
-      const idx = audioState.cardClipWarmers.indexOf(warmer);
-      if (idx >= 0) audioState.cardClipWarmers.splice(idx, 1);
-      drainCardClipWarmQueue();
-    };
-
-    const markReady = () => {
-      audioState.cardClipWarmUrlCache.add(url);
-      cleanup();
-    };
-
-    let finished = false;
-    const finalize = (fn) => () => {
-      if (finished) return;
-      finished = true;
-      window.clearTimeout(timeout);
-      warmer.removeEventListener('loadedmetadata', onMetaFinal);
-      warmer.removeEventListener('canplay', onMetaFinal);
-      warmer.removeEventListener('error', onErrorFinal);
-      fn();
-    };
-    const onMetaFinal = finalize(markReady);
-    const onErrorFinal = finalize(cleanup);
-    const timeout = window.setTimeout(onErrorFinal, 2200);
-
-    warmer.addEventListener('loadedmetadata', onMetaFinal, { once: true });
-    warmer.addEventListener('canplay', onMetaFinal, { once: true });
-    warmer.addEventListener('error', onErrorFinal, { once: true });
-    try {
-      warmer.load();
-    } catch (error) {
-      onErrorFinal();
-    }
-  }
 }
 
 function canUseSpeechSynthesis() {
@@ -3425,62 +5788,104 @@ function pickSpeechVoiceForBlurb(meta = {}, speechSpec = {}) {
   return best || null;
 }
 
-function getCardSpeechUtteranceVolume(speechSpec = {}) {
-  if (audioState.muted || !audioState.cardEnabled) return 0;
+function getCardSpeechUtteranceVolume(speechSpec = {}, options = {}) {
+  const bypassCardEnabled = options && options.bypassCardEnabled === true;
+  if (audioState.muted || (!bypassCardEnabled && !audioState.cardEnabled)) return 0;
   const master = clampAudioLevel(audioState.masterVolume, 0.9);
   const card = clampAudioLevel(audioState.cardVolume, AUDIO_CATEGORY_DEFAULTS.card.volume);
   const gain = clampAudioLevel(speechSpec && speechSpec.gain != null ? speechSpec.gain : 1, 1);
   return Math.max(0, Math.min(1, master * card * gain));
 }
 
-function playCardSpeechQuote(speechSpec = {}, meta = {}, options = {}) {
-  if (!canUseSpeechSynthesis()) return false;
-  if (audioState.muted || !audioState.cardEnabled) return false;
-
+function buildCardSpeechQuoteVoiceCue(speechSpec = {}, meta = {}, options = {}) {
   const text = String(speechSpec && (speechSpec.text || speechSpec.displayText) || '').trim();
-  if (!text) return false;
+  if (!text) return null;
 
-  const synth = getSpeechSynthesisSafe();
-  if (!synth) return false;
-  ensureSpeechVoicesLoadedSoon();
+  const startDelayMs = Math.max(0, Number(options && options.delayMs) || 0);
+  const contextLabel = String(options && options.context || '').toLowerCase();
+  const manualReplayContext = contextLabel.includes('ovr')
+    || contextLabel.includes('click')
+    || contextLabel.includes('replay')
+    || contextLabel.includes('mvp')
+    || contextLabel.includes('final-screen');
+  const shouldPreemptVoice = options && options.preemptVoice === true
+    ? true
+    : (
+      contextLabel.includes('ovr')
+      || contextLabel.includes('click')
+      || contextLabel.includes('replay')
+      || contextLabel.includes('mvp')
+      || contextLabel.includes('finale')
+      || contextLabel.includes('final-screen-autoplay')
+    );
+
+  const inferred = classifyEntryArchetype(meta && (meta.character || meta.resolvedTitle || ''), {
+    scenario: gameState.currentScenario,
+    twist: gameState.currentTwist,
+    round: gameState.currentRound,
+    voiceStyle: speechSpec && speechSpec.voiceStyle
+  });
+  const speechArchetype = mapSpeechStyleToArchetype(speechSpec && speechSpec.voiceStyle) || (inferred && inferred.archetype);
+  const intensity = Math.max(
+    0.25,
+    Math.min(
+      1,
+      Number(speechSpec && speechSpec.confidence) || 0,
+      1
+    )
+  );
+
+  return {
+    id: `entry-${hashAudioSeed(buildCharacterAudioSignature(meta))}`,
+    type: 'entry',
+    text,
+    subtitleText: String(speechSpec && (speechSpec.displayText || speechSpec.text) || text).trim(),
+    archetype: speechArchetype,
+    intensity: Math.max(intensity, Number(inferred && inferred.intensity) || 0.5, Math.min(1, (Number(meta && meta.ovr) || 0) / 100)),
+    priority: (contextLabel.includes('mvp') || contextLabel.includes('finale'))
+      ? 94
+      : (contextLabel.includes('final') ? 88 : 76),
+    dedupeKey: manualReplayContext && !(options && options.forPrefetch === true)
+      ? `entry:interactive:${buildCharacterAudioSignature(meta)}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`
+      : `entry:${buildCharacterAudioSignature(meta)}:${text.toLowerCase()}`,
+    preempt: options && options.forPrefetch === true ? false : shouldPreemptVoice,
+    allowLiveGenerate: true,
+    delayMs: options && options.forPrefetch === true ? 0 : startDelayMs,
+    speechSpec: {
+      voiceStyle: speechSpec && speechSpec.voiceStyle,
+      rate: speechSpec && speechSpec.rate,
+      pitch: speechSpec && speechSpec.pitch,
+      gain: clampAudioLevel(speechSpec && speechSpec.gain != null ? speechSpec.gain : getCardSpeechUtteranceVolume(speechSpec, options), 1)
+    }
+  };
+}
+
+function playCardSpeechQuote(speechSpec = {}, meta = {}, options = {}) {
+  const bypassCardEnabled = options && options.bypassCardEnabled === true;
+  if (audioState.muted || audioState.voiceEnabled === false || (!bypassCardEnabled && !audioState.cardEnabled)) return false;
+  scheduleKokoroFullCastWarmup({ source: 'card-speech', delayMs: 120 });
+  const contextLabel = String(options && options.context || '').toLowerCase();
+  const bypassSupersedeCheck = contextLabel.includes('mvp') || contextLabel.includes('finale');
+
+  const manager = getVoiceManager();
+  if (!manager) return false;
+  void ensureVoiceManagerInitialized();
 
   stopCardPlaybackElement();
   stopCardSpeechFallback();
 
   const requestToken = ++audioState.cardPlaybackToken;
-  const startDelayMs = Math.max(0, Number(options && options.delayMs) || 0);
-  const start = () => {
-    if (requestToken !== audioState.cardPlaybackToken) return false;
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voice = pickSpeechVoiceForBlurb(meta, speechSpec);
-    if (voice) {
-      try { utterance.voice = voice; } catch (error) {}
-      try { if (voice.lang) utterance.lang = voice.lang; } catch (error) {}
-    }
-    utterance.rate = clampAudioRate(speechSpec && speechSpec.rate != null ? speechSpec.rate : 1.15, 1.15);
-    utterance.pitch = Math.max(0, Math.min(2, Number(speechSpec && speechSpec.pitch != null ? speechSpec.pitch : 1) || 1));
-    utterance.volume = getCardSpeechUtteranceVolume(speechSpec);
-    if (utterance.volume <= 0.0001) return false;
-    try {
-      synth.cancel();
-    } catch (error) {
-    }
-    try {
-      synth.speak(utterance);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  };
+  const cue = buildCardSpeechQuoteVoiceCue(speechSpec, meta, options);
+  if (!cue) return false;
 
-  if (startDelayMs > 0) {
-    window.setTimeout(start, startDelayMs);
-    return true;
-  }
-  return start();
+  const result = manager.enqueue(cue);
+  if (!result || !result.enqueued) return false;
+  if (!bypassSupersedeCheck && requestToken !== audioState.cardPlaybackToken) return false;
+  return true;
 }
 
 async function prefetchCharacterCardBlurbsNow(metaList = [], options = {}) {
+  scheduleKokoroFullCastWarmup({ source: 'blurb-prefetch', delayMs: 120 });
   const metas = (Array.isArray(metaList) ? metaList : [])
     .map((meta) => normalizeCharacterAudioMeta(meta))
     .filter((meta) => meta && (meta.character || meta.resolvedTitle));
@@ -3497,7 +5902,7 @@ async function prefetchCharacterCardBlurbsNow(metaList = [], options = {}) {
 
   deduped.sort((a, b) => scoreCardClipPrefetchPriority(b, options) - scoreCardClipPrefetchPriority(a, options));
 
-  const maxEntries = Math.max(1, Math.min(36, Number(options && options.maxEntries) || 18));
+  const maxEntries = Math.max(1, Math.min(48, Number(options && options.maxEntries) || 18));
   const selected = deduped.slice(0, maxEntries);
 
   // Avoid re-requesting entries that already have a resolved cache promise.
@@ -3506,29 +5911,50 @@ async function prefetchCharacterCardBlurbsNow(metaList = [], options = {}) {
     await resolveCharacterCardSnippetsViaServerBatch(pendingRequest, { log: true });
   }
 
-  let warmed = 0;
-  const warmLimit = Math.max(0, Math.min(8, Number(options && options.warmTop) || 0));
-  if (warmLimit > 0) {
-    const warmedCandidates = [];
-    for (let i = 0; i < selected.length; i += 1) {
-      const meta = selected[i];
-      const cached = await Promise.resolve(getCachedSnippetForMeta(meta) || null);
-      if (!cached || cached.__libraryEmpty) continue;
-      const snippet = normalizeSnippetSpec(cached);
-      if (!snippet || !snippet.url) continue;
-      warmedCandidates.push(snippet.url);
-      if (warmedCandidates.length >= warmLimit) break;
+  let speechQueued = 0;
+  let speechWarmed = 0;
+  const contextKey = String(options && options.context || '').toLowerCase();
+  const voiceWarmCap = contextKey.includes('round4') || contextKey.includes('final') || contextKey.includes('ovr') ? 18 : 10;
+  const voiceWarmLimit = Math.max(0, Math.min(voiceWarmCap, Number(options && options.voiceWarmTop) || Math.min(6, selected.length)));
+  const speechPrefetchCues = [];
+  for (let i = 0; i < selected.length; i += 1) {
+    const meta = selected[i];
+    const cached = await Promise.resolve(getCachedSnippetForMeta(meta) || null);
+    if (!cached) continue;
+    if (cached.__speechQuote) {
+      const cue = buildCardSpeechQuoteVoiceCue(cached, meta, {
+        context: String(options && options.context || 'blurb-prefetch'),
+        preemptVoice: false,
+        forPrefetch: true
+      });
+      if (cue) speechPrefetchCues.push(cue);
     }
-    warmedCandidates.forEach((url) => {
-      warmCardClipMediaUrl(url);
-      warmed += 1;
+  }
+
+  if (speechPrefetchCues.length) {
+    scheduleKokoroVoiceCuePrefetch(speechPrefetchCues, {
+      source: String(options && options.context || 'card-speech-prefetch'),
+      delayMs: 0
     });
+    speechQueued = speechPrefetchCues.length;
+    for (let i = 0; i < Math.min(voiceWarmLimit, speechPrefetchCues.length); i += 1) {
+      try {
+        const warmResult = await prefetchKokoroCueClipNow(speechPrefetchCues[i], { source: 'card-speech-prefetch' });
+        if (warmResult && warmResult.ok) speechWarmed += 1;
+      } catch (error) {
+      }
+      if (i < Math.min(voiceWarmLimit, speechPrefetchCues.length) - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 18));
+      }
+    }
   }
 
   return {
     queued: metas.length,
     fetched: pendingRequest.length,
-    warmed
+    warmed: 0,
+    speechQueued,
+    speechWarmed
   };
 }
 
@@ -3538,6 +5964,8 @@ function scheduleCharacterCardBlurbPrefetch(entries = [], options = {}) {
   const context = String(options && options.context || 'generic');
   const maxEntries = Number(options && options.maxEntries) || 18;
   const warmTop = Number(options && options.warmTop) || 0;
+  const voiceWarmTop = Number(options && options.voiceWarmTop) || 0;
+  const immediate = options && options.immediate === true;
 
   list.forEach((entry) => {
     const meta = normalizeCharacterAudioMeta(entry);
@@ -3546,18 +5974,29 @@ function scheduleCharacterCardBlurbPrefetch(entries = [], options = {}) {
     if (!key || audioState.cardClipPrefetchQueuedKeys.has(key)) return;
     if (audioState.cardSnippetMatchCache.has(key)) return;
     audioState.cardClipPrefetchQueuedKeys.add(key);
-    audioState.cardClipPrefetchQueue.push({ meta, context, maxEntries, warmTop, enqueuedAt: Date.now() });
+    audioState.cardClipPrefetchQueue.push({ meta, context, maxEntries, warmTop, voiceWarmTop, immediate, enqueuedAt: Date.now() });
   });
 
-  if (audioState.cardClipPrefetchDrainTimer) return true;
+  if (audioState.cardClipPrefetchDrainTimer) {
+    if (!immediate) return true;
+    try {
+      if (typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(audioState.cardClipPrefetchDrainTimer);
+      } else {
+        window.clearTimeout(audioState.cardClipPrefetchDrainTimer);
+      }
+    } catch (error) {
+    }
+    audioState.cardClipPrefetchDrainTimer = null;
+  }
   const drain = () => {
     audioState.cardClipPrefetchDrainTimer = null;
     void drainCharacterCardBlurbPrefetchQueue();
   };
-  if (typeof window.requestIdleCallback === 'function') {
+  if (!immediate && typeof window.requestIdleCallback === 'function') {
     audioState.cardClipPrefetchDrainTimer = window.requestIdleCallback(drain, { timeout: 450 });
   } else {
-    audioState.cardClipPrefetchDrainTimer = window.setTimeout(drain, 90);
+    audioState.cardClipPrefetchDrainTimer = window.setTimeout(drain, immediate ? 0 : 60);
   }
   return true;
 }
@@ -3577,9 +6016,10 @@ async function drainCharacterCardBlurbPrefetchQueue() {
     });
     const metas = queue.map((task) => task.meta).filter(Boolean);
     const warmTop = queue.reduce((best, task) => Math.max(best, Number(task && task.warmTop) || 0), 0);
+    const voiceWarmTop = queue.reduce((best, task) => Math.max(best, Number(task && task.voiceWarmTop) || 0), 0);
     const maxEntries = queue.reduce((best, task) => Math.max(best, Number(task && task.maxEntries) || 0), 0);
     const context = queue[0] && queue[0].context ? queue[0].context : 'prefetch';
-    await prefetchCharacterCardBlurbsNow(metas, { context, warmTop, maxEntries });
+    await prefetchCharacterCardBlurbsNow(metas, { context, warmTop, voiceWarmTop, maxEntries });
   } catch (error) {
   } finally {
     audioState.cardClipPrefetchInFlight = false;
@@ -3597,93 +6037,35 @@ async function drainCharacterCardBlurbPrefetchQueue() {
       audioState.cardClipPrefetchDrainTimer = window.setTimeout(() => {
         audioState.cardClipPrefetchDrainTimer = null;
         void drainCharacterCardBlurbPrefetchQueue();
-      }, 120);
+      }, 70);
     }
   }
-}
-
-function playCardSnippet(snippet, options = {}) {
-  const spec = normalizeSnippetSpec(snippet);
-  if (!spec) return false;
-  if (audioState.muted || !audioState.cardEnabled) return false;
-
-  const el = ensureCardPlaybackElement();
-  clearCardPlaybackStopTimer();
-  stopCardSpeechFallback();
-
-  const requestToken = ++audioState.cardPlaybackToken;
-  const startDelayMs = Math.max(0, Number(options && options.delayMs) || 0);
-  const applyAndPlay = () => {
-    if (requestToken !== audioState.cardPlaybackToken) return false;
-    try {
-      el.playbackRate = spec.playbackRate;
-    } catch (error) {
-    }
-    audioState.cardPlaybackGainScalar = clampAudioLevel(spec.gain, 1);
-    try {
-      if (Math.abs((Number(el.currentTime) || 0) - spec.startSec) > 0.05) {
-        el.currentTime = spec.startSec;
-      }
-    } catch (error) {
-    }
-    syncManagedMediaAudioLevels();
-    safePlayManagedAudioElement(el);
-    const stopAfterMs = Math.max(350, Math.round((spec.durationSec / Math.max(0.5, spec.playbackRate || 1)) * 1000) + 30);
-    audioState.cardPlaybackStopTimer = window.setTimeout(() => {
-      if (requestToken !== audioState.cardPlaybackToken) return;
-      safePauseManagedAudioElement(el);
-    }, stopAfterMs);
-    return true;
-  };
-
-  const startPlayback = () => {
-    const needsSourceSwap = (() => {
-      try {
-        return el.src !== `${window.location.origin}${spec.url}` && el.src !== spec.url;
-      } catch (error) {
-        return true;
-      }
-    })();
-
-    if (needsSourceSwap) {
-      try {
-        el.src = spec.url;
-      } catch (error) {
-        return false;
-      }
-      el.preload = 'auto';
-    }
-
-    const run = () => applyAndPlay();
-    if (Number(spec.startSec) > 0 && (!el.readyState || el.readyState < 1)) {
-      const onLoaded = () => {
-        el.removeEventListener('loadedmetadata', onLoaded);
-        run();
-      };
-      el.addEventListener('loadedmetadata', onLoaded, { once: true });
-      try {
-        el.load();
-      } catch (error) {
-      }
-      return true;
-    }
-    return run();
-  };
-
-  if (startDelayMs > 0) {
-    window.setTimeout(startPlayback, startDelayMs);
-    return true;
-  }
-  return startPlayback();
 }
 
 function buildNoAudioPromptText(meta = {}, options = {}) {
   const name = String(meta && (meta.character || meta.resolvedTitle) || '').trim() || 'this card';
   const context = String(options && options.context || '').toLowerCase();
   if (context.includes('final')) {
-    return `Archive scan miss: no quote audio found for ${name} yet. Playing fallback sting.`;
+    return `No character callout available for ${name} yet. Playing fallback sting.`;
   }
-  return `Archive scan miss: no quote audio found for ${name} yet.`;
+  return `No character callout available for ${name} yet.`;
+}
+
+function resetCharacterCalloutSessionState(reason = 'generic') {
+  audioState.lastCardBlurbAt = 0;
+  audioState.lastCardBlurbSig = '';
+  audioState.lastFinaleAutoplaySig = '';
+  audioState.lastFinaleVictoryAutoplaySig = '';
+  audioState.lastFinaleNoAudioToastSig = '';
+  audioState.cardPlaybackToken += 1;
+  audioState.cardSpeechToken += 1;
+  if (String(reason || '').toLowerCase().includes('lobby')) {
+    try {
+      stopCardPlaybackElement();
+      stopCardSpeechFallback();
+    } catch (error) {
+    }
+  }
 }
 
 function playNoAudioSadCue(meta = {}, options = {}) {
@@ -3731,7 +6113,7 @@ async function playCharacterCardBlurb(input = {}, options = {}) {
   tryUnlockHtmlMediaStack();
 
   const requestToken = ++audioState.cardPlaybackToken;
-  const snippetSpec = await resolveCharacterCardSnippetSpec(meta);
+  const snippetSpec = await resolveCharacterCardSnippetSpec(meta, { purpose: 'entry-callout' });
   if (requestToken !== audioState.cardPlaybackToken) {
     return { skipped: true, reason: 'superseded', signature };
   }
@@ -3749,23 +6131,14 @@ async function playCharacterCardBlurb(input = {}, options = {}) {
     }
   }
 
-  if (snippetSpec && !snippetSpec.__libraryEmpty && !snippetSpec.__speechQuote) {
-    const played = playCardSnippet(snippetSpec, options);
-    if (played) {
-      return { signature, meta, mode: snippetSpec.source || 'snippet', url: snippetSpec.url, snippet: snippetSpec };
-    }
-  }
-
   stopCardPlaybackElement();
 
   playNoAudioSadCue(meta, options);
   return {
     signature,
     meta,
-    mode: snippetSpec && snippetSpec.__libraryEmpty ? 'no-audio-library-empty' : 'no-audio-fallback',
-    prompt: (snippetSpec && snippetSpec.__libraryEmpty)
-      ? `Quote clip library is empty. Add local clips to audio/clips/ for ${meta.character || meta.resolvedTitle || 'this card'}.`
-      : buildNoAudioPromptText(meta, options)
+    mode: 'no-audio-fallback',
+    prompt: buildNoAudioPromptText(meta, options)
   };
 }
 
@@ -3794,6 +6167,141 @@ function playHighestOVRCardBlurb(entries = [], options = {}) {
     audioState.lastFinaleAutoplaySig = dedupeKey;
   }
   return playCharacterCardBlurb(best, options);
+}
+
+function emitFinaleMvpOverlayUpdate(options = {}, payload = {}) {
+  const fn = options && typeof options.onOverlayUpdate === 'function'
+    ? options.onOverlayUpdate
+    : null;
+  if (!fn) return;
+  try {
+    fn(payload);
+  } catch (error) {
+  }
+}
+
+async function playFinaleMvpVictoryCallout(entries = [], options = {}) {
+  const best = pickHighestOVRCard(entries);
+  if (!best) return null;
+  const meta = normalizeCharacterAudioMeta(best);
+  const signature = buildCharacterAudioSignature(meta);
+  const context = String(options && options.context || 'finale-mvp-victory');
+  const dedupeKey = `${signature}|${context}|victory`;
+  if (options && options.dedupeFinale !== false && audioState.lastFinaleVictoryAutoplaySig === dedupeKey) {
+    return { skipped: true, reason: 'duplicate_finale_victory', signature };
+  }
+  if (options && options.dedupeFinale !== false) {
+    audioState.lastFinaleVictoryAutoplaySig = dedupeKey;
+  }
+
+  emitFinaleMvpOverlayUpdate(options, {
+    state: 'loading',
+    characterName: meta.character || meta.resolvedTitle || 'MVP',
+    subtitle: 'Preparing MVP victory callout...'
+  });
+
+  ensureAudioRunning();
+  tryUnlockHtmlMediaStack();
+
+  const requestToken = ++audioState.cardSpeechToken;
+  const speechSpec = await resolveCharacterCardSnippetSpec(meta, { purpose: 'finale-mvp-victory' });
+  if (requestToken !== audioState.cardSpeechToken) {
+    return { skipped: true, reason: 'superseded', signature };
+  }
+
+  if (speechSpec && speechSpec.__speechQuote) {
+    const correctedName = String(speechSpec.correctedName || meta.resolvedTitle || meta.character || '').trim()
+      || (meta.character || meta.resolvedTitle || 'MVP');
+    const narratorLead = String(options && options.narratorLeadText || '').trim();
+    const resolvedPhrase = String(speechSpec.text || '').trim();
+    emitFinaleMvpOverlayUpdate(options, {
+      state: 'ready',
+      characterName: correctedName,
+      phrase: resolvedPhrase,
+      compositeLine: narratorLead
+        ? `[Narrator]: ${narratorLead} [MVP]: "${resolvedPhrase}"`
+        : '',
+      classLabel: String(speechSpec.classLabel || '').trim(),
+      voiceStyle: String(speechSpec.voiceStyle || '').trim(),
+      temperament: String(speechSpec.temperament || '').trim(),
+      variant: String(speechSpec.variant || 'finale-mvp-victory')
+    });
+    try {
+      await Promise.race([
+        ensureVoiceManagerInitialized().catch(() => null),
+        new Promise((resolve) => window.setTimeout(resolve, 500))
+      ]);
+      if (audioState.voiceEnabled !== false && audioState.muted !== true) {
+        const prewarmCue = buildCardSpeechQuoteVoiceCue(speechSpec, meta, {
+          ...options,
+          context,
+          throttleMs: 0,
+          bypassCardEnabled: true,
+          preemptVoice: true
+        });
+        if (prewarmCue) {
+          await Promise.race([
+            prefetchKokoroCueClipNow(prewarmCue, { source: 'finale-mvp-victory' }),
+            new Promise((resolve) => window.setTimeout(() => resolve({ ok: false, reason: 'timeout' }), 450))
+          ]);
+        }
+      }
+    } catch (_mvpWarmError) {
+    }
+    const speechPlayed = playCardSpeechQuote(speechSpec, meta, {
+      ...options,
+      context,
+      throttleMs: 0,
+      bypassCardEnabled: true,
+      preemptVoice: true
+    });
+    if (!speechPlayed && !(options && options.__retryingFinaleMvp === true)) {
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
+      return playFinaleMvpVictoryCallout(entries, {
+        ...options,
+        __retryingFinaleMvp: true,
+        dedupeFinale: false
+      });
+    }
+    if (speechPlayed) {
+      emitFinaleMvpOverlayUpdate(options, {
+        state: 'speaking',
+        characterName: correctedName,
+        phrase: resolvedPhrase,
+        compositeLine: narratorLead
+          ? `[Narrator]: ${narratorLead} [MVP]: "${resolvedPhrase}"`
+          : '',
+        classLabel: String(speechSpec.classLabel || '').trim(),
+        voiceStyle: String(speechSpec.voiceStyle || '').trim(),
+        temperament: String(speechSpec.temperament || '').trim(),
+        variant: String(speechSpec.variant || 'finale-mvp-victory')
+      });
+      return {
+        signature,
+        meta,
+        mode: String(speechSpec.source || 'speech-fact'),
+        speech: speechSpec,
+        prompt: String(speechSpec.displayText || speechSpec.text || '').trim(),
+        finaleVictory: true
+      };
+    }
+  }
+
+  stopCardPlaybackElement();
+  playNoAudioSadCue(meta, { ...options, context });
+  emitFinaleMvpOverlayUpdate(options, {
+    state: 'fallback',
+    characterName: meta.character || meta.resolvedTitle || 'MVP',
+    phrase: (speechSpec && speechSpec.__speechQuote) ? String(speechSpec.text || '').trim() : '',
+    subtitle: 'MVP victory audio unavailable on this device.'
+  });
+  return {
+    signature,
+    meta,
+    mode: 'no-audio-fallback',
+    prompt: buildNoAudioPromptText(meta, { ...options, context }),
+    finaleVictory: true
+  };
 }
 
 function prefetchCharacterCardBlurbs(entries = [], options = {}) {
@@ -3826,6 +6334,9 @@ function publishGlobalAudioBridge() {
         sfxEnabled: audioState.sfxEnabled,
         revealEnabled: audioState.revealEnabled,
         cardEnabled: audioState.cardEnabled,
+        voiceEnabled: audioState.voiceEnabled,
+        voiceExpressiveMode: (KOKORO_ONLY_VOICE_SYSTEM ? true : audioState.voiceExpressiveMode),
+        voiceUnlocked: audioState.voiceUnlocked,
         currentMusicScene: audioState.currentMusicScene
       };
     },
@@ -3843,11 +6354,43 @@ function publishGlobalAudioBridge() {
     playHighestOVRCardBlurb(entries, options = {}) {
       return playHighestOVRCardBlurb(entries, options);
     },
+    playFinaleMvpVictoryCallout(entries, options = {}) {
+      return playFinaleMvpVictoryCallout(entries, options);
+    },
     prefetchCharacterCardBlurbs(entries, options = {}) {
       return prefetchCharacterCardBlurbs(entries, options);
     },
     getCardClipStats() {
-      return loadCardClipStats();
+      return Promise.resolve(audioState.cardClipStats || buildCalloutEngineStatus());
+    },
+    enqueueVoiceCue(cue) {
+      return enqueueVoiceCue(cue);
+    },
+    enqueueVoiceCues(cues, options = {}) {
+      return enqueueVoiceCues(cues, options);
+    },
+    prefetchVoiceCues(cues, options = {}) {
+      scheduleKokoroVoiceCuePrefetch(Array.isArray(cues) ? cues : [cues], {
+        source: String(options && options.source || 'bridge-prefetch'),
+        delayMs: Math.max(0, Number(options && options.delayMs) || 0)
+      });
+      return true;
+    },
+    warmVoiceCuesNow(cues, options = {}) {
+      return warmKokoroVoiceCuesNow(Array.isArray(cues) ? cues : [cues], {
+        source: String(options && options.source || 'bridge-warm'),
+        limit: Math.max(0, Number(options && options.limit) || 12),
+        concurrency: Math.max(1, Number(options && options.concurrency) || 3),
+        onProgress: (options && typeof options.onProgress === 'function') ? options.onProgress : null,
+        preserveOrder: options && options.preserveOrder === true
+      });
+    },
+    clearVoiceQueue(reason = 'bridge-clear', options = {}) {
+      clearVoiceCues(reason, options);
+      return true;
+    },
+    getVoiceState() {
+      return getVoiceManager().getState();
     },
     openQuickPanel() {
       setAudioQuickPanelOpen(true);
@@ -4535,6 +7078,7 @@ function joinRoom() {
 
 function leaveRoom() {
   if (confirm('Are you sure you want to leave? You\'ll disconnect from the room.')) {
+    clearVoiceCues('leave-room', { includeActive: true });
     audioState.hasPlayedLobbyEntry = false;
     socket.disconnect();
     socket.connect();
@@ -4572,6 +7116,20 @@ socket.on('gameError', (msg) => {
 socket.on('roomData', (data) => {
   console.log('📍 Received roomData:', data);
   Object.assign(roomState, data);
+  if (data && data.voiceConfig && typeof data.voiceConfig === 'object') {
+    const narratorVoiceId = normalizeKokoroVoiceId(data.voiceConfig.narratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
+    const updatedBy = String(data.voiceConfig.updatedBy || '').trim();
+    const updatedAt = Number(data.voiceConfig.updatedAt) || 0;
+    if (updatedAt > 0) {
+      applyQueuedKokoroNarratorVoice({
+        narratorVoiceId,
+        queuedBy: updatedBy,
+        queuedAt: updatedAt
+      }, { local: updatedBy === String(player && player.name || '') });
+    } else if (normalizeKokoroVoiceId(audioState.kokoroNarratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) !== narratorVoiceId) {
+      setKokoroVoiceChoice('narrator', narratorVoiceId, { persist: true });
+    }
+  }
   roomState.packCatalog = data && data.packCatalog ? data.packCatalog : roomState.packCatalog;
   roomState.selectedPackMeta = normalizePackMeta(data && data.selectedPackMeta) || roomState.selectedPackMeta;
   roomState.messages = normalizeChatMessages(data.messages);
@@ -4581,6 +7139,7 @@ socket.on('roomData', (data) => {
   if (chatPingState.roomCode !== (player.room || '')) {
     chatPingState.roomCode = player.room || '';
     resetChatTabPing();
+    clearKokoroNarratorPeerPing({ sync: false });
   } else {
     syncChatTabPingBadge();
   }
@@ -4735,6 +7294,18 @@ socket.on('settingsUpdated', (settings) => {
   updateContentPackDescription(settings && settings.contentPackId);
 });
 
+const handleNarratorVoiceQueuedSocket = (payload) => {
+  if (!payload || typeof payload !== 'object') return;
+  applyQueuedKokoroNarratorVoice({
+    narratorVoiceId: payload.narratorVoiceId,
+    queuedBy: payload.queuedBy,
+    queuedAt: payload.queuedAt
+  }, { local: String(payload.queuedBy || '') === String(player && player.name || '') });
+};
+
+socket.on('narratorVoiceQueued', handleNarratorVoiceQueuedSocket);
+socket.on('kokoroNarratorQueued', handleNarratorVoiceQueuedSocket); // legacy alias
+
 function toggleReady() {
   playReadyToggleSound(!player.ready);
   socket.emit('toggleReady');
@@ -4822,6 +7393,11 @@ socket.on('gameStarting', (data) => {
 });
 
 socket.on('roundStart', (data) => {
+  resetCharacterCalloutSessionState('round-start');
+  clearVoiceCues('round-start', { includeActive: true });
+  enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : [], {
+    fallback: () => buildPhaseVoiceCues('roundStart', data)
+  });
   resetDraftWaitIntelPreview({ hide: true });
   gameState.currentRound = data.roundNumber;
   gameState.myTeam = [];
@@ -4868,9 +7444,12 @@ socket.on('roundStart', (data) => {
 
 socket.on('scenarioRevealed', (data) => {
   clearTimers();
+  clearVoiceCues('scenario-revealed', { includeActive: true });
   gameState.currentScenario = data.scenario;
   gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   gameState.myTeam = [];
+  gameState.myDraftSlots = buildFallbackDraftSlotsFromTeam();
+  gameState.draftActiveSlotIndex = 0;
   gameState.draftEntryCount = 0;
   gameState.draftLocked = false;
   gameState.voteLocked = false;
@@ -4893,6 +7472,7 @@ socket.on('scenarioRevealed', (data) => {
 
   const myTeamList = document.getElementById('myTeam');
   if (myTeamList) myTeamList.innerHTML = '';
+  renderMyDraftSlots();
 
   const livePicksList = document.getElementById('livePicksList');
   if (livePicksList) livePicksList.innerHTML = '';
@@ -4921,6 +7501,7 @@ socket.on('scenarioRevealed', (data) => {
   }
 
   syncDraftActionControls();
+  syncDraftComposerUi();
 
   if (document.getElementById('draftCounter')) {
     document.getElementById('draftCounter').textContent = '(0/2)';
@@ -4929,6 +7510,9 @@ socket.on('scenarioRevealed', (data) => {
 
   showScreen('scenarioScreen');
   playDraftSound();
+  enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : [], {
+    fallback: () => buildPhaseVoiceCues('scenario', data)
+  });
 
   let timeLeft = data.draftTimeRemaining;
   document.getElementById('draftTimer').textContent = timeLeft;
@@ -4955,12 +7539,350 @@ socket.on('scenarioRevealed', (data) => {
 // ========================
 // DRAFT PHASE
 // ========================
+function buildFallbackDraftSlotsFromTeam() {
+  const team = Array.isArray(gameState.myTeam) ? gameState.myTeam : [];
+  const slots = [];
+  for (let i = 0; i < 2; i += 1) {
+    const character = String(team[i] || '').trim();
+    slots.push({
+      slotIndex: i,
+      character,
+      filled: Boolean(character),
+      autoFilled: false,
+      editable: Boolean(character),
+      editLocked: false,
+      lockReason: '',
+      editedCount: 0,
+      updatedAtMs: 0
+    });
+  }
+  return slots;
+}
+
+function getNarratorLeadLineFromVoiceCues(cues = []) {
+  const list = Array.isArray(cues) ? cues : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const cue = list[i] && typeof list[i] === 'object' ? list[i] : null;
+    if (!cue) continue;
+    const type = String(cue.type || '').toLowerCase();
+    if (type !== 'narration' && type !== 'round4') continue;
+    const line = String(cue.subtitleText || cue.text || '').replace(/\s+/g, ' ').trim();
+    if (line) return line;
+  }
+  return 'Final results are in.';
+}
+
+function getMyDraftSlots() {
+  const slots = Array.isArray(gameState.myDraftSlots) && gameState.myDraftSlots.length
+    ? gameState.myDraftSlots
+    : buildFallbackDraftSlotsFromTeam();
+  const normalized = [];
+  for (let i = 0; i < 2; i += 1) {
+    const raw = slots[i] && typeof slots[i] === 'object' ? slots[i] : {};
+    const character = String(raw.character || '').trim();
+    const autoFilled = raw.autoFilled === true;
+    const editLocked = raw.editLocked === true || autoFilled;
+    normalized.push({
+      slotIndex: i,
+      character,
+      filled: Boolean(character),
+      autoFilled,
+      editable: Boolean(character) && !editLocked,
+      editLocked,
+      lockReason: editLocked ? String(raw.lockReason || (autoFilled ? 'auto_fill' : 'locked')) : '',
+      editedCount: Math.max(0, Number(raw.editedCount) || 0),
+      updatedAtMs: Number(raw.updatedAtMs) || 0
+    });
+  }
+  gameState.myDraftSlots = normalized;
+  return normalized;
+}
+
+function countFilledDraftSlotsClient() {
+  return getMyDraftSlots().filter((slot) => slot && slot.filled).length;
+}
+
+function getNextEditableDraftSlotIndex() {
+  const slots = getMyDraftSlots();
+  for (let i = 0; i < slots.length; i += 1) {
+    const slot = slots[i];
+    if (!slot || !slot.filled) return i;
+  }
+  for (let i = 0; i < slots.length; i += 1) {
+    const slot = slots[i];
+    if (slot && slot.editable) return i;
+  }
+  return 0;
+}
+
+function syncDraftSlotSelectionBounds({ preserveInput = true } = {}) {
+  const slots = getMyDraftSlots();
+  let nextIndex = Number.isFinite(Number(gameState.draftActiveSlotIndex))
+    ? Math.max(0, Math.min(1, Number(gameState.draftActiveSlotIndex)))
+    : getNextEditableDraftSlotIndex();
+  const activeSlot = slots[nextIndex];
+  if (gameState.draftLocked || !activeSlot || (activeSlot.filled && activeSlot.editLocked)) {
+    nextIndex = getNextEditableDraftSlotIndex();
+  }
+  gameState.draftActiveSlotIndex = nextIndex;
+  if (!preserveInput) {
+    const charInput = document.getElementById('charInput');
+    if (charInput) {
+      const slot = slots[nextIndex];
+      charInput.value = slot && slot.filled ? String(slot.character || '') : '';
+    }
+  }
+}
+
+function getDraftSlotModeLabel(slot) {
+  if (!slot) return 'Choose a slot';
+  if (gameState.draftLocked) return 'Team locked';
+  if (!slot.filled) return `Pick ${slot.slotIndex + 1}: Add`;
+  if (slot.editLocked) return `Pick ${slot.slotIndex + 1} locked`;
+  return `Pick ${slot.slotIndex + 1}: Edit`;
+}
+
+function syncDraftComposerUi() {
+  const slots = getMyDraftSlots();
+  syncDraftSlotSelectionBounds({ preserveInput: true });
+  const activeIndex = Math.max(0, Math.min(1, Number(gameState.draftActiveSlotIndex) || 0));
+  const activeSlot = slots[activeIndex] || slots[0] || null;
+  const charInput = document.getElementById('charInput');
+  const submitBtn = document.getElementById('draftSubmitBtn') || document.querySelector('.btn-submit-draft');
+  const clearBtn = document.getElementById('draftClearBtn');
+  const modeEl = document.getElementById('draftComposerMode');
+  const hintEl = document.getElementById('draftComposerHint');
+  const summaryEl = document.getElementById('draftSlotSummary');
+  const tabButtons = [
+    document.getElementById('draftSlotTab0'),
+    document.getElementById('draftSlotTab1')
+  ];
+
+  tabButtons.forEach((btn, idx) => {
+    if (!btn) return;
+    const slot = slots[idx];
+    const active = idx === activeIndex;
+    btn.classList.toggle('is-active', active);
+    btn.classList.toggle('is-filled', Boolean(slot && slot.filled));
+    btn.classList.toggle('is-locked', Boolean(slot && slot.editLocked));
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    const label = slot && slot.filled ? `Pick ${idx + 1}: ${slot.character}` : `Pick ${idx + 1}: empty`;
+    btn.title = slot && slot.editLocked
+      ? `${label} (locked)`
+      : label;
+  });
+
+  if (modeEl) modeEl.textContent = getDraftSlotModeLabel(activeSlot);
+
+  if (hintEl) {
+    if (gameState.draftLocked) {
+      hintEl.textContent = 'Team locked. Waiting for others.';
+    } else if (activeSlot && activeSlot.editLocked) {
+      hintEl.textContent = `Pick ${activeIndex + 1} is locked. Select the other slot or lock.`;
+    } else if (slots.every((slot) => slot && slot.filled)) {
+      hintEl.textContent = 'Both picks ready. Edit either, then lock.';
+    } else {
+      hintEl.textContent = 'Fill 2 picks. Edit before lock.';
+    }
+  }
+
+  if (summaryEl) {
+    const filled = slots.filter((slot) => slot && slot.filled).length;
+    const lockedSlots = slots.filter((slot) => slot && slot.editLocked).length;
+    const editableFilled = Math.max(0, filled - lockedSlots);
+    const summaryParts = [`Picks ${filled}/2`];
+    if (filled > 0) summaryParts.push(`${editableFilled} editable`);
+    if (lockedSlots > 0) summaryParts.push(`${lockedSlots} locked`);
+    summaryEl.classList.toggle('is-visible', filled > 0 || lockedSlots > 0);
+    summaryEl.textContent = summaryParts.join(' • ');
+  }
+
+  if (charInput) {
+    const nextPlaceholder = activeSlot && activeSlot.filled && !activeSlot.editLocked
+      ? `Edit pick ${activeIndex + 1}...`
+      : (activeSlot && activeSlot.editLocked
+        ? `Pick ${activeIndex + 1} locked`
+        : `Pick ${activeIndex + 1}...`);
+    charInput.placeholder = nextPlaceholder;
+    charInput.disabled = gameState.draftLocked || Boolean(activeSlot && activeSlot.editLocked);
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = gameState.draftLocked || Boolean(activeSlot && activeSlot.editLocked);
+    if (activeSlot && activeSlot.filled && !activeSlot.editLocked && !gameState.draftLocked) {
+      submitBtn.textContent = '↺';
+      submitBtn.title = `Replace Pick ${activeIndex + 1}`;
+      submitBtn.setAttribute('aria-label', `Replace Pick ${activeIndex + 1}`);
+    } else {
+      submitBtn.textContent = '✓';
+      submitBtn.title = activeSlot && !activeSlot.filled ? `Submit Pick ${activeIndex + 1}` : 'Submit character';
+      submitBtn.setAttribute('aria-label', activeSlot && !activeSlot.filled ? `Submit Pick ${activeIndex + 1}` : 'Submit character');
+    }
+  }
+
+  if (clearBtn) {
+    clearBtn.disabled = gameState.draftLocked || !charInput || !String(charInput.value || '').trim();
+  }
+}
+
+function renderMyDraftSlots() {
+  const myTeamList = document.getElementById('myTeam');
+  if (!myTeamList) return;
+  const slots = getMyDraftSlots();
+  syncDraftSlotSelectionBounds({ preserveInput: true });
+  const activeIndex = Math.max(0, Math.min(1, Number(gameState.draftActiveSlotIndex) || 0));
+  const frag = document.createDocumentFragment();
+
+  slots.forEach((slot, idx) => {
+    const li = document.createElement('li');
+    li.className = 'draft-slot-card';
+    if (!slot.filled) li.classList.add('is-empty');
+    if (idx === activeIndex) li.classList.add('is-active');
+    if (slot.editLocked) li.classList.add('is-locked');
+    if (slot.autoFilled) li.classList.add('is-autofill');
+
+    const head = document.createElement('div');
+    head.className = 'draft-slot-card-head';
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'draft-slot-card-title';
+    const pill = document.createElement('span');
+    pill.className = 'draft-slot-pill';
+    pill.textContent = `Pick ${idx + 1}`;
+    const state = document.createElement('span');
+    state.className = 'draft-slot-state';
+    state.textContent = slot.filled
+      ? (slot.editLocked ? 'Locked' : 'Ready')
+      : 'Open';
+    titleWrap.appendChild(pill);
+    titleWrap.appendChild(state);
+    head.appendChild(titleWrap);
+
+    const body = document.createElement('div');
+    body.className = 'draft-slot-card-body';
+    const value = document.createElement('div');
+    value.className = 'draft-slot-value';
+    value.textContent = slot.filled ? slot.character : 'Open slot';
+    body.appendChild(value);
+
+    const meta = document.createElement('div');
+    meta.className = 'draft-slot-meta';
+    if (slot.autoFilled) {
+      const chip = document.createElement('span');
+      chip.className = 'draft-slot-chip autofill';
+      chip.textContent = 'Auto-filled';
+      meta.appendChild(chip);
+    }
+    if (slot.editLocked) {
+      const chip = document.createElement('span');
+      chip.className = 'draft-slot-chip locked';
+      chip.textContent = slot.lockReason === 'auto_fill' ? 'Edit locked' : 'Locked';
+      meta.appendChild(chip);
+    }
+    if ((Number(slot.editedCount) || 0) > 1) {
+      const chip = document.createElement('span');
+      chip.className = 'draft-slot-chip';
+      chip.textContent = `Edited ${Number(slot.editedCount)}x`;
+      meta.appendChild(chip);
+    }
+    if (meta.childNodes.length) body.appendChild(meta);
+    li.appendChild(head);
+    li.appendChild(body);
+
+    const actions = document.createElement('div');
+    actions.className = 'draft-slot-card-actions';
+    const selectBtn = document.createElement('button');
+    selectBtn.type = 'button';
+    selectBtn.className = `draft-slot-action-btn ${idx === activeIndex ? 'is-primary' : ''}`;
+    selectBtn.textContent = idx === activeIndex ? 'Selected' : (slot.filled && !slot.editLocked ? 'Edit' : 'Select');
+    selectBtn.disabled = gameState.draftLocked || (slot.filled && slot.editLocked);
+    selectBtn.onclick = () => selectDraftSlot(idx, { focus: true, populate: true });
+    actions.appendChild(selectBtn);
+    li.appendChild(actions);
+
+    frag.appendChild(li);
+  });
+
+  myTeamList.innerHTML = '';
+  myTeamList.appendChild(frag);
+  syncDraftComposerUi();
+}
+
+function selectDraftSlot(slotIndex, { focus = false, populate = true } = {}) {
+  const safeIndex = Math.max(0, Math.min(1, Number(slotIndex) || 0));
+  const slots = getMyDraftSlots();
+  const slot = slots[safeIndex];
+  if (slot && slot.filled && slot.editLocked) {
+    syncDraftComposerUi();
+    return;
+  }
+  gameState.draftActiveSlotIndex = safeIndex;
+  if (populate) {
+    const charInput = document.getElementById('charInput');
+    if (charInput) {
+      charInput.value = slot && slot.filled ? String(slot.character || '') : '';
+      if (focus && !charInput.disabled) {
+        charInput.focus();
+        try { charInput.setSelectionRange(0, charInput.value.length); } catch (error) {}
+      }
+    }
+  }
+  updateDraftWarning('', false);
+  renderMyDraftSlots();
+}
+
+function clearDraftInputField() {
+  const charInput = document.getElementById('charInput');
+  if (!charInput || charInput.disabled) return;
+  charInput.value = '';
+  updateDraftWarning('', false);
+  syncDraftComposerUi();
+  try { charInput.focus(); } catch (error) {}
+}
+
+function setMyDraftSlotsFromPayload(playerDraftSlotsMap = {}) {
+  const rows = playerDraftSlotsMap && typeof playerDraftSlotsMap === 'object'
+    ? playerDraftSlotsMap[player.name]
+    : null;
+  if (!Array.isArray(rows)) {
+    gameState.myDraftSlots = buildFallbackDraftSlotsFromTeam();
+    return;
+  }
+  gameState.myDraftSlots = rows.slice(0, 2).map((slot, index) => ({
+    slotIndex: index,
+    character: String(slot && slot.character || '').trim(),
+    filled: slot && slot.filled === true ? true : Boolean(String(slot && slot.character || '').trim()),
+    autoFilled: slot && slot.autoFilled === true,
+    editable: slot && slot.editable === true,
+    editLocked: slot && slot.editLocked === true,
+    lockReason: String(slot && slot.lockReason || '').trim(),
+    editedCount: Math.max(0, Number(slot && slot.editedCount) || 0),
+    updatedAtMs: Number(slot && slot.updatedAtMs) || 0
+  }));
+  while (gameState.myDraftSlots.length < 2) {
+    gameState.myDraftSlots.push({
+      slotIndex: gameState.myDraftSlots.length,
+      character: '',
+      filled: false,
+      autoFilled: false,
+      editable: false,
+      editLocked: false,
+      lockReason: '',
+      editedCount: 0,
+      updatedAtMs: 0
+    });
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const charInput = document.getElementById('charInput');
   if (charInput) {
     charInput.addEventListener('keypress', handleDraftInput);
     charInput.addEventListener('input', handleDraftChange);
   }
+  setMyDraftSlotsFromPayload({});
+  renderMyDraftSlots();
+  syncDraftComposerUi();
 
   const chatInput = document.getElementById('chatInput');
   if (chatInput) {
@@ -4988,15 +7910,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function handleDraftChange(e) {
   const char = e.target.value.trim();
+  syncDraftComposerUi();
   if (!char) {
     updateDraftWarning('', false);
     return;
   }
 
   const charLower = char.toLowerCase();
-  const isDuplicate = gameState.myTeam.some(c => c.toLowerCase() === charLower);
+  const activeSlotIndex = Math.max(0, Math.min(1, Number(gameState.draftActiveSlotIndex) || 0));
+  const mySlots = getMyDraftSlots();
+  const isDuplicate = mySlots.some((slot, idx) =>
+    idx !== activeSlotIndex && slot && slot.filled && String(slot.character || '').toLowerCase() === charLower
+  );
   const otherPlayersHave = gameState.allDraftsList.some(p =>
-    p.name !== player.name && p.character.toLowerCase() === charLower
+    p.name !== player.name && String(p.character || '').toLowerCase() === charLower
   );
 
   if (isDuplicate || otherPlayersHave) {
@@ -5017,7 +7944,7 @@ function syncDraftEntryComposerVisibility() {
   const scenarioScreen = document.getElementById('scenarioScreen');
   if (!draftInputSticky || !scenarioScreen) return;
 
-  const shouldHideComposer = gameState.draftEntryCount >= 2;
+  const shouldHideComposer = gameState.draftLocked === true;
   draftInputSticky.classList.toggle('is-hidden', shouldHideComposer);
   scenarioScreen.classList.toggle('draft-input-hidden', shouldHideComposer);
   draftInputSticky.setAttribute('aria-hidden', shouldHideComposer ? 'true' : 'false');
@@ -5159,6 +8086,8 @@ function syncDraftActionControls() {
   }
 
   setDraftWaitVisual(isLocked);
+  renderMyDraftSlots();
+  syncDraftComposerUi();
 }
 
 function submitDraft(char) {
@@ -5166,42 +8095,68 @@ function submitDraft(char) {
     showToast('🔒 Your team is already locked in!', 'info');
     return;
   }
-
-  if (gameState.draftEntryCount >= 2) {
-    showToast('⚠️ You can draft max 2 characters!', 'warning');
+  const trimmed = String(char || '').trim();
+  if (!trimmed) {
+    showToast('⚠️ Enter a character first!', 'warning', 1800);
     return;
   }
 
-  const charLower = char.toLowerCase();
-  const isDupOwn = gameState.myTeam.some(c => c.toLowerCase() === charLower);
+  const slots = getMyDraftSlots();
+  syncDraftSlotSelectionBounds({ preserveInput: true });
+  let activeSlotIndex = Math.max(0, Math.min(1, Number(gameState.draftActiveSlotIndex) || 0));
+  let activeSlot = slots[activeSlotIndex];
+  if (!activeSlot || (activeSlot.filled && activeSlot.editLocked)) {
+    activeSlotIndex = getNextEditableDraftSlotIndex();
+    activeSlot = slots[activeSlotIndex];
+  }
+  if (activeSlot && activeSlot.filled && activeSlot.editLocked) {
+    playErrorSound();
+    showToast(`🔒 Pick ${activeSlotIndex + 1} is locked and can’t be edited.`, 'warning', 2600);
+    return;
+  }
+
+  const charLower = trimmed.toLowerCase();
+  const isDupOwn = slots.some((slot, idx) => idx !== activeSlotIndex && slot && slot.filled && String(slot.character || '').toLowerCase() === charLower);
   const isDupOther = gameState.allDraftsList.some(p =>
-    p.name !== player.name && p.character.toLowerCase() === charLower
+    p.name !== player.name && String(p.character || '').toLowerCase() === charLower
   );
   const isDupAcrossRounds = gameState.allCharactersDrafted.includes(charLower);
+  const isEdit = Boolean(activeSlot && activeSlot.filled);
 
   if (isDupOwn) {
     playErrorSound();
-    showToast(`❌ You already drafted "${char}" this round! Auto-filling instead...`, 'error', 4000);
+    showToast(`❌ You already drafted "${trimmed}" in your other slot! Auto-filling instead...`, 'error', 4000);
   } else if (isDupAcrossRounds) {
     playErrorSound();
-    showToast(`❌ You already drafted "${char}" in a previous round! Auto-filling instead...`, 'error', 4000);
+    showToast(`❌ You already drafted "${trimmed}" in a previous round! Auto-filling instead...`, 'error', 4000);
   } else if (isDupOther) {
     playErrorSound();
-    showToast(`❌ "${char}" was picked by another player! Auto-filling instead...`, 'error', 4000);
+    showToast(`❌ "${trimmed}" was picked by another player! Auto-filling instead...`, 'error', 4000);
   } else {
     playDraftSound();
   }
 
-  if (!isDupOwn && !isDupOther && !isDupAcrossRounds) {
-    gameState.allCharactersDrafted.push(charLower);
+  if (isEdit) {
+    socket.emit('editDraftCharacter', {
+      slotIndex: activeSlotIndex,
+      character: trimmed
+    });
+  } else {
+    if (gameState.draftEntryCount >= 2) {
+      showToast('⚠️ Both picks are full. Select a slot to edit or lock your team.', 'warning', 2600);
+      return;
+    }
+    socket.emit('draftCharacter', trimmed);
   }
-  socket.emit('draftCharacter', char);
+
   const charInput = document.getElementById('charInput');
   if (charInput) {
-    charInput.value = '';
-    charInput.focus();
+    const keepText = isEdit && activeSlot && activeSlot.filled && activeSlot.editLocked;
+    if (!keepText) charInput.value = '';
+    if (!charInput.disabled) charInput.focus();
   }
   updateDraftWarning('', false);
+  syncDraftComposerUi();
 }
 
 function lockDraft() {
@@ -5230,10 +8185,12 @@ socket.on('draftUpdate', (data) => {
   if (!picksList) return;
   picksList.innerHTML = '';
 
-  [...data.allDrafts].reverse().forEach((pick, idx) => {
+  [...(Array.isArray(data.allDrafts) ? data.allDrafts : [])].forEach((pick, idx) => {
     const li = document.createElement('li');
+    const slotLabel = Number.isFinite(Number(pick && pick.slotIndex)) ? ` [${Number(pick.slotIndex) + 1}]` : '';
     const autoFillBadge = pick.autoFilled ? ' 🔄 (auto-filled)' : '';
-    li.textContent = `${pick.name} → ${pick.character}${autoFillBadge}`;
+    const editBadge = (Number(pick && pick.editedCount) || 0) > 0 ? ` ✏️ x${Number(pick.editedCount)}` : '';
+    li.textContent = `${pick.name}${slotLabel} → ${pick.character}${autoFillBadge}${editBadge}`;
     li.classList.add('live-pick');
     if (pick.autoFilled) li.classList.add('live-pick-duplicate');
     li.style.animationDelay = `${idx * 0.05}s`;
@@ -5245,35 +8202,47 @@ socket.on('draftUpdate', (data) => {
   updateLivePicksCount(data.allDrafts.length);
 
   const myTeamList = document.getElementById('myTeam');
-  if (myTeamList) myTeamList.innerHTML = '';
-
-  gameState.myTeam = data.allDrafts
+  gameState.myTeam = (Array.isArray(data.allDrafts) ? data.allDrafts : [])
     .filter(p => p.name === player.name)
+    .sort((a, b) => (Number(a && a.slotIndex) || 0) - (Number(b && b.slotIndex) || 0))
     .map(p => p.character);
+  setMyDraftSlotsFromPayload(data.playerDraftSlots || {});
 
   const reportedEntryCount = Number(data.playerEntryCounts && data.playerEntryCounts[player.name]);
   gameState.draftEntryCount = Number.isFinite(reportedEntryCount)
     ? reportedEntryCount
-    : gameState.myTeam.length;
+    : countFilledDraftSlotsClient();
   syncDraftEntryComposerVisibility();
-
-  data.allDrafts
-    .filter(p => p.name === player.name)
-    .forEach(p => {
-      const li = document.createElement('li');
-      li.textContent = p.character;
-      if (p.autoFilled) {
-        li.classList.add('draft-autofill');
-      }
-      if (myTeamList) myTeamList.appendChild(li);
-    });
+  if (gameState.draftLocked !== true && gameState.draftEntryCount < 2) {
+    const nextOpen = getNextEditableDraftSlotIndex();
+    if (Number.isFinite(Number(nextOpen))) {
+      gameState.draftActiveSlotIndex = nextOpen;
+    }
+  }
 
   updateDraftCounter();
+  renderMyDraftSlots();
   syncDraftActionControls();
+  syncDraftComposerUi();
 });
 
 socket.on('draftSuccess', (data) => {
   console.log(`✓ Drafted: ${data.character} (${data.teamSize}/2)`);
+  if (data && data.unchanged) {
+    showToast(`✓ Pick ${Number(data.slotIndex) + 1} unchanged`, 'info', 1200);
+    return;
+  }
+  if (data && Number.isFinite(Number(data.slotIndex))) {
+    const nextSlot = (Number(data.teamSize) || 0) >= 2
+      ? Number(data.slotIndex)
+      : Math.min(1, Number(data.slotIndex) + 1);
+    gameState.draftActiveSlotIndex = nextSlot;
+  }
+  const charInput = document.getElementById('charInput');
+  if (charInput && !charInput.disabled) {
+    charInput.value = '';
+  }
+  syncDraftComposerUi();
 });
 
 socket.on('playerLocked', (data) => {
@@ -5291,10 +8260,14 @@ socket.on('playerLocked', (data) => {
 // ========================
 socket.on('plotTwistRevealed', (data) => {
   clearTimers();
+  clearVoiceCues('twist-revealed', { includeActive: true });
   gameState.currentTwist = data.twist;
   document.getElementById('twistText').textContent = `"${data.twist}"`;
   stopDraftWaitIntelPreviewPolling();
   resetDraftWaitIntelPreview({ hide: true });
+  enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : [], {
+    fallback: () => buildPhaseVoiceCues('twist', data)
+  });
   showScreen('twistScreen');
   playTwistSound();
   showToast('🌀 Plot twist incoming!', 'warning');
@@ -5433,6 +8406,8 @@ socket.on('draftWaitIntelPreview', (data) => {
 // ROUND 4: AI EVALUATION (NEW)
 // ========================
 socket.on('round4Start', (data) => {
+  resetCharacterCalloutSessionState('round4-start');
+  clearVoiceCues('round4-start', { includeActive: true });
   console.log('🎮 Round 4 Start event received:', data);
   clearTimers();
   playPhaseShiftSound();
@@ -5447,7 +8422,9 @@ socket.on('round4Start', (data) => {
       scheduleCharacterCardBlurbPrefetch(prefetchEntries, {
         context: 'round4-start',
         maxEntries: 18,
-        warmTop: 2
+        warmTop: 10,
+        voiceWarmTop: 12,
+        immediate: true
       });
     }
   } catch (prefetchError) {
@@ -5457,6 +8434,9 @@ socket.on('round4Start', (data) => {
   } else {
     console.error('❌ Round 4 evaluation function not found');
   }
+  enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : [], {
+    fallback: () => buildPhaseVoiceCues('round4Start', data)
+  });
 });
 
 function castVote(playerName) {
@@ -6023,6 +9003,7 @@ function buildRoundWinnerHTML(data, isFinalRound = false) {
 socket.on('roundResults', (data) => {
   resetVoteTallyLoadingState();
   clearTimers();
+  clearVoiceCues('round-results', { includeActive: true });
   gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   playWinSound();
   document.getElementById('resultRound').textContent = data.round;
@@ -6159,6 +9140,7 @@ socket.on('roundResults', (data) => {
 
   showScreen('resultsScreen');
   showToast(winnerView.isTie ? '🤝 Tie at the top (votes + intel)!' : '📊 Round results are in (votes + intel)!', 'info');
+  enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : []);
 });
 
 socket.on('voteTallying', (data) => {
@@ -6182,9 +9164,13 @@ function readyForNextRound() {
 
 socket.on('finalRoundResults', (data) => {
   clearTimers();
+  clearVoiceCues('final-round-results', { includeActive: true });
   gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   playWinSound();
   const tie = data && data.isTie === true;
+  enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : [], {
+    fallback: () => buildPhaseVoiceCues('finalResults', data)
+  });
   showToast(tie ? '🤝 Final round locked with a tie.' : '🏁 Final round tally locked.', 'info', 2200);
 });
 
@@ -6192,9 +9178,13 @@ socket.on('finalRoundResults', (data) => {
 // FINAL LEADERBOARD
 // ========================
 socket.on('gameEnded', (data) => {
+  resetCharacterCalloutSessionState('game-ended');
   clearTimers();
+  clearVoiceCues('game-ended', { includeActive: true });
   gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
   playWinSound();
+  const finalGameEndedVoiceCues = Array.isArray(data && data.voiceCues) ? data.voiceCues : [];
+  let finalGameEndedVoiceQueued = false;
   setTimeout(() => createConfetti(), 300);
   setFinalPackMetaLine(data && data.packMeta);
   const finalStandings = Array.isArray(data && data.finalLeaderboard) ? data.finalLeaderboard : [];
@@ -6204,6 +9194,7 @@ socket.on('gameEnded', (data) => {
   const finalContainerRoot = document.querySelector('.final-container-modern');
   if (finalContainerRoot) {
     finalContainerRoot.classList.remove('from-round4-archive');
+    finalContainerRoot.classList.remove('squad-open');
     finalContainerRoot.removeAttribute('data-final-view');
     const staleArchiveBackbar = finalContainerRoot.querySelector('.final-archive-backbar');
     if (staleArchiveBackbar) staleArchiveBackbar.remove();
@@ -6234,7 +9225,9 @@ socket.on('gameEnded', (data) => {
         scheduleCharacterCardBlurbPrefetch(prefetchPool, {
           context: 'final-screen',
           maxEntries: 18,
-          warmTop: 4
+          warmTop: 10,
+          voiceWarmTop: 12,
+          immediate: true
         });
       }
     } catch (prefetchError) {
@@ -6242,6 +9235,17 @@ socket.on('gameEnded', (data) => {
     if (eliteShowcaseCharacters.length || championCharacters.length) {
       const stats = data && data.winnerTeamStats ? data.winnerTeamStats : {};
       const safeMVP = escapeHtml(stats.mvp || 'N/A');
+      const winnerMvpLookup = String(stats.mvp || '').trim().toLowerCase();
+      const winnerMvpEntry = championCharacters.find((entry) => String(entry && entry.character || '').trim().toLowerCase() === winnerMvpLookup)
+        || championCharacters.slice().sort((a, b) => (Number(b && b.ovr) || 0) - (Number(a && a.ovr) || 0))[0]
+        || eliteShowcaseCharacters.slice().sort((a, b) => (Number(b && b.ovr) || 0) - (Number(a && a.ovr) || 0))[0]
+        || null;
+      const winnerMvpOverlayNameRaw = String((winnerMvpEntry && winnerMvpEntry.character) || stats.mvp || 'MVP').trim() || 'MVP';
+      const winnerMvpOverlayName = escapeHtml(winnerMvpOverlayNameRaw);
+      const winnerMvpOverlayImageRaw = winnerMvpEntry && winnerMvpEntry.imageUrl ? String(winnerMvpEntry.imageUrl).trim() : '';
+      const winnerMvpOverlayImage = winnerMvpOverlayImageRaw.startsWith('//')
+        ? `https:${winnerMvpOverlayImageRaw}`
+        : (winnerMvpOverlayImageRaw || placeholderImage);
       const safeChampionName = escapeHtml((data && data.winner && data.winner.name) || 'Champion');
       const teamOVR = Number(stats.teamOVR) || 0;
       const round4Points = Number(stats.round4Points) || 0;
@@ -6485,6 +9489,19 @@ socket.on('gameEnded', (data) => {
               <span class="final-ceremony-kpi">${finalMarginLabel}</span>
               ${usingGlobalEliteShowcase ? `<span class="final-ceremony-kpi">Top 6 Split ${championEliteCount}/6</span>` : ''}
             </div>
+            <section class="final-ceremony-mvp-callout" data-final-mvp-callout data-state="idle" aria-label="MVP victory callout">
+              <div class="final-ceremony-mvp-avatar-wrap">
+                <img class="final-ceremony-mvp-avatar" src="${escapeHtml(winnerMvpOverlayImage)}" alt="${winnerMvpOverlayName} portrait" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${placeholderImage}';">
+              </div>
+              <div class="final-ceremony-mvp-bubble">
+                <div class="final-ceremony-mvp-bubble-top">
+                  <span class="final-ceremony-mvp-chip">MVP Voice</span>
+                  <strong class="final-ceremony-mvp-name" data-final-mvp-callout-name>${winnerMvpOverlayName}</strong>
+                </div>
+                <p class="final-ceremony-mvp-line" data-final-mvp-callout-line>Preparing victory callout...</p>
+                <small class="final-ceremony-mvp-meta" data-final-mvp-callout-meta>Winner-only phrase set - archetype-shaped</small>
+              </div>
+            </section>
           </header>
           <div class="final-ceremony-tabs" role="tablist" aria-label="Final result views">
             <button type="button" class="final-ceremony-tab is-active" data-final-view="story" role="tab" aria-selected="true" aria-controls="finalCeremonyPanelStory">Bridge</button>
@@ -6644,34 +9661,24 @@ socket.on('gameEnded', (data) => {
       });
 
       setCeremonyView('story');
-
-      try {
-        if (window.__lobbyAudio && typeof window.__lobbyAudio.playHighestOVRCardBlurb === 'function') {
-          Promise.resolve(window.__lobbyAudio.playHighestOVRCardBlurb(eliteShowcaseCharacters, {
-            context: 'final-screen-autoplay',
-            dedupeFinale: true,
-            throttleMs: 100
-          })).then((audioResult) => {
-            if (!audioResult || (audioResult.mode !== 'no-audio-fallback' && audioResult.mode !== 'no-audio-library-empty')) return;
-            const prompt = String(audioResult.prompt || '').trim() || 'No quote clip found yet. Playing fallback sting.';
-            const sig = `${audioResult.signature || ''}|${prompt}`;
-            if (audioState.lastFinaleNoAudioToastSig === sig) return;
-            audioState.lastFinaleNoAudioToastSig = sig;
-            showToast(`🎙️ ${prompt}`, 'info', 2400);
-          }).catch(() => {});
-        }
-      } catch (finalAudioError) {
-        console.warn('[final results] audio cue failed:', finalAudioError);
-      }
     } else {
       winnerGallery.innerHTML = '';
     }
   }
 
-  const final = document.getElementById('finalLeaderboard');
+  let final = document.getElementById('finalLeaderboard');
+  if (!final) {
+    const fallbackFinalContainer = document.querySelector('.final-container-modern');
+    if (fallbackFinalContainer) {
+      final = document.createElement('ol');
+      final.id = 'finalLeaderboard';
+      final.className = 'leaderboard-modern';
+      fallbackFinalContainer.appendChild(final);
+    }
+  }
   if (!final) {
     showScreen('finalScreen');
-    showToast('ðŸŽ‰ Game Over! Check the results!', 'info');
+    showToast('Game Over! Check the results!', 'info');
     return;
   }
   final.innerHTML = '';
@@ -6680,8 +9687,8 @@ socket.on('gameEnded', (data) => {
     const li = document.createElement('li');
     li.className = 'leaderboard-entry final-entry';
     const medals = ['🥇', '🥈', '🥉'];
-    const medal = medals[idx] || '•';
-    const emoji = idx === 0 ? '👑 CHAMPION' : idx === 1 ? '⭐ RUNNER-UP' : '🌟 TOP 3';
+    const medal = medals[idx] || '*';
+    const emoji = idx === 0 ? 'CHAMPION' : idx === 1 ? 'RUNNER-UP' : 'TOP 3';
     const breakdown = entry.breakdown.map((pts, round) => `R${round + 1}: ${pts}`).join(' | ');
     li.innerHTML = `
       <div class="final-entry-content">
@@ -6727,8 +9734,78 @@ socket.on('gameEnded', (data) => {
     console.warn('[final results] music scene failed:', finalMusicError);
   }
 
+  if (!finalGameEndedVoiceQueued) {
+    enqueueVoiceCues(finalGameEndedVoiceCues, {
+      fallback: () => buildPhaseVoiceCues('gameEnded', data)
+    });
+    finalGameEndedVoiceQueued = true;
+  }
+
   showScreen('finalScreen');
+  try {
+    const finalNarratorLeadText = getNarratorLeadLineFromVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : []);
+    const mvpCalloutNode = winnerGallery ? winnerGallery.querySelector('[data-final-mvp-callout]') : null;
+    const mvpCalloutNameNode = winnerGallery ? winnerGallery.querySelector('[data-final-mvp-callout-name]') : null;
+    const mvpCalloutLineNode = winnerGallery ? winnerGallery.querySelector('[data-final-mvp-callout-line]') : null;
+    const mvpCalloutMetaNode = winnerGallery ? winnerGallery.querySelector('[data-final-mvp-callout-meta]') : null;
+    const updateFinalMvpOverlay = (payload = {}) => {
+      if (!mvpCalloutNode) return;
+      const state = String(payload && payload.state || 'idle');
+      mvpCalloutNode.setAttribute('data-state', state);
+      if (mvpCalloutNameNode && payload && payload.characterName) {
+        mvpCalloutNameNode.textContent = String(payload.characterName);
+      }
+      if (mvpCalloutLineNode) {
+        const line = String(payload && (payload.phrase || payload.compositeLine || payload.subtitle) || '').trim();
+        if (line) mvpCalloutLineNode.textContent = line;
+      }
+      if (mvpCalloutMetaNode) {
+        const bits = [];
+        if (payload && payload.classLabel) bits.push(String(payload.classLabel));
+        if (payload && payload.temperament) bits.push(String(payload.temperament).replace(/_/g, ' '));
+        else if (payload && payload.voiceStyle) bits.push(String(payload.voiceStyle));
+        if (state === 'speaking') bits.push('MVP victory callout');
+        if (!bits.length) bits.push('Winner-only phrase set - archetype-shaped');
+        mvpCalloutMetaNode.textContent = bits.join(' - ');
+      }
+    };
+    if (window.__lobbyAudio && typeof window.__lobbyAudio.playFinaleMvpVictoryCallout === 'function') {
+      try {
+        if (typeof window.__lobbyAudio.ensureUnlocked === 'function') window.__lobbyAudio.ensureUnlocked();
+        if (typeof window.__lobbyAudio.ensureRunning === 'function') window.__lobbyAudio.ensureRunning();
+      } catch (_audioReadyError) {}
+      const finaleRoster = Array.isArray(data && data.winnerTeamCharacters) && data.winnerTeamCharacters.length
+        ? data.winnerTeamCharacters
+        : (Array.isArray(data && data.eliteFinalSix) ? data.eliteFinalSix : []);
+      const mvpDelayMs = Math.max(
+        520,
+        Math.min(1900, 520 + Math.round((String(finalNarratorLeadText || '').length || 0) * 14))
+      );
+      Promise.resolve(window.__lobbyAudio.playFinaleMvpVictoryCallout(finaleRoster, {
+        context: 'final-screen-mvp-victory',
+        dedupeFinale: true,
+        delayMs: mvpDelayMs,
+        narratorLeadText: finalNarratorLeadText,
+        onOverlayUpdate: updateFinalMvpOverlay
+      })).then((audioResult) => {
+        if (!audioResult || audioResult.mode !== 'no-audio-fallback') return;
+        const prompt = String(audioResult.prompt || '').trim() || 'MVP victory callout unavailable.';
+        const sig = `${audioResult.signature || ''}|${prompt}`;
+        if (audioState.lastFinaleNoAudioToastSig === sig) return;
+        audioState.lastFinaleNoAudioToastSig = sig;
+        showToast(`Voice: ${prompt}`, 'info', 2400);
+      }).catch(() => {});
+    }
+  } catch (finalAudioError) {
+    console.warn('[final results] audio cue failed:', finalAudioError);
+  }
   showToast('Game Over! Check the results!', 'info');
+  if (!finalGameEndedVoiceQueued) {
+    enqueueVoiceCues(finalGameEndedVoiceCues, {
+      fallback: () => buildPhaseVoiceCues('gameEnded', data)
+    });
+    finalGameEndedVoiceQueued = true;
+  }
 });
 
 function sendPlayAgain() {
@@ -6737,6 +9814,7 @@ function sendPlayAgain() {
 }
 
 function openFinalResultsArchive() {
+  resetCharacterCalloutSessionState('open-final-archive');
   const finalContainer = document.querySelector('.final-container-modern');
   if (finalContainer) {
     finalContainer.classList.add('from-round4-archive');
@@ -6765,6 +9843,7 @@ function openFinalResultsArchive() {
 }
 
 function returnToRound4Finale() {
+  resetCharacterCalloutSessionState('return-round4-finale');
   showScreen('round4EvalScreen');
   const finale = document.querySelector('.eval-finale-ceremony');
   if (finale) {
@@ -6778,6 +9857,8 @@ function returnToRound4Finale() {
 
 function goToLobby() {
   if (confirm('Are you sure? This will return to the lobby.')) {
+    resetCharacterCalloutSessionState('go-to-lobby');
+    clearVoiceCues('go-to-lobby', { includeActive: true });
     clearTimers();
     resetDraftWaitIntelPreview({ hide: true });
     chatPingState.roomCode = '';
@@ -6796,6 +9877,7 @@ function goToLobby() {
 // INITIALIZATION
 // ========================
 window.addEventListener('beforeunload', () => {
+  clearVoiceCues('beforeunload', { includeActive: true });
   socket.disconnect();
 });
 
@@ -6825,6 +9907,8 @@ window.sendMessage = sendMessage;
 window.sendReaction = sendReaction;
 window.sendStartGame = sendStartGame;
 window.submitDraft = submitDraft;
+window.selectDraftSlot = selectDraftSlot;
+window.clearDraftInputField = clearDraftInputField;
 window.lockDraft = lockDraft;
 window.lockVote = lockVote;
 window.readyForNextRound = readyForNextRound;
@@ -6838,3 +9922,4 @@ if (shouldAutoOpenRound4Loading()) {
     openRound4LoadingDebugView();
   }, 0);
 }
+

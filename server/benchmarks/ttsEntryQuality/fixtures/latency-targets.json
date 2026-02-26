@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "notes": "Targets for prejoin-prewarmed entry TTS. Tune against real hardware/provider runs.",
+  "targets": {
+    "firstGenerateMs": {
+      "good": 550,
+      "acceptable": 1200,
+      "fail": 2200
+    },
+    "cacheHitMs": {
+      "good": 8,
+      "acceptable": 16,
+      "fail": 40
+    },
+    "estimatedPrejoinBatchMs": {
+      "good": 1200,
+      "acceptable": 3500,
+      "fail": 7000,
+      "assumedConcurrency": 3
+    },
+    "instantaneousAppliedMs": {
+      "ideal": 0,
+      "good": 8,
+      "acceptable": 16,
+      "fail": 40
+    },
+    "prejoinWarmTopoffMs": {
+      "good": 120,
+      "acceptable": 500,
+      "fail": 1500
+    },
+    "firstCallCacheHitRate": {
+      "good": 0.95,
+      "acceptable": 0.8,
+      "fail": 0.5
+    },
+    "warmCacheHitRate": {
+      "good": 0.995,
+      "acceptable": 0.95,
+      "fail": 0.8
+    },
+    "cuePreemptFadeOutMs": {
+      "good": 45,
+      "acceptable": 90,
+      "fail": 150
+    }
+  }
+}

@@ -245,13 +245,171 @@
   gap: var(--spacing-sm);
 }
 
-.my-team-modern li {
+.my-team-modern li:not(.draft-slot-card) {
   padding: var(--spacing-md);
   background: #e8f5ff;
   border-left: 4px solid var(--secondary);
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
   animation: slideIn 0.3s ease;
+}
+
+.draft-slot-summary {
+  display: none;
+  margin: 0 0 4px;
+  min-height: 1.05rem;
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--dark) 76%, white);
+}
+
+.draft-slot-summary.is-visible {
+  display: block;
+}
+
+.draft-slot-card {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--secondary) 22%, white);
+  background: linear-gradient(145deg, #f8fcff, #edf7ff);
+  padding: 9px 9px 8px;
+  display: grid;
+  gap: 6px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  min-height: 94px;
+  contain: layout paint;
+  animation: none;
+}
+
+.draft-slot-card.is-empty {
+  border-style: dashed;
+  background: linear-gradient(145deg, #fcfdff, #f5f8fb);
+}
+
+.draft-slot-card.is-active {
+  border-color: color-mix(in srgb, var(--primary) 55%, white);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 22%, transparent), 0 6px 14px rgba(0, 0, 0, 0.08);
+}
+
+.draft-slot-card.is-locked {
+  background: linear-gradient(145deg, #f4fbf6, #edf7ef);
+  border-color: color-mix(in srgb, var(--success) 28%, white);
+}
+
+.draft-slot-card.is-autofill {
+  background: linear-gradient(145deg, #f2f8ff, #e5f1ff);
+  border-color: color-mix(in srgb, #2196f3 28%, white);
+}
+
+.draft-slot-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.draft-slot-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.draft-slot-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--dark) 86%, white);
+  background: color-mix(in srgb, var(--secondary) 16%, white);
+  border: 1px solid color-mix(in srgb, var(--secondary) 20%, white);
+}
+
+.draft-slot-state {
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--dark) 72%, white);
+  font-weight: 700;
+}
+
+.draft-slot-card-body {
+  display: grid;
+  gap: 4px;
+}
+
+.draft-slot-value {
+  font-size: 0.93rem;
+  font-weight: 700;
+  color: var(--dark);
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.draft-slot-card.is-empty .draft-slot-value {
+  color: #7a8791;
+  font-weight: 600;
+}
+
+.draft-slot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.draft-slot-chip {
+  font-size: 0.66rem;
+  border-radius: 999px;
+  padding: 2px 7px;
+  border: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.72);
+  color: #334;
+  font-weight: 700;
+}
+
+.draft-slot-chip.autofill {
+  color: #0d47a1;
+  border-color: rgba(33, 150, 243, 0.2);
+  background: rgba(227, 242, 253, 0.85);
+}
+
+.draft-slot-chip.locked {
+  color: #1b5e20;
+  border-color: rgba(76, 175, 80, 0.22);
+  background: rgba(232, 245, 233, 0.9);
+}
+
+.draft-slot-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.draft-slot-action-btn {
+  border: 1px solid color-mix(in srgb, var(--secondary) 25%, white);
+  background: rgba(255,255,255,0.85);
+  border-radius: 10px;
+  padding: 6px 9px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--dark) 86%, white);
+  cursor: pointer;
+  min-width: 70px;
+  justify-content: center;
+  text-align: center;
+}
+
+.draft-slot-action-btn.is-primary {
+  border-color: color-mix(in srgb, var(--primary) 34%, white);
+  background: color-mix(in srgb, var(--primary) 10%, white);
+  color: color-mix(in srgb, var(--primary) 82%, black);
+}
+
+.draft-slot-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .draft-warning-modern {
@@ -408,15 +566,15 @@
   bottom: 0;
   left: 0;
   right: 0;
-  padding: var(--spacing-md);
+  padding: 10px 12px 10px;
   background: var(--white);
   border-top: 3px solid var(--primary);
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
-  display: flex;
-  gap: var(--spacing-sm);
+  display: grid;
+  gap: 6px;
   z-index: 98;
   overflow: hidden;
-  max-height: 96px;
+  max-height: 156px;
   transform: translateY(0) scale(1);
   opacity: 1;
   transform-origin: center bottom;
@@ -440,14 +598,101 @@
 
 .draft-input-sticky input { flex: 1; }
 
+.draft-slot-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, auto)) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.draft-slot-tab {
+  border: 1px solid color-mix(in srgb, var(--secondary) 24%, white);
+  background: rgba(255,255,255,0.92);
+  color: color-mix(in srgb, var(--dark) 85%, white);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.draft-slot-tab.is-active {
+  border-color: color-mix(in srgb, var(--primary) 40%, white);
+  background: color-mix(in srgb, var(--primary) 13%, white);
+  color: color-mix(in srgb, var(--primary) 84%, black);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.draft-slot-tab.is-filled::after {
+  content: ' •';
+  color: var(--success);
+}
+
+.draft-slot-tab.is-locked {
+  border-color: color-mix(in srgb, var(--success) 28%, white);
+}
+
+.draft-composer-mode {
+  font-size: 0.69rem;
+  font-weight: 700;
+  text-align: right;
+  color: color-mix(in srgb, var(--dark) 76%, white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 1em;
+}
+
+.draft-input-row {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.draft-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-draft-clear {
+  min-width: 40px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--secondary) 24%, white);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: color-mix(in srgb, var(--dark) 82%, white);
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-draft-clear:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.draft-composer-hint {
+  margin: 0;
+  min-height: 1.05rem;
+  font-size: 0.68rem;
+  line-height: 1.15;
+  color: color-mix(in srgb, var(--dark) 74%, white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .btn-submit-draft {
-  min-width: 60px;
-  padding: 12px 20px;
+  min-width: 56px;
+  height: 42px;
+  padding: 8px 14px;
   background: var(--success);
   color: white;
   border: none;
   border-radius: var(--radius-md);
-  font-size: 1.5rem;
+  font-size: 1.15rem;
   font-weight: bold;
   cursor: pointer;
   transition: var(--transition-fast);
@@ -513,6 +758,38 @@
   color: #f4fbff;
   text-align: left;
   overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .draft-slot-tabs {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .draft-composer-mode {
+    grid-column: 1 / -1;
+    text-align: left;
+    padding-left: 2px;
+  }
+
+  .draft-slot-card-actions {
+    gap: 6px;
+  }
+
+  .draft-slot-action-btn {
+    flex: 1;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .draft-input-row {
+    gap: 6px;
+  }
+
+  .btn-submit-draft {
+    min-width: 52px;
+    height: 40px;
+    padding: 8px 12px;
+  }
 }
 
 .draft-wait-intel-preview-head {

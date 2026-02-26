@@ -6,6 +6,11 @@ const {
   fetchFromWikipediaSearchEnhanced,
   fetchFromWikipediaSummary
 } = require('../../../evaluator/core/fetchers');
+const {
+  lookupExternalEntityFact,
+  shouldTryExternalFactEnrichment,
+  mergeExternalFactIntoInfo
+} = require('../../externalEntityFactsService');
 
 const IMAGE_BACKFILL_CACHE = new Map();
 const IMAGE_BACKFILL_INFLIGHT = new Map();
@@ -15,6 +20,10 @@ const ROUND_RESOLVE_TIMEOUT_MS = Math.max(400, Number(process.env.CONTEXT_ROUND_
 const ROUND_ALIAS_OVERRIDE_TIMEOUT_MS = Math.max(250, Number(process.env.CONTEXT_ROUND_ALIAS_TIMEOUT_MS) || 500);
 const FINAL_IDENTITY_UPGRADE_TIMEOUT_MS = Math.max(300, Number(process.env.CONTEXT_FINAL_IDENTITY_UPGRADE_TIMEOUT_MS) || 900);
 const FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS = Math.max(300, Number(process.env.CONTEXT_FINAL_IMAGE_UPGRADE_TIMEOUT_MS) || 900);
+const EXTERNAL_FACT_ENRICH_TIMEOUT_MS = Math.max(200, Number(process.env.CONTEXT_EXTERNAL_FACT_TIMEOUT_MS) || 500);
+const CONTEXT_EXTERNAL_FACT_ENRICH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.CONTEXT_EXTERNAL_FACT_ENRICH_ENABLED || 'true').toLowerCase()
+);
 const CONTEXT_SYNTHETIC_IMAGE_FALLBACK = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.CONTEXT_SYNTHETIC_IMAGE_FALLBACK || 'true').toLowerCase()
 );
@@ -2525,6 +2534,61 @@ async function tryGenericIdentityUpgrade(character, info, fetchOptions = {}) {
   };
 }
 
+async function tryEnrichIdentityFromExternalFacts(character, info, fetchOptions = {}) {
+  const safeInfo = info && typeof info === 'object' ? info : null;
+  if (!safeInfo) return info;
+  if (!CONTEXT_EXTERNAL_FACT_ENRICH_ENABLED) return info;
+  if (fetchOptions && fetchOptions.skipExternalFactEnrichment === true) return info;
+  if (!shouldTryExternalFactEnrichment(character, safeInfo, fetchOptions)) return info;
+
+  const confidence = Number(safeInfo.confidence) || 0;
+  const descriptionLen = String(safeInfo.description || '').replace(/\s+/g, ' ').trim().length;
+  const source = String(safeInfo.source || '').toLowerCase();
+  const isFastRound = Boolean(fetchOptions && fetchOptions.fastRoundMode);
+
+  // Keep round-path latency tight: only enrich if the current result is thin or clearly low-fidelity.
+  if (isFastRound && confidence >= 0.55 && descriptionLen >= 70) return info;
+  if (isFastRound && /wikipedia/.test(source) && descriptionLen >= 56) return info;
+
+  const meta = {
+    character,
+    resolvedTitle: String(safeInfo.title || safeInfo.name || character || '').trim(),
+    aliases: Array.isArray(safeInfo.aliases) ? safeInfo.aliases.slice(0, 12) : [],
+    description: String(safeInfo.description || '').slice(0, 700),
+    resolvedSource: safeInfo.source || null,
+    infoConfidence: confidence,
+    resolverConfidence: confidence,
+    imageSynthetic: Boolean(safeInfo.imageSynthetic)
+  };
+
+  const timeoutMs = Math.max(
+    200,
+    Math.min(
+      isFastRound ? Math.min(EXTERNAL_FACT_ENRICH_TIMEOUT_MS, 320) : EXTERNAL_FACT_ENRICH_TIMEOUT_MS,
+      Number(fetchOptions && fetchOptions.externalFactTimeoutMs) || EXTERNAL_FACT_ENRICH_TIMEOUT_MS
+    )
+  );
+
+  const lookup = await withTimeout(
+    lookupExternalEntityFact(meta, {
+      sources: isFastRound ? ['wikidata'] : ['wikidata', 'dbpedia'],
+      fastOnly: isFastRound || confidence < MIN_INFO_CONFIDENCE,
+      totalTimeoutMs: timeoutMs,
+      wikidataTimeoutMs: Math.min(timeoutMs, isFastRound ? 280 : 450),
+      dbpediaTimeoutMs: Math.min(Math.max(350, timeoutMs), isFastRound ? 0 : 900),
+      stopOnFirstHit: false
+    }),
+    timeoutMs
+  ).catch(() => null);
+
+  const best = lookup && lookup.best ? lookup.best : null;
+  if (!best || !best.description) return info;
+
+  const merged = mergeExternalFactIntoInfo(safeInfo, best, character);
+  if (!merged || merged === safeInfo) return info;
+  return merged;
+}
+
 function buildFetchOptions(character, options = {}, scenario, twist) {
   const fetchContext = options && options.fetchContext && typeof options.fetchContext === 'object'
     ? options.fetchContext
@@ -2556,9 +2620,13 @@ function buildFetchOptions(character, options = {}, scenario, twist) {
       ? Boolean(options.skipImageBackfill)
       : Boolean(options && options.evaluationMode === 'round'),
     skipIdentityUpgrade: Boolean(options && options.skipIdentityUpgrade),
+    skipExternalFactEnrichment: options && Object.prototype.hasOwnProperty.call(options, 'skipExternalFactEnrichment')
+      ? Boolean(options.skipExternalFactEnrichment)
+      : false,
     skipSyntheticImageUpgrade: Boolean(options && options.skipSyntheticImageUpgrade),
     roundResolveTimeoutMs: Number(options && options.roundResolveTimeoutMs) || undefined,
-    roundAliasOverrideTimeoutMs: Number(options && options.roundAliasOverrideTimeoutMs) || undefined
+    roundAliasOverrideTimeoutMs: Number(options && options.roundAliasOverrideTimeoutMs) || undefined,
+    externalFactTimeoutMs: Number(options && options.externalFactTimeoutMs) || undefined
   };
 }
 
@@ -3663,15 +3731,18 @@ async function resolveEntryIdentity(input) {
       const finalSeedInfo = fetchOptions.skipIdentityUpgrade
         ? backfilledSeedInfo
         : await tryRescueDangerousTitleDiffIdentity(character, backfilledSeedInfo, fetchOptions);
-      if (finalSeedInfo && finalSeedInfo !== seeded.scoringInfo) {
+      const enrichedSeedInfo = fetchOptions.skipExternalFactEnrichment
+        ? finalSeedInfo
+        : await tryEnrichIdentityFromExternalFacts(character, finalSeedInfo, fetchOptions);
+      if (enrichedSeedInfo && enrichedSeedInfo !== seeded.scoringInfo) {
         const confidence = Number(seeded.infoConfidence) || 0;
-        const trustedInfo = confidence >= MIN_INFO_CONFIDENCE ? finalSeedInfo : null;
+        const trustedInfo = confidence >= MIN_INFO_CONFIDENCE ? enrichedSeedInfo : null;
         seeded = {
           ...seeded,
-          info: finalSeedInfo,
-          scoringInfo: finalSeedInfo,
+          info: enrichedSeedInfo,
+          scoringInfo: enrichedSeedInfo,
           trustedInfo,
-          riskFlags: buildRiskFlags({ info: finalSeedInfo, confidence, trustedInfo, character })
+          riskFlags: buildRiskFlags({ info: enrichedSeedInfo, confidence, trustedInfo, character })
         };
       }
       return seeded;
@@ -3714,7 +3785,10 @@ async function resolveEntryIdentity(input) {
   const dangerousDiffRescuedInfo = fetchOptions.skipIdentityUpgrade
     ? patchedInfo
     : await tryRescueDangerousTitleDiffIdentity(character, patchedInfo, fetchOptions);
-  const syntheticReadyInfo = attachSyntheticImageIfNeeded(character, dangerousDiffRescuedInfo, fetchOptions);
+  const externalEnrichedInfo = fetchOptions.skipExternalFactEnrichment
+    ? dangerousDiffRescuedInfo
+    : await tryEnrichIdentityFromExternalFacts(character, dangerousDiffRescuedInfo, fetchOptions);
+  const syntheticReadyInfo = attachSyntheticImageIfNeeded(character, externalEnrichedInfo, fetchOptions);
   const syntheticUpgradedInfo = fetchOptions.skipSyntheticImageUpgrade
     ? syntheticReadyInfo
     : await tryUpgradeSyntheticImage(character, syntheticReadyInfo, fetchOptions);

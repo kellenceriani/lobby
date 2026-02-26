@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "notes": "Representative entry voice audit samples. Keep short, deterministic, and archetype-diverse.",
+  "samples": [
+    { "id": "villain_doom", "character": "Doctor Doom", "text": "Doctor Doom: Despair.", "archetype": "VILLAIN", "genderHint": "male", "anchorProfile": "villain_menace" },
+    { "id": "villain_maleficent", "character": "Maleficent", "text": "Maleficent: Kneel before the night.", "archetype": "VILLAIN", "genderHint": "female", "anchorProfile": "villain_menace" },
+    { "id": "heroic_batman", "character": "Batman", "text": "Batman: I am vengeance.", "archetype": "HEROIC", "genderHint": "male", "anchorProfile": "heroic_batman" },
+    { "id": "heroic_wonder", "character": "Wonder Woman", "text": "Wonder Woman: Stand your ground.", "archetype": "HEROIC", "genderHint": "female", "anchorProfile": "heroic_batman" },
+    { "id": "cartoon_spongebob", "character": "SpongeBob", "text": "SpongeBob: I'm ready!", "archetype": "KID_CARTOON", "genderHint": "male", "anchorProfile": "cartoon_spongebob" },
+    { "id": "cartoon_minnie", "character": "Minnie Mouse", "text": "Minnie: Oh my, let's go!", "archetype": "KID_CARTOON", "genderHint": "female", "anchorProfile": "cartoon_spongebob" },
+    { "id": "robotic_hal", "character": "HAL 9000", "text": "HAL: I'm afraid I can't do that.", "archetype": "ROBOTIC", "genderHint": "neutral", "anchorProfile": "robotic_hal" },
+    { "id": "robotic_unit7", "character": "Unit Seven", "text": "Unit Seven online. Awaiting protocol.", "archetype": "ROBOTIC", "genderHint": "neutral", "anchorProfile": "robotic_hal" },
+    { "id": "spooky_ghost", "character": "Ghost Signal", "text": "Ghost signal: the hallway whispers back.", "archetype": "SPOOKY", "genderHint": "neutral", "anchorProfile": "spooky_whisper" },
+    { "id": "spooky_phantom", "character": "Danny Phantom", "text": "Danny Phantom: Did you hear that?", "archetype": "SPOOKY", "genderHint": "male", "anchorProfile": "spooky_whisper" },
+    { "id": "chaotic_mask", "character": "The Mask", "text": "Chaos mode: somebody stop me!", "archetype": "CHAOTIC", "genderHint": "male", "anchorProfile": "chaotic_mask" },
+    { "id": "chaotic_harley", "character": "Harley Quinn", "text": "Harley Quinn: Okay, let's make this loud!", "archetype": "CHAOTIC", "genderHint": "female", "anchorProfile": "chaotic_mask" }
+  ]
+}

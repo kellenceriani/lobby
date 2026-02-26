@@ -12,8 +12,8 @@
   <meta name="description" content="LobbyWARS - Real-time multiplayer party game for 3-6 players">
   <title>LobbyWARS - Party Game</title>
   <link rel="manifest" href="manifest.webmanifest?v=20260223-livefix1">
-  <link rel="stylesheet" href="css/base.css?v=20260224-audiomix1">
-  <link rel="stylesheet" href="css/lobby.css?v=20260224-audiomix1">
+  <link rel="stylesheet" href="css/base.css?v=20260226-voice-router1">
+  <link rel="stylesheet" href="css/lobby.css?v=20260226-voice-router1">
   <link rel="stylesheet" href="css/game.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/results.css?v=20260223-livefix1">
 </head>
@@ -48,13 +48,20 @@
       <p class="tagline">Build Teams • Vote + intel • Win Glory</p>
       
       <div id="startupBootstrapPanel" class="startup-bootstrap-panel" aria-live="polite" hidden>
-        <div class="startup-bootstrap-head">
-          <strong>Startup Preflight</strong>
-          <span id="startupBootstrapCount">0/0</span>
-        </div>
-        <p id="startupBootstrapStatus">Preparing local services...</p>
-        <div class="startup-bootstrap-bar" role="progressbar" aria-label="Startup preflight progress" aria-valuemin="0" aria-valuemax="100">
-          <span id="startupBootstrapFill" class="startup-bootstrap-fill" style="width: 0%;"></span>
+        <div class="startup-bootstrap-card">
+          <div class="startup-bootstrap-brand">LobbyWARS</div>
+          <div class="startup-bootstrap-kicker">Warming Local Systems</div>
+          <div class="startup-bootstrap-head">
+            <strong>Startup Preflight</strong>
+            <span id="startupBootstrapCount">0/0</span>
+          </div>
+          <p id="startupBootstrapStatus">Preparing local services...</p>
+          <div class="startup-bootstrap-bar" role="progressbar" aria-label="Startup preflight progress" aria-valuemin="0" aria-valuemax="100">
+            <span id="startupBootstrapFill" class="startup-bootstrap-fill" style="width: 0%;"></span>
+          </div>
+          <p id="startupBootstrapDetail" class="startup-bootstrap-detail">Preparing local audio, music, and voice systems for fast first interaction.</p>
+          <ul id="startupBootstrapSteps" class="startup-bootstrap-steps" aria-label="Startup loading checklist"></ul>
+          <p class="startup-bootstrap-subhint">Join screen unlocks when critical systems are ready. Remaining warmups continue with low priority.</p>
         </div>
       </div>
 
@@ -427,14 +434,77 @@
 
             <div class="audio-control-row">
               <div class="audio-control-copy">
-                <span class="audio-control-label">Card Blurbs</span>
-                <small>Character reveal signatures + OVR replay</small>
+                <span class="audio-control-label">Character Callouts</span>
+                <small>Class phrase callouts + OVR replay</small>
               </div>
               <button id="audioCardToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
-              <input id="audioCardVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="92" aria-label="Character card audio blurb volume">
+              <input id="audioCardVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="92" aria-label="Character callout voice volume">
               <span id="audioCardVolumeValue" class="audio-control-value">92%</span>
             </div>
+
+            <div class="audio-control-row voice">
+              <div class="audio-control-copy">
+                <span class="audio-control-label">Voice</span>
+                <small>Adaptive neural voices (server-neural + browser fallback)</small>
+              </div>
+              <button id="audioVoiceToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+              <button id="audioVoiceExpressiveToggle" class="audio-chip-toggle audio-chip-toggle-wide" type="button" aria-pressed="true" hidden>Expressive</button>
+              <button id="audioVoiceUnlockBtn" class="btn btn-secondary audio-compact-btn ghost audio-voice-unlock-btn" type="button" hidden>Tap to Enable Voice</button>
+              <button id="audioKokoroPanelToggleBtn" class="btn btn-secondary audio-compact-btn ghost audio-kokoro-panel-toggle" type="button" aria-expanded="false" aria-controls="audioKokoroPanelShell">
+                <span class="audio-kokoro-panel-toggle-label">Neural Voices (4)</span>
+                <span id="audioKokoroPanelPing" class="audio-kokoro-panel-ping" hidden>1</span>
+                <span class="audio-kokoro-panel-toggle-chevron" aria-hidden="true">&#9662;</span>
+              </button>
+            </div>
+
+            <div class="audio-voice-studio" aria-label="Voice Studio">
+              <p id="audioKokoroPanelToggleSummary" class="audio-kokoro-collapsed-summary" role="status" aria-live="polite">Narrator: Ryan (UK Male) - Neural Dramatic (Suggested)</p>
+              <div id="audioKokoroPanelShell" class="audio-kokoro-panel-shell" hidden>
+              <div id="audioKokoroPanel" class="audio-kokoro-panel" aria-label="Enhanced Neural Voices">
+                <div class="audio-kokoro-header">
+                  <div class="audio-control-copy">
+                    <span class="audio-control-label">Adaptive Neural Voices (Narration)</span>
+                    <small>Host queues the narrator for the room. Entry callouts use automatic archetype routing with class phrase callouts and fallbacks.</small>
+                  </div>
+                </div>
+
+                <div id="audioKokoroQueuedBanner" class="audio-kokoro-queued-banner" hidden>
+                  <strong id="audioKokoroQueuedBannerText">Queued narrator: Ryan (UK Male) - Neural Dramatic (Suggested)</strong>
+                  <span id="audioKokoroQueuedBannerMeta">Queued for this room</span>
+                </div>
+
+                <div class="audio-voice-picker">
+                  <label for="audioKokoroNarratorSelect">Room Narrator Voice (host queues this for everyone)</label>
+                  <div class="audio-voice-picker-row">
+                    <select id="audioKokoroNarratorSelect" class="audio-kokoro-voice-select" aria-label="Adaptive narration voice">
+                      <option value="bm_george">Ryan (UK Male) - Neural Dramatic (Suggested)</option>
+                    </select>
+                    <button id="audioKokoroPreviewNarratorBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview Narration</button>
+                  </div>
+                </div>
+
+                <div class="audio-voice-picker">
+                  <label for="audioKokoroCharacterSelect">Character Archetype Preview (preview only - runtime always auto multi-provider archetype routing)</label>
+                  <div class="audio-voice-picker-row">
+                    <select id="audioKokoroCharacterSelect" class="audio-kokoro-voice-select" aria-label="Character archetype preview selector (preview only)">
+                      <option value="auto_archetype">Auto Mix (Runtime Default)</option>
+                    </select>
+                    <button id="audioKokoroPreviewCharacterBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview Archetype</button>
+                  </div>
+                </div>
+
+                <p id="audioKokoroStatus" class="audio-preview-scene-status audio-kokoro-status" role="status" aria-live="polite">
+                  Adaptive neural voice routing is the live backend. It auto-loads during startup/previews.
+                </p>
+              </div>
+              </div>
+
+              <p id="audioVoiceSelectionHint" class="audio-preview-scene-status audio-voice-selection-hint" role="status" aria-live="polite">
+                Adaptive neural voice routing is the active backend in this build. Narration uses the selected voice from the curated 4-voice cast (2 female + 2 male). Entry callouts use category phrase associations with archetype voice shaping. The archetype dropdown is preview-only.
+              </p>
+            </div>
           </div>
+          <p id="audioVoiceStatus" class="audio-preview-scene-status audio-voice-status" role="status" aria-live="polite">Voice initializing...</p>
 
           <div class="audio-control-deck-footer">
             <label class="audio-scene-preview">
@@ -640,6 +710,7 @@
           <div class="section-header">
             <span>✍️ My Team <span id="draftCounter" class="draft-counter-badge">(0/2)</span></span>
           </div>
+          <div id="draftSlotSummary" class="draft-slot-summary" role="status" aria-live="polite"></div>
           <ul id="myTeam" class="my-team-modern"></ul>
           <div id="draftWarning" class="draft-warning-modern"></div>
           <button id="lockDraftBtn" class="btn btn-success btn-lock-draft" onclick="lockDraft()" style="display: none;">
@@ -669,10 +740,21 @@
 
     <!-- Bottom Input (Sticky) -->
     <div class="draft-input-sticky">
-      <input id="charInput" placeholder="Type character name..." maxlength="30" aria-label="Character name">
-      <button onclick="submitDraft(document.getElementById('charInput').value)" class="btn-submit-draft" title="Submit character" aria-label="Submit character">
-        ✓
-      </button>
+      <div class="draft-slot-tabs" role="tablist" aria-label="Draft entry slots">
+        <button id="draftSlotTab0" class="draft-slot-tab is-active" type="button" onclick="selectDraftSlot(0)" aria-controls="charInput" aria-selected="true">Pick 1</button>
+        <button id="draftSlotTab1" class="draft-slot-tab" type="button" onclick="selectDraftSlot(1)" aria-controls="charInput" aria-selected="false">Pick 2</button>
+        <span id="draftComposerMode" class="draft-composer-mode" aria-live="polite">Pick 1: Add</span>
+      </div>
+      <div class="draft-input-row">
+        <input id="charInput" placeholder="Type character name..." maxlength="30" aria-label="Character name">
+        <button id="draftClearBtn" type="button" class="btn-draft-clear" title="Clear input" aria-label="Clear input" onclick="clearDraftInputField()">✕</button>
+        <button id="draftSubmitBtn" onclick="submitDraft(document.getElementById('charInput').value)" class="btn-submit-draft" title="Submit character" aria-label="Submit character">
+          ✓
+        </button>
+      </div>
+      <div id="draftComposerHint" class="draft-composer-hint" role="status" aria-live="polite">
+        Fill 2 picks. Edit before lock.
+      </div>
     </div>
   </div>
 
@@ -911,7 +993,7 @@
             </div>
             <p id="modalCharacterSummary" class="ovr-section-text"></p>
             <div class="ovr-character-tools">
-              <button id="modalPlayCardAudio" class="ovr-audio-preview-btn" type="button" aria-label="Play character card audio blurb">Play Card Audio</button>
+              <button id="modalPlayCardAudio" class="ovr-audio-preview-btn" type="button" aria-label="Play character callout">Play Callout</button>
             </div>
             <p id="modalCardAudioStatus" class="ovr-audio-preview-status" role="status" aria-live="polite"></p>
           </div>
@@ -950,31 +1032,34 @@
     </div>
   </div>
 
-  <button id="audioQuickFab" class="audio-quick-fab" type="button" aria-haspopup="dialog" aria-controls="audioQuickPanel" aria-expanded="false" aria-label="Open quick music controls">
+  <button id="audioQuickFab" class="audio-quick-fab" type="button" aria-haspopup="dialog" aria-controls="audioQuickPanel" aria-expanded="false" aria-label="Open quick audio controls">
     <span class="audio-quick-fab-icon" aria-hidden="true">&#9835;</span>
   </button>
 
-  <div id="audioQuickPanel" class="audio-quick-panel" role="dialog" aria-modal="false" aria-label="Quick music controls" hidden>
+  <div id="audioQuickPanel" class="audio-quick-panel" role="dialog" aria-modal="false" aria-label="Quick audio controls" hidden>
     <div class="audio-quick-panel-head">
       <div>
-        <strong>Music</strong>
-        <small id="audioQuickPanelStatus">Ready</small>
+        <strong>Quick Audio</strong>
+        <small id="audioQuickPanelStatus">Music on / Voice on</small>
       </div>
       <button id="audioQuickCloseBtn" class="audio-quick-close" type="button" aria-label="Close audio quick controls">&#10006;</button>
     </div>
     <div class="audio-quick-panel-actions">
       <button id="audioQuickMusicToggleBtn" class="audio-quick-action" type="button" aria-pressed="true">Music On</button>
+      <button id="audioQuickVoiceToggleBtn" class="audio-quick-action" type="button" aria-pressed="true">Voice On</button>
     </div>
     <label class="audio-quick-volume">
-      <span>Music Volume</span>
+      <span>Music</span>
       <input id="audioQuickMusicVolume" type="range" min="0" max="100" step="1" value="42" aria-label="Quick music volume">
     </label>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="js/round4Eval.js?v=20260224-audiomix1"></script>
-  <script type="module" src="js/app.js?v=20260224-audiomix1"></script>
-  <link rel="stylesheet" href="css/round4Eval.css?v=20260224-audiomix1">
-  <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260224-audiomix1">
+  <script src="js/round4Eval.js?v=20260226-voice-router1"></script>
+  <script type="module" src="js/app.js?v=20260226-voice-router1"></script>
+  <link rel="stylesheet" href="css/round4Eval.css?v=20260226-voice-ui1">
+  <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260226-voice-ui1">
 </body>
 </html>
+
+

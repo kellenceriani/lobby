@@ -3,7 +3,7 @@ const path = require('path');
 
 const { fetchCharacterInfo } = require('./evaluator/index');
 const { evaluateCharacter, getEvaluationEngineMode } = require('./services/entryEvaluationService');
-const { resolveAudioBlurbBatch } = require('./services/audioBlurbResolverService');
+const { resolveAudioCalloutBatch } = require('./services/audioCalloutResolverService');
 const {
   summarizeContextDiagnostics,
   formatScalingDiagnostics,
@@ -514,7 +514,7 @@ async function runAudioBlurbHarnessAudit(audioMetaCandidates = []) {
     return { enabled: false, skipped: 'disabled' };
   }
 
-  const clipsDir = path.join(__dirname, '..', 'audio', 'clips');
+  const clipsDir = null; // callout resolver no longer depends on a local clip library
   const metas = (Array.isArray(audioMetaCandidates) ? audioMetaCandidates : [])
     .map((row) => row && typeof row === 'object' ? row : null)
     .filter(Boolean);
@@ -570,7 +570,7 @@ async function runAudioBlurbHarnessAudit(audioMetaCandidates = []) {
     const batch = deduped.slice(start, start + HARNESS_AUDIO_BATCH_SIZE);
     aggregate.batches += 1;
     try {
-      const payload = await resolveAudioBlurbBatch(clipsDir, batch);
+      const payload = await resolveAudioCalloutBatch(clipsDir, batch);
       if (payload && payload.cacheHit) aggregate.cacheHits += 1;
       const stats = payload && payload.stats && typeof payload.stats === 'object' ? payload.stats : {};
       aggregate.stats.audioClip += Number(stats.audioClip) || 0;

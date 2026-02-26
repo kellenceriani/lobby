@@ -1026,25 +1026,30 @@ export class AdaptiveTtsVoiceEngine {
     return this._speakTextDesktop(args);
   }
 
-  // Desktop/server-preferred pipeline (existing logic)
+  // Desktop/server-preferred pipeline (bm_george as default for narration)
   _speakTextDesktop({
     text,
-    voiceId = 'af_heart',
+    voiceId = 'bm_george', // Always prefer male UK voice for narration
     speed = 1,
     pitch = 1,
     volume = 1,
     onStart = null,
     onEnd = null
   } = {}) {
-    // (Paste the entire previous speakText logic here, unchanged)
     const spokenText = normalizeText(text);
     if (!spokenText) return { handled: false, reason: 'empty_text' };
+
+    // If this is a narrator cue and not explicitly overridden, force bm_george
+    let effectiveVoiceId = voiceId;
+    if (!voiceId || voiceId === 'af_heart' || voiceId === 'af_bella' || voiceId === 'am_michael') {
+      effectiveVoiceId = 'bm_george';
+    }
 
     const safeSpeed = clamp(speed, 0.65, 1.6, 1);
     const safePitch = clamp(pitch, 0.7, 1.35, 1);
     const safeVolume = clamp(volume, 0, 1, 1);
     let cancelled = false;
-    const jobId = `adaptive-${nowMs()}-${hashString(`${voiceId}|${spokenText}`).toString(36).slice(0, 8)}`;
+    const jobId = `adaptive-desktop-${nowMs()}-${hashString(`${effectiveVoiceId}|${spokenText}`).toString(36).slice(0, 8)}`;
     const job = {
       id: jobId,
       cancel: (options = {}) => {
@@ -1100,7 +1105,7 @@ export class AdaptiveTtsVoiceEngine {
 
         let clip = null;
         try {
-          clip = await this._getOrGenerateAudioClip({ text: spokenText, voiceId, speed: safeSpeed, pitch: safePitch });
+          clip = await this._getOrGenerateAudioClip({ text: spokenText, voiceId: effectiveVoiceId, speed: safeSpeed, pitch: safePitch });
         } catch (error) {
           clip = null;
         }
@@ -1108,18 +1113,70 @@ export class AdaptiveTtsVoiceEngine {
         if (cancelled || !this.activeJob || this.activeJob.id !== jobId) return;
 
         if (!clip || !clip.objectUrl) {
-          await this._warmBrowserFallbackVoices({ primeUtterance: true, timeoutMs: 900 }).catch(() => {});
-          const spoke = this._speakViaBrowserFallback({
-            text: spokenText,
-            voiceId,
-            speed: safeSpeed,
-            pitch: safePitch,
-            volume: safeVolume,
-            onStart: safeStart,
-            onEnd: safeEnd
-          });
-          if (!spoke) {
-            throw new Error('no_audio_provider_and_browser_fallback_failed');
+          // If server fails, fallback to browser, but only allow high-quality English voices
+          await this._warmBrowserFallbackVoices({ primeUtterance: true, timeoutMs: 900, voiceIds: [effectiveVoiceId] }).catch(() => {});
+          let voices = [];
+          try {
+            voices = Array.isArray(window.speechSynthesis.getVoices()) ? window.speechSynthesis.getVoices() : [];
+          } catch (_error) {}
+          // Try to resolve bm_george or best UK male voice
+          let picked = this._resolveAssignedBrowserFallbackVoice(voices, 'bm_george');
+          if (!picked) {
+            // Fallback: pick any en-GB male voice
+            picked = voices.find(v => String(v.lang || '').toLowerCase().startsWith('en-gb') && String(v.gender || '').toLowerCase() === 'male');
+          }
+          if (!picked) {
+            // Fallback: pick any en-GB voice
+            picked = voices.find(v => String(v.lang || '').toLowerCase().startsWith('en-gb'));
+          }
+          if (!picked) {
+            // Fallback: pick any English voice
+            picked = voices.find(v => String(v.lang || '').toLowerCase().startsWith('en'));
+          }
+          if (!picked) {
+            // Visual warning for missing voice
+            if (typeof window !== 'undefined') {
+              const msg = `[TTS] No usable UK/English browser voice for narration. Skipping.`;
+              if (window.console && window.console.warn) window.console.warn(msg);
+              if (typeof window.showTtsWarningToast === 'function') {
+                window.showTtsWarningToast(msg);
+              }
+            }
+            safeEnd('error');
+            return;
+          }
+          let utterance;
+          try {
+            utterance = new SpeechSynthesisUtterance(spokenText);
+          } catch (_error) {
+            safeEnd('error');
+            return;
+          }
+          try { utterance.voice = picked; } catch (_error) {}
+          try { if (picked.lang) utterance.lang = picked.lang; } catch (_error) {}
+          try { utterance.rate = safeSpeed; } catch (_error) {}
+          try { utterance.pitch = safePitch; } catch (_error) {}
+          try { utterance.volume = safeVolume; } catch (_error) {}
+
+          utterance.onstart = () => {
+            if (cancelled) return;
+            safeStart();
+          };
+          utterance.onend = () => {
+            if (cancelled) return;
+            safeEnd('end');
+          };
+          utterance.onerror = () => {
+            if (cancelled) return;
+            safeEnd('error');
+          };
+          this.activeSpeechUtterance = utterance;
+          try {
+            try { window.speechSynthesis.resume(); } catch (_error) {}
+            window.speechSynthesis.speak(utterance);
+          } catch (_error) {
+            this.activeSpeechUtterance = null;
+            safeEnd('error');
           }
           return;
         }
@@ -1163,16 +1220,15 @@ export class AdaptiveTtsVoiceEngine {
               el.removeEventListener('error', handleError);
               try { el.pause(); } catch (_error) {}
             }
-            const spoke = this._speakViaBrowserFallback({
-              text: spokenText,
-              voiceId,
-              speed: safeSpeed,
-              pitch: safePitch,
-              volume: safeVolume,
-              onStart: safeStart,
-              onEnd: safeEnd
-            });
-            if (!spoke) finalize('error');
+            // If server and browser fallback both fail, show warning
+            if (typeof window !== 'undefined') {
+              const msg = `[TTS] All desktop TTS options failed for narration.`;
+              if (window.console && window.console.warn) window.console.warn(msg);
+              if (typeof window.showTtsWarningToast === 'function') {
+                window.showTtsWarningToast(msg);
+              }
+            }
+            safeEnd('error');
           });
         } else {
           safeStart();

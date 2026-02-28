@@ -1,11 +1,16 @@
-# public
+# public/
+
+Last updated: February 28, 2026
 
 Frontend SPA assets served by Express.
 
-- `index.html`: all screen layouts and interaction anchors
-- `css/`: visual styles split by feature area
-- `js/`: socket-driven gameplay logic
-- `img/`: static assets (including Round 4 emotion icons)
+- `index.html` - full screen/layout markup and script/style entrypoints.
+- `css/` - feature-area styling.
+- `js/` - client runtime orchestration.
+- `img/` - static image assets.
 
-Client/server event contract:
-- `../md/SOCKET_EVENT_CONTRACT.md`
+Key behavior:
+
+- Startup preflight runs before join unlock.
+- Join-screen Eval plaques are staged/prewarmed during preflight.
+- Lobby settings are host-authoritative and synced from socket events.

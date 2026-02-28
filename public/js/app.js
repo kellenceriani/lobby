@@ -4203,6 +4203,56 @@ function seedAudioSceneFromActiveScreen({ syncUi = false } = {}) {
   if (syncUi) syncAudioControlUI();
 }
 
+async function ensureJoinEvalPlaquesReady({ source = 'startup-bootstrap', bridgeWaitMs = 1200 } = {}) {
+  const resolvePrepareFn = () => {
+    if (typeof window.prepareJoinEvalPlaques === 'function') return window.prepareJoinEvalPlaques;
+    if (window.JoinEvalPlaques && typeof window.JoinEvalPlaques.prepare === 'function') return window.JoinEvalPlaques.prepare;
+    return null;
+  };
+
+  let prepareFn = resolvePrepareFn();
+  if (!prepareFn) {
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        try {
+          document.removeEventListener('joinEvalPlaquesBridgeReady', onBridgeReady);
+        } catch (error) {
+        }
+        window.clearTimeout(timerId);
+        resolve();
+      };
+      const onBridgeReady = () => finish();
+      const timerId = window.setTimeout(() => finish(), Math.max(250, Number(bridgeWaitMs) || 1200));
+      try {
+        document.addEventListener('joinEvalPlaquesBridgeReady', onBridgeReady, { once: true });
+      } catch (error) {
+      }
+    });
+    prepareFn = resolvePrepareFn();
+  }
+
+  if (!prepareFn) {
+    return { ok: false, skipped: 'join-eval-bridge-missing' };
+  }
+
+  try {
+    const result = await Promise.resolve(prepareFn({
+      source,
+      preload: true
+    }));
+    if (result && typeof result === 'object') return result;
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error && (error.message || error) || 'join-eval-prep-failed')
+    };
+  }
+}
+
 async function runStartupBootstrapPreflight() {
   if (startupBootstrapState.started) return;
   startupBootstrapState.started = true;
@@ -4235,6 +4285,14 @@ async function runStartupBootstrapPreflight() {
   });
 
   const blockingTaskList = [
+    {
+      key: 'join-eval-plaques',
+      label: 'Join eval visuals',
+      run: async () => runWithSoftTimeout(
+        () => ensureJoinEvalPlaquesReady({ source: 'startup-blocking-join-eval' }),
+        { timeoutMs: 3200, timeoutCode: 'join-eval-soft-timeout' }
+      )
+    },
     {
       key: 'kokoro-core',
       label: 'Adaptive voice router',
@@ -4362,7 +4420,7 @@ async function runStartupBootstrapPreflight() {
 
   startupBootstrapState.total = blockingTaskList.length;
   startupBootstrapState.done = 0;
-  updateStartupBootstrapUi(0, blockingTaskList.length, 'Preparing join screen...', 'Loading music and adaptive voice cast before the join screen opens. Non-critical caches continue in the background.');
+  updateStartupBootstrapUi(0, blockingTaskList.length, 'Preparing join screen...', 'Loading eval visuals, music, and adaptive voice cast before the join screen opens. Non-critical caches continue in the background.');
 
   for (let i = 0; i < blockingTaskList.length; i += 1) {
     const task = blockingTaskList[i];
@@ -4378,7 +4436,14 @@ async function runStartupBootstrapPreflight() {
       const taskResult = await task.run();
       const elapsedMs = Math.max(0, Date.now() - startedAt);
       let detail = `${elapsedMs}ms`;
-      if (task.key === 'kokoro-core') {
+      if (task.key === 'join-eval-plaques') {
+        const plaqueCount = Math.max(0, Number(taskResult && taskResult.plaqueCount) || 0);
+        const decodedPortraits = Math.max(0, Number(taskResult && taskResult.decodedPortraits) || 0);
+        const label = taskResult && taskResult.softTimeout
+          ? 'continuing in background'
+          : `${plaqueCount || 18} plaques staged, ${decodedPortraits} portraits decoded`;
+        detail = `${label} (${elapsedMs}ms)`;
+      } else if (task.key === 'kokoro-core') {
         const mode = audioState.kokoroDevice || 'adaptive';
         const status = taskResult && taskResult.softTimeout
           ? 'continuing in background'
@@ -6811,6 +6876,20 @@ socket.on('roomData', (data) => {
   const hostBadge = document.getElementById('hostBadge');
   renderContentPackOptions();
 
+  if (data.settings) {
+    const difficultyInput = document.getElementById('difficulty');
+    const scenarioThemeInput = document.getElementById('scenarioTheme');
+    const customScenarioInput = document.getElementById('customScenario');
+    const contentPackInput = document.getElementById('contentPack');
+    const plotTwistsInput = document.getElementById('plotTwists');
+    if (difficultyInput && data.settings.difficulty) difficultyInput.value = data.settings.difficulty;
+    if (scenarioThemeInput && data.settings.scenarioTheme) scenarioThemeInput.value = data.settings.scenarioTheme;
+    if (customScenarioInput && data.settings.customScenario !== undefined) customScenarioInput.value = data.settings.customScenario;
+    if (contentPackInput && data.settings.contentPackId) contentPackInput.value = data.settings.contentPackId;
+    if (plotTwistsInput && data.settings.plotTwists !== undefined) plotTwistsInput.checked = data.settings.plotTwists;
+    updateContentPackDescription(data.settings.contentPackId);
+  }
+
   // Settings OS (new Settings tab UI)
   if (hostBadge) hostBadge.style.display = isHost ? 'inline-flex' : 'none';
   if (settingsReadonlyHome) settingsReadonlyHome.style.display = isHost ? 'none' : 'grid';
@@ -6818,14 +6897,6 @@ socket.on('roomData', (data) => {
   if (isHost) {
     settingsContent.style.display = 'block';
     hostNote.style.display = 'none';
-    if (data.settings) {
-      if (data.settings.difficulty) document.getElementById('difficulty').value = data.settings.difficulty;
-      if (data.settings.scenarioTheme) document.getElementById('scenarioTheme').value = data.settings.scenarioTheme;
-      if (data.settings.customScenario !== undefined) document.getElementById('customScenario').value = data.settings.customScenario;
-      if (data.settings.contentPackId) document.getElementById('contentPack').value = data.settings.contentPackId;
-      if (data.settings.plotTwists !== undefined) document.getElementById('plotTwists').checked = data.settings.plotTwists;
-      updateContentPackDescription(data.settings.contentPackId);
-    }
   } else {
     settingsContent.style.display = 'none';
     hostNote.style.display = 'block';
@@ -6938,6 +7009,7 @@ socket.on('roomData', (data) => {
 
 socket.on('settingsUpdated', (settings) => {
   roomState.settings = settings;
+  renderContentPackOptions();
   const difficulty = document.getElementById('difficulty');
   const scenarioTheme = document.getElementById('scenarioTheme');
   const customScenario = document.getElementById('customScenario');
@@ -6949,6 +7021,56 @@ socket.on('settingsUpdated', (settings) => {
   if (contentPack && settings.contentPackId) contentPack.value = settings.contentPackId;
   if (plotTwists && settings.plotTwists !== undefined) plotTwists.checked = settings.plotTwists;
   updateContentPackDescription(settings && settings.contentPackId);
+  roomState.selectedPackMeta = normalizePackMeta(getCatalogPackEntry(settings && settings.contentPackId)) || roomState.selectedPackMeta;
+  if (typeof window !== 'undefined' && window.SettingsOS && typeof window.SettingsOS.refreshNowPlaying === 'function') {
+    window.SettingsOS.refreshNowPlaying();
+  }
+});
+
+const SETTINGS_CHANGED_LABELS = {
+  difficulty: 'difficulty',
+  scenarioTheme: 'theme',
+  contentPackId: 'content pack',
+  plotTwists: 'plot twists',
+  customScenario: 'custom scenario',
+  teamsMode: 'teams mode',
+  noVoting: 'no voting mode'
+};
+
+function buildSettingsChangePingText(payload = {}) {
+  const changedBy = String(payload.changedBy || '').trim();
+  const changedKeys = Array.isArray(payload.changedKeys)
+    ? payload.changedKeys.map((key) => String(key || '').trim()).filter(Boolean)
+    : [];
+  const labels = changedKeys
+    .map((key) => SETTINGS_CHANGED_LABELS[key] || key)
+    .filter(Boolean);
+  const uniqueLabels = Array.from(new Set(labels));
+  const labelText = uniqueLabels.length
+    ? uniqueLabels.join(', ')
+    : 'room settings';
+
+  if (payload && payload.system === true) {
+    return String(payload.summary || 'Match complete: settings reset to defaults.');
+  }
+
+  if (changedBy && changedBy.toLowerCase() === String(player && player.name || '').toLowerCase()) {
+    return `You updated ${labelText}.`;
+  }
+  if (changedBy) {
+    return `${changedBy} updated ${labelText}.`;
+  }
+  return `Settings updated: ${labelText}.`;
+}
+
+socket.on('settingsChangePing', (payload) => {
+  const message = buildSettingsChangePingText(payload);
+  if (!message) return;
+  try {
+    playMessageSound();
+  } catch (error) {
+  }
+  showToast(message, 'info', 2600);
 });
 
 const handleNarratorVoiceQueuedSocket = (payload) => {
@@ -6968,14 +7090,20 @@ function toggleReady() {
   socket.emit('toggleReady');
 }
 
-function updateSetting(key, value) {
+function updateSettingsBatch(partialSettings = {}) {
   if (roomState.host !== player.name) return;
   const settings = { ...roomState.settings };
-  settings[key] = value;
-  if (key === 'contentPackId') {
-    updateContentPackDescription(value);
+  Object.entries(partialSettings || {}).forEach(([key, value]) => {
+    settings[key] = value;
+  });
+  if (Object.prototype.hasOwnProperty.call(partialSettings || {}, 'contentPackId')) {
+    updateContentPackDescription(settings.contentPackId);
   }
   socket.emit('updateSettings', settings);
+}
+
+function updateSetting(key, value) {
+  updateSettingsBatch({ [key]: value });
 }
 
 function sendMessage() {
@@ -9561,6 +9689,8 @@ window.toggleScenario = toggleScenario;
 window.toggleResultsDetails = toggleResultsDetails;
 window.toggleReady = toggleReady;
 window.updateSetting = updateSetting;
+window.updateSettingsBatch = updateSettingsBatch;
+window.updateContentPackDescription = updateContentPackDescription;
 window.sendMessage = sendMessage;
 window.sendReaction = sendReaction;
 window.sendStartGame = sendStartGame;

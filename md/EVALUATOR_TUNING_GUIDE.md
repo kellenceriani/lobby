@@ -1,73 +1,99 @@
 # Evaluator Tuning Guide
 
-Last updated: February 19, 2026
+Last updated: February 28, 2026
 
-Use this guide when the request is "improve evaluator quality quickly".
+## Primary Tuning Surfaces
 
-## 1) Tuning Surface Map
-
-- **Input validation**: `server/evaluator/core/validation.js`
-- **Lookup confidence and candidate ranking**:
+- Resolver/candidate quality:
   - `server/evaluator/core/fetchers.js`
   - `server/evaluator/core/candidateScoring.js`
-  - `server/evaluator/core/constants.js`
-- **Relevance / feasibility / twist impact**: `server/evaluator/scoring/relevance.js`
-- **OVR conversion and rarity/type bonuses**: `server/evaluator/scoring/ovr.js`
-- **Presentation text and breakdown shape**: `server/evaluator/presentation/presentation.js`
-- **Team chemistry**: `server/evaluator/team/chemistryCalculator.js`
-- **Rounds 1–3 intel bonus economy**: `server/services/roundEvaluationService.js`
-- **Round 4 point economy**: `server/services/scoreScaling.js`
+  - `server/services/evaluation/resolver/*`
 
-## 2) Fastest High-Impact Knobs
+- Context parsing and signals:
+  - `server/services/evaluation/context/parseRoundContext.js`
+  - `server/services/evaluation/scoring/contextSignals.js`
 
-- Increase/decrease metadata trust gate:
-  - `MIN_INFO_CONFIDENCE` in `constants.js`
+- Scoring and weighting:
+  - `server/evaluator/scoring/relevance.js`
+  - `server/evaluator/scoring/ovr.js`
+  - `server/services/evaluation/scoring/weightingModel.js`
+  - `server/services/scoreScaling.js`
 
-- Change Round 4 point inflation/deflation:
-  - `ROUND4_BASE_MULTIPLIER`
-  - `ROUND4_COMPETITIVE_MULTIPLIER`
-  - `ROUND4_ELITE_CURVE`
-  - in `scoreScaling.js`
+- Team chemistry:
+  - `server/evaluator/team/chemistryCalculator.js`
 
-- Change rounds 1–3 intel impact (without overpowering voting):
-  - `ROUND_INTEL_TUNING` in `roundEvaluationService.js`
-  - especially `maxIntelBonus`, `relevanceWeight`, `confidenceWeight`, `trustedRatioWeight`
+## High-Impact, Low-Risk Sequence
 
-- Make scenario fit more/less strict:
-  - `mapFitCountToPoints`, capability scoring, feasibility thresholds in `relevance.js`
+1. Tune resolver confidence and fallback behavior.
+2. Tune context fit weighting before changing OVR curves.
+3. Tune Round 1-3 intel bonus caps.
+4. Tune Round 4 point conversion.
+5. Tune chemistry volatility last.
 
-- Make chemistry more/less swingy:
-  - `CHEMISTRY_MAX`, `CHEMISTRY_BASE`, relationship bonuses/penalties in `chemistryCalculator.js`
+## Deterministic Scoring Model (Server Weights)
 
-## 3) Recommended Change Sequence (Large Retune)
+Round OVR (draft rounds):
 
-1. Adjust **rounds 1–3 intel economy** (`roundEvaluationService.js`) to keep vote impact primary.
-2. Adjust **Round 4 point economy** (`scoreScaling.js`) to target endgame impact.
-3. Adjust **individual skill model** (`relevance.js`, `ovr.js`) to improve ranking quality.
-4. Adjust **chemistry volatility** to avoid overpowering individual OVR.
-5. Validate with a scenario matrix (action, mystery, building, social, absurd).
-6. Ensure no ties/regressions in final leaderboard generation.
+- Keep weighting deterministic and scenario-led.
+- Exact sub-score split can evolve as context parsing improves, but stays server-authoritative and replay-stable.
 
-## 4) Stability Constraints
+Final OVR (Round 4):
 
-- Keep evaluator response shape stable for UI:
-  - `emotion`, `score`, `ovr`, `ovrTier`, `rarity`, `characterType`, `notes`, `breakdown`, `phrase`.
-- Keep `teamSummary` fields stable for Round 4 cards and leaderboard.
-- Keep round result intel summary fields stable (`averageRelevance`, `averageAdaptability`, `averageConfidence`, `averageFetchDurationMs`, `trustedCount`).
-- Preserve one-time application guard (`round4Applied`) in socket layer.
+If final twist exists:
 
-## 5) Quality Checklist
+1. Original scenario carryover: 18%
+2. Original twist carryover: 14.5%
+3. Final scenario fit: 18%
+4. Final twist fit: 14.5%
+5. Base ability: 25%
+6. Other restraints incl. chemistry: 10%
 
-- Known characters should outperform unknown random strings.
-- Scenario fit should noticeably affect OVR and notes.
-- Twist impacts should produce both positive and negative outcomes.
-- Chemistry should be meaningful but not dominate all outcomes.
-- Round 1–3 intel bonuses should reward quality without nullifying vote outcomes.
-- Round 4 points should create decisive but believable leaderboard movement.
+If no final twist:
 
-## 6) Telemetry During Tuning
+1. Original scenario carryover: 32.5%
+2. Final scenario fit: 32.5%
+3. Base ability: 25%
+4. Other restraints incl. chemistry: 10%
 
-- Compact per-round telemetry is always logged from `roundEvaluationService.js`.
-- Optional per-player verbose telemetry:
-  - Set `INTEL_TELEMETRY_VERBOSE=true`
-  - Truthy values supported: `1`, `true`, `yes`, `on`
+Rules:
+
+- Compute final score/OVR server-side from clamped sub-scores (`0-100`).
+- Keep original-context carryover meaningful but capped (`<=33%` per carryover lane).
+- Tune weights in `server/services/evaluation/scoring/weightingModel.js`, never in client presentation code.
+
+## Guardrails
+
+- Keep payload shape stable for client renderers (`app.js`, `round4Eval.js`).
+- Avoid over-rewarding low-confidence entries.
+- Keep vote impact meaningful in rounds 1-3.
+- Validate tie and edge-case ordering after each tuning pass.
+
+## Chemistry Risk and Opportunity Map
+
+Active risks:
+
+- Rule interactions can over-stack without balance checks.
+- Expanded keyword systems can overfit to popular franchises.
+- Low-confidence resolver paths can leak into chemistry perception.
+
+High-value follow-up:
+
+1. Add Monte Carlo distribution tests for chemistry bonus variance.
+2. Build confidence-calibration checks for candidate scoring.
+3. Add profile presets (`balanced`, `chaotic`, `competitive`) behind explicit flags.
+4. Capture evaluator telemetry snapshots for post-match diagnostics.
+
+## Telemetry Focus for Tuning Runs
+
+- `dangerous_title_diff` rate overall and by source (`wikipedia-search` is the primary watch bucket).
+- Risky outliers (`risky60+`) and low-confidence elite outliers (`lowConf80+`).
+- Synthetic image rate and backfill success by source.
+- Resolver-side audio coverage versus client playback success/failure telemetry.
+
+## Validation
+
+- `npm run eval:viability`
+- `npm run bench:context`
+- `npm run bench:random500`
+
+Use fixed sample sets before and after each tuning change so score shifts are explainable.

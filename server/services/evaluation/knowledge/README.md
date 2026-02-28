@@ -1,11 +1,12 @@
-# Knowledge Layer (Planned)
+# Evaluation Knowledge
 
-This folder will host compact, editable knowledge sources used by the Context Engine:
+Last updated: February 28, 2026
 
-- alias maps and resolver hints
-- trait lexicons and intent expansions
-- rarity bands / prestige signals
-- domain packs (sports, mythology, cyber, etc.)
+Knowledge assets and notes used by the deterministic evaluation pipeline.
 
-Initial implementation will re-use data from `server/evaluator/core/constants.js` and
-gradually move only the parts that are still useful.
+Current state:
+
+- Most operational dictionaries still live in evaluator core constants.
+- This folder is reserved for gradual extraction into maintainable domain packs.
+
+Do not duplicate active constants here without updating runtime readers.

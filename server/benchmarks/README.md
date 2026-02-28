@@ -1,6 +1,10 @@
-# server/benchmarks
+# server/benchmarks/
 
-Benchmark and replay tooling for evaluator tuning.
+Last updated: February 28, 2026
 
-Primary target now:
-- Context Engine replay/latency/consistency benchmarks (non-LLM runtime path)
+Benchmark tooling for evaluator and audio performance.
+
+Primary suites:
+
+- `contextEngine/` - context pipeline replay and consistency harnesses.
+- `ttsEntryQuality/` - narration/callout quality and latency harnesses.

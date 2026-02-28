@@ -439,8 +439,10 @@ function resetCoreRules() {
   if ($('plotTwists')) $('plotTwists').checked = defaults.plotTwists;
   if ($('customScenario')) $('customScenario').value = defaults.customScenario;
 
-  // Push settings to host/server if updateSetting exists
-  if (typeof window.updateSetting === 'function') {
+  // Push settings to host/server in one socket update when possible.
+  if (typeof window.updateSettingsBatch === 'function') {
+    window.updateSettingsBatch({ ...defaults });
+  } else if (typeof window.updateSetting === 'function') {
     window.updateSetting('difficulty', defaults.difficulty);
     window.updateSetting('scenarioTheme', defaults.scenarioTheme);
     window.updateSetting('contentPackId', defaults.contentPackId);

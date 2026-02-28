@@ -1,101 +1,106 @@
-# LobbyWARS Architecture Reference
+# LobbyWARS Architecture
 
-Last updated: February 19, 2026
+Last updated: February 28, 2026
 
-## 1) Runtime Topology
+## Runtime
 
-- **Server bootstrap**: `server.js`
-  - Creates Express HTTP server.
-  - Hosts static client from `public/`.
-  - Attaches Socket.IO server.
-  - Initializes random word cache via `initWordCache()`.
-  - Registers all socket handlers via `registerSocketHandlers(io)`.
+- `server.js` boots Express + Socket.IO, serves `public/`, and exposes pack/debug endpoints.
+- Client is a single-page app (`public/index.html`) driven by `public/js/app.js`.
 
-- **Client runtime**: `public/index.html` + `public/js/*.js`
-  - Single-page UI with screen-based state transitions.
-  - Main event orchestration in `public/js/app.js`.
-  - Round 4 rendering/pacing in `public/js/round4Eval.js`.
-
-## 2) Server Module Map
+## Core Server Ownership
 
 - `server/core/gameEngine.js`
-  - Owns room/game lifecycle state.
-  - Generates scenarios + twists.
-  - Runs Rounds 1–3 phase transitions: PRE_ROUND -> DRAFT -> TWIST -> VOTING -> RESULTS.
-  - Blends community voting with per-round contextual intel scoring.
-  - Prepares Round 4 input rosters.
-
-- `server/services/roundEvaluationService.js`
-  - Evaluates current-round drafted picks (2 per player) with scenario/twist context.
-  - Produces per-player intel summaries and bounded intel round bonus.
-  - Emits lightweight telemetry for confidence/fetch latency.
+- Owns room/game lifecycle and authoritative phase transitions.
+- Generates scenarios/twists/final conditions with difficulty + theme + content pack influence.
+- Resets room settings to defaults after match completion.
 
 - `server/socket/socketHandlers.js`
-  - Validates all realtime actions.
-  - Enforces join/message/draft rate limiting.
-  - Applies authoritative state changes.
-  - Triggers Round 4 evaluation and final results emission.
+- Owns socket event validation, mutation authorization, and event broadcast sequencing.
+- Handles host-only settings updates with room-wide `settingsUpdated` and `settingsChangePing`.
+
+- `server/services/roundEvaluationService.js`
+- Rounds 1-3 contextual intel evaluation and intel bonus shaping.
 
 - `server/services/round4Service.js`
-  - Evaluates each final roster character-by-character.
-  - Adds chemistry bonus.
-  - Converts team OVR into Round 4 points.
-  - Produces `teamEvaluations`, `finalLeaderboard`, and point breakdowns.
+- Round 4 full-roster evaluation, chemistry application, and final-team summaries.
 
-- `server/evaluator/*`
-  - Character validation, metadata lookup, relevance scoring, OVR calculation, notes/breakdowns, phrase generation.
-  - Round-mode fetch path is lighter and context-prioritized (character/person-first).
-
-- `server/services/scoreScaling.js`
-  - Round weights + Round 4 point curve.
+- `server/content/packRegistry.js`
+- Content pack loading, validation, featured selection, and pack metadata/metrics.
 
 - `server/storage/statePersistence.js`
-  - Serializes room snapshots into `.runtime/rooms.snapshot.json`.
+- Debounced room snapshot persistence.
 
-## 3) Core Data Objects
+## Core Client Ownership
 
-- **Room** (`rooms[roomCode]`)
-  - `players[]`, `host`, `settings`, `messages[]`, `gameState`, `isGameActive`.
+- `public/js/app.js`
+- Main state orchestration, socket bindings, lobby/game/final UI updates, audio control, startup preflight.
 
-- **GameState**
-  - `players[]` (runtime player stats/team data), `currentRound`, `totalRounds`, `scenarios[]`, `activePhase`, `results[]`, `votes`, `voteLocks`, `draftEntries`, `allCharactersDrafted`, `roundResolutionLocks`.
-  - Round 4 flags: `round4InProgress`, `round4Applied`, `round4Results`, `finalResultsReady`, `finalResultsEmitted`.
+- `public/js/settings.js`
+- Settings OS UI navigation and summary rendering.
 
-- **Round 4 Team Evaluation**
-  - Per player: `evaluations[]` + `teamSummary`.
-  - `teamSummary` includes `totalOVR`, `averageOVR`, `chemistryBonus`, `chemistryDetails`, `topPick`, `highestOVR`.
+- `public/js/joinEvalFallingPlaques.js`
+- Join-screen Eval plaque layer creation + portrait prewarm bridge.
+- Preloaded during startup preflight before join unlock.
 
-## 4) Phase Lifecycle (Authoritative)
+- `public/js/round4Eval*.js`
+- Round 4 reveal sequencing, shared audio hooks, cinematic states.
 
-1. `startGame` creates game instance and emits `gameStarting`.
-2. `startRound` emits `roundStart`.
-3. `revealScenario` emits `scenarioRevealed` and starts draft timer.
-4. `revealPlotTwist` auto-fills missing picks, emits `plotTwistRevealed`.
-5. `startVoting` emits `votingPhaseStart`.
-6. `tallyResults` computes weighted voting points, applies intel bonus from `roundEvaluationService`, emits `roundResults`.
-7. After round 3, `startFinalRound` compiles 6-char rosters and emits `round4Start`.
-8. `evaluateRound4` computes final evaluation and emits `round4Evaluated`.
-9. `requestFinalResults` synchronization emits `finalRoundResults` once all players are ready.
+## Startup Preflight
 
-## 5) Critical Invariants
+Blocking startup tasks (before join unlock) include:
 
-- Duplicate draft picks are replaced with random auto-fill words.
-- Regular rounds require exactly 2 locked picks per player.
-- Rounds 1–3 always score via both community vote and contextual intel bonus.
-- Round 4 does **not** include drafting or voting.
+- Join Eval plaque staging + portrait decode prewarm.
+- Adaptive voice router/cast warmup.
+- Join/lobby music path verification.
+
+Deferred tasks continue in background after join unlock.
+
+## Deterministic Evaluation Architecture
+
+Live evaluation follows a deterministic context-engine shape (no live LLM runtime in scoring paths):
+
+1. Resolver:
+- identity resolution, alias/typo handling, source ranking.
+2. Context parser:
+- parse scenario/twist into intents, constraints, and trait pressures.
+3. Context judge:
+- compute sub-scores (scenario/twist fit, base ability, confidence, risk flags).
+4. Weight + explain:
+- apply server-side weights and emit explainable payload fields.
+
+Payload expectations:
+
+- normalized identity + resolution confidence
+- clamped sub-scores (`0-100`)
+- explicit risk/confidence signals for diagnostics and UI trust messaging
+
+## Evaluation Performance Strategy
+
+- Batch and cache evidence lookups per normalized identity.
+- Cache context-scored outputs by `(entry + scenario + twist + mode)`.
+- Reuse rounds 1-3 evidence in Round 4 where possible.
+- Precompute final evaluation during safe windows (for example, voting phase) to reduce end-round stalls.
+
+## Settings Model
+
+Room settings currently include:
+
+- `difficulty`
+- `scenarioTheme`
+- `contentPackId`
+- `plotTwists`
+- `customScenario`
+- `maxPlayers`
+
+Behavior:
+
+- Host changes are diffed server-side and broadcast to all players.
+- Settings summary UI is refreshed for host and non-host clients.
+- Match end resets settings to defaults for the next game.
+
+## Invariants
+
+- Server is authoritative for scoring and phase progression.
 - Round 4 scoring is applied once (`round4Applied` guard).
-- Final results broadcast is one-time (`finalResultsEmitted` guard).
-
-## 6) High-Impact Change Points
-
-- **Scenario variety/pacing**: `generateScenario`, `generateTwists`, draft/vote timer helpers in `gameEngine.js`.
-- **Voting economy**: `calculateRoundBonuses` in `gameEngine.js` + round weights in `scoreScaling.js`.
-- **Round 4 competitiveness**: `calculateRound4Points` and formula constants in `scoreScaling.js`.
-- **Character quality model**: `server/evaluator/index.js` + `server/evaluator/scoring/*`.
-- **Chemistry volatility**: `server/evaluator/team/chemistryCalculator.js`.
-
-## 7) Safety Notes
-
-- Any change to socket event names must be mirrored in `public/js/app.js` and/or `public/js/round4Eval.js`.
-- Any change to evaluator output shape must preserve UI expectations in `round4Eval.js`.
-- Any change to score formula should be tested against multi-team and tie scenarios.
+- Final results sync waits for connected eligible players.
+- If docs drift from implementation, trust code paths in `app.js`, `socketHandlers.js`, and `gameEngine.js`.

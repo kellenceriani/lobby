@@ -1,6 +1,8 @@
-# server/evaluator/presentation
+# server/evaluator/presentation/
 
-Presentation-layer helpers for evaluator output.
+Last updated: February 28, 2026
 
-- `presentation.js`: emotion mapping, player-facing notes, structured breakdown payloads
-- `phraseGenerator.js`: short flavor lines keyed by emotion tier
+Presentation helpers for evaluator output.
+
+- `presentation.js` - notes and breakdown payload assembly.
+- `phraseGenerator.js` - flavor text generation.

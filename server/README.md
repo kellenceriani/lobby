@@ -1,18 +1,18 @@
-# server
+# server/
+
+Last updated: February 28, 2026
 
 Backend runtime for LobbyWARS.
 
-## Module ownership
+- `core/` - authoritative game lifecycle and scoring phase flow.
+- `socket/` - realtime event handlers, validation, and rate limiting.
+- `services/` - evaluation orchestration, scoring helpers, audio/voice services.
+- `content/` - content pack schema/registry.
+- `storage/` - room snapshot persistence.
+- `evaluator/` - character/team evaluation model.
 
-- `core/` — game lifecycle, scenario/twist generation, round progression
-- `socket/` — realtime event handlers, input sanitation, rate limiting
-- `services/` — Round 4 orchestration and score-scaling formulas
-- `storage/` — room snapshot persistence (`server/.runtime/rooms.snapshot.json`)
-- `evaluator/` — character scoring, relevance, OVR, chemistry, presentation breakdowns
-
-## Canonical docs
+Canonical docs:
 
 - `../md/ARCHITECTURE.md`
-- `../md/ROUND4_AI_EVALUATOR_SPEC.md`
-- `../md/EVALUATOR_TUNING_GUIDE.md`
 - `../md/SOCKET_EVENT_CONTRACT.md`
+- `../md/ROUND4_AI_EVALUATOR_SPEC.md`

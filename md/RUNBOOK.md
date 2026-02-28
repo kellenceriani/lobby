@@ -1,62 +1,65 @@
 # Engineering Runbook
 
-Last updated: February 19, 2026
+Last updated: February 28, 2026
 
-This runbook is for rapid, safe iteration when making major gameplay/evaluator changes.
-
-## 1) Local Validation Commands
+## Fast Validation
 
 - Start server:
   - `npm start`
 
-- Syntax check evaluator:
-  - `node --check server/evaluator/index.js`
+- Validate pack manifests:
+  - `npm run packs:validate`
 
-- Evaluator viability harness:
-  - `node server/viabilityTestHarness.js`
+- Syntax checks (server files):
+  - `node --check server/core/gameEngine.js`
+  - `node --check server/socket/socketHandlers.js`
+
+- Optional evaluator harness:
   - `npm run eval:viability`
+  - `npm run bench:context`
+  - `npm run bench:random500`
 
-- Smoke module exports:
-  - `node -e "const ev=require('./server/evaluator/index'); const ge=require('./server/core/gameEngine'); const sh=require('./server/socket/socketHandlers'); const r4=require('./server/services/round4Service'); console.log('ok', typeof ev.scoreCharacter, typeof ge.startGame, typeof sh, typeof r4.evaluateRound4FromGame);"`
+## Change Workflow
 
-## 2) Standard Change Workflow
+1. Locate ownership in `md/ARCHITECTURE.md`.
+2. Apply smallest coherent change.
+3. Run targeted validations.
+4. Run manual multiplayer smoke test.
+5. Update docs in `md/` and any impacted local READMEs.
 
-1. Identify target subsystem in docs (`ARCHITECTURE.md`, `EVALUATOR_TUNING_GUIDE.md`).
-2. Make smallest coherent code change.
-3. Run targeted validation command(s).
-4. Run a full gameflow smoke test.
-5. Update relevant markdown docs in `md/`.
+## Manual Smoke Test
 
-## 3) Manual E2E Smoke Test
+1. Open 3 clients in one room.
+2. Confirm host and non-host settings views.
+3. Change settings as host and verify:
+   - all clients receive update
+   - settings summary updates for all
+   - ping/toast appears for all
+4. Play through rounds 1-3 and Round 4.
+5. Confirm final results and post-match settings reset.
+6. Confirm `playAgain` returns lobby with default settings.
 
-1. Open 3 browser clients.
-2. Join same room, set all ready, start game.
-3. Complete rounds 1–3 with mixed draft quality.
-4. Verify Round 4:
-   - `round4Start` appears
-   - evaluation renders all teams
-   - final leaderboard displays
-5. Verify final synchronization:
-   - all players press continue
-   - `finalRoundResults` shows once
-   - game ends and can reset with `playAgain`
+## Common Regression Watchlist
 
-## 4) Regression Watchlist
-
-- Socket event name mismatches between client/server.
+- Event mismatch between client and server.
+- Host-only settings leaking to non-host write paths.
+- Settings not applied to game instance generation.
 - Round transition deadlocks (`resultsReady`, `finalResultsReady`).
-- Duplicate scoring in Round 4 (missing `round4Applied` guard behavior).
-- UI assumptions about evaluator payload fields.
-- Score inflation causing impossible leaderboard swings.
+- Duplicate Round 4 scoring application.
 
-## 5) Intel Telemetry Toggle
+## AI-Core Regression Checklist
 
-- Default telemetry (always on):
-  - Per round log from `roundEvaluationService`:
-  - `📈 [Round X Intel Telemetry] avgConfidence=... avgFetchMs=... trusted=.../...`
+When touching resolver/scoring/diagnostics code, compare against a prior known-good artifact/log and verify:
 
-- Optional verbose telemetry (per-player rows):
-  - Set env var before starting server:
-    - PowerShell: `$env:INTEL_TELEMETRY_VERBOSE='true'`
-    - CMD: `set INTEL_TELEMETRY_VERBOSE=true`
-  - Truthy values supported: `1`, `true`, `yes`, `on`
+- `dangerous_title_diff` rate does not regress (overall and by source).
+- `risky60+` and `lowConf80+` outlier counts do not expand.
+- synthetic image rate and image-backfill success do not regress materially.
+- resolver-side audio coverage and quote/fact fallback latency remain stable.
+- no false quality-gate failures from legacy-only metrics.
+
+Keep machine-readable harness artifacts so runs can be diffed across sessions.
+
+## Notes
+
+- `npm test` is not implemented in this repository.
+- If port 3000 is already in use, stop the existing process before `npm start`.

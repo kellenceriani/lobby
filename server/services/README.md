@@ -1,12 +1,11 @@
-# server/services
+# server/services/
+
+Last updated: February 28, 2026
 
 Cross-cutting backend services.
 
-- `entryEvaluationService.js`: stable adapter for all character evaluations (current legacy engine, future context engine)
-- `evaluation/`: scaffold for the new deterministic Context Engine migration
-- `round4Service.js`: evaluates complete final rosters with concurrency-limited mapping
-- `roundEvaluationService.js`: evaluates rounds 1-3 and computes intel bonuses
-- `scoreScaling.js`: round weights + nonlinear Round 4 points formula
-
-Tuning reference:
-- `../../md/EVALUATOR_TUNING_GUIDE.md`
+- `roundEvaluationService.js` - rounds 1-3 contextual intel evaluation.
+- `round4Service.js` - final roster evaluation and leaderboard shaping.
+- `scoreScaling.js` - point conversion and weighting formulas.
+- `entryEvaluationService.js` - central adapter into evaluation pipeline.
+- `evaluation/` - context-engine pipeline modules (resolver/context/scoring/explain/cache).

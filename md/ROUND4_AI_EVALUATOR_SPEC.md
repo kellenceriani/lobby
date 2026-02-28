@@ -1,92 +1,66 @@
-# Round 4 AI Evaluator Specification
+# Round 4 Evaluator Spec
 
-Last updated: February 18, 2026
-Status: Canonical implementation in active use
+Last updated: February 28, 2026
 
-## 1) Purpose
+## Purpose
 
-Round 4 is the final, server-authoritative evaluation phase that ranks each player's 6-character roster using character quality + team chemistry.
+Round 4 is the server-authoritative final roster evaluation phase.
 
-## 2) Inputs
+## Inputs
 
-- `scenario`: generated at start of final round
-- `twist`: generated at start of final round
-- `finalTeam` per player: collected from stored teams in rounds 1–3
-- `finalTeamDraftMeta`: original draft context metadata per character where available
+- Final scenario and twist (prepared server-side)
+- Each player's 6-character final roster
+- Draft metadata from rounds 1-3
 
-## 3) Processing Pipeline
+## Pipeline
 
-1. `startFinalRound` compiles final teams and emits `round4Start`.
-2. Client sends `evaluateRound4`.
-3. `evaluateRound4FromGame(game)` orchestrates:
-	- per-player roster evaluation (concurrency-limited)
-	- per-character `scoreCharacter(...)`
-	- phrase assignment by emotion
-	- chemistry computation
-	- team summary assembly
-4. `calculateRound4Points(teamOVR)` maps team quality to Round 4 points.
-5. Results are persisted in game state and emitted as `round4Evaluated`.
+1. `startFinalRound` compiles final rosters and emits `round4Start`.
+2. Client requests evaluation with `evaluateRound4`.
+3. Server evaluates entries via `round4Service` (+ evaluator stack).
+4. Server applies chemistry and Round 4 point conversion.
+5. Server emits `round4Evaluated`.
+6. Final sync waits for `requestFinalResults` from all eligible players.
 
-## 4) Character Evaluation Output Contract
+## Scoring Weights (Deterministic)
 
-Each evaluated character includes:
-- `character`
-- `emotion`
-- `score` (0–30 style internal score)
-- `ovr` (0–99)
-- `ovrTier`
-- `attributes`
-- `rarity`
-- `characterType`
-- `reason`
-- `notes[]`
-- `breakdown` object
-- `phrase`
+Final OVR uses server-side sub-scores and deterministic weights.
 
-## 5) Team Summary Contract
+If final twist exists:
 
-Per player `teamSummary`:
-- `totalOVR`
-- `chemistryBonus`
-- `chemistryDetails[]`
-- `averageOVR`
-- `topPick`
-- `highestOVR`
-- `evaluationCount`
+1. Original scenario carryover: 18%
+2. Original twist carryover: 14.5%
+3. Final scenario fit: 18%
+4. Final twist fit: 14.5%
+5. Base ability: 25%
+6. Other restraints incl. chemistry: 10%
 
-## 6) Round 4 Point Formula
+If no final twist:
 
-From `server/services/scoreScaling.js`:
+1. Original scenario carryover: 32.5%
+2. Final scenario fit: 32.5%
+3. Base ability: 25%
+4. Other restraints incl. chemistry: 10%
 
-- Base points: `teamOVR * ROUND4_BASE_MULTIPLIER`
-- Competitive bonus: `max(0, teamOVR - ROUND4_COMPETITIVE_FLOOR) * ROUND4_COMPETITIVE_MULTIPLIER`
-- Elite curve bonus: `(max(0, teamOVR - ROUND4_ELITE_FLOOR)^2) * ROUND4_ELITE_CURVE`
-- Total: rounded sum of components
+All sub-scores are clamped to `0-100` and recomputed server-side before point conversion.
 
-Current constants are defined in `scoreScaling.js` and should be treated as economy knobs.
+## Output Contract
 
-## 7) Server Safeguards
+`round4Evaluated` includes:
 
-- `round4InProgress`: prevents duplicate concurrent evaluations.
-- `round4Applied`: guarantees points are only added to totals once.
-- Cached payload replay: if results already exist, requester receives existing payload.
+- `evaluationId`
+- `allTeamEvaluations`
+- `finalLeaderboard`
+- `revealTimeline`
+- tie metadata (`isTie`, `tiedPlayers`)
+- optional `voiceCues`
 
-## 8) Client Rendering Behavior
+Each team evaluation includes:
 
-- `round4Eval.js` renders team-by-team, character-by-character with reveal delays.
-- Team summary card is shown after each team’s character cards.
-- Final Round 4 leaderboard appears after all cards render.
-- Continue action triggers final synchronization via `requestFinalResults`.
+- `evaluations[]` (character-level output)
+- `teamSummary` (`totalOVR`, `averageOVR`, `chemistryBonus`, etc.)
 
-## 9) Failure Modes
+## Invariants
 
-- Wrong phase request -> `round4EvaluationError`.
-- Evaluator internal exception -> `round4EvaluationError` and no state mutation.
-- Missing emotion icon -> client image fallback to alternate emotion path.
-
-## 10) Extension Points
-
-- Improve lookup precision: `server/evaluator/core/fetchers.js`, `candidateScoring.js`
-- Improve scenario realism: `server/evaluator/scoring/relevance.js`
-- Rebalance roster outcomes: `scoreScaling.js`
-- Rebalance team synergy volatility: `server/evaluator/team/chemistryCalculator.js`
+- Round 4 points are applied once per match (`round4Applied`).
+- Cached/in-flight precompute can be reused but must preserve deterministic payload shape.
+- Final-round emit sequence must not bypass final-results synchronization.

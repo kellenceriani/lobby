@@ -47,6 +47,76 @@ const EVAL_WARMUP_ON_DRAFT = ['1', 'true', 'yes', 'on'].includes(
 );
 const draftWarmupDedupe = new Map();
 const DRAFT_WARMUP_DEDUPE_WINDOW_MS = Math.max(3000, Number(process.env.DRAFT_WARMUP_DEDUPE_MS) || 45000);
+const ROOM_SETTINGS_DEFAULTS = Object.freeze({
+  difficulty: 'normal',
+  scenarioTheme: 'all',
+  plotTwists: true,
+  maxPlayers: 6,
+  customScenario: '',
+  contentPackId: 'default'
+});
+
+function buildDefaultRoomSettings(baseSettings = null) {
+  const maxPlayersSource = Number(baseSettings && baseSettings.maxPlayers);
+  const safeMaxPlayers = Number.isFinite(maxPlayersSource)
+    ? Math.min(6, Math.max(3, Math.floor(maxPlayersSource)))
+    : ROOM_SETTINGS_DEFAULTS.maxPlayers;
+  return {
+    ...ROOM_SETTINGS_DEFAULTS,
+    maxPlayers: safeMaxPlayers,
+    contentPackId: 'default'
+  };
+}
+
+function normalizeSettingValueForDiff(value) {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'boolean') return value;
+  if (value == null) return null;
+  if (Array.isArray(value)) return JSON.stringify(value);
+  if (typeof value === 'object') return JSON.stringify(value);
+  return value;
+}
+
+function getChangedSettingKeys(previousSettings = {}, nextSettings = {}) {
+  const keys = new Set([
+    ...Object.keys(previousSettings || {}),
+    ...Object.keys(nextSettings || {})
+  ]);
+  const changed = [];
+  keys.forEach((key) => {
+    const before = normalizeSettingValueForDiff(previousSettings[key]);
+    const after = normalizeSettingValueForDiff(nextSettings[key]);
+    if (before !== after) changed.push(String(key));
+  });
+  return changed;
+}
+
+function emitSettingsSync(io, roomCode, roomData, {
+  changedKeys = [],
+  changedBy = '',
+  system = false,
+  summary = ''
+} = {}) {
+  io.to(roomCode).emit('settingsUpdated', roomData.settings);
+  if (!Array.isArray(changedKeys) || (!changedKeys.length && !summary)) return;
+  io.to(roomCode).emit('settingsChangePing', {
+    changedKeys: changedKeys.map((key) => String(key)),
+    changedBy: String(changedBy || ''),
+    system: system === true,
+    summary: String(summary || ''),
+    settings: roomData.settings,
+    timestamp: Date.now()
+  });
+}
+
+function resetRoomSettingsToDefaults(roomData) {
+  const previousSettings = { ...(roomData && roomData.settings ? roomData.settings : {}) };
+  roomData.settings = buildDefaultRoomSettings(previousSettings);
+  roomData.settings.contentPackId = coercePackId(roomData.settings.contentPackId);
+  const changedKeys = getChangedSettingKeys(previousSettings, roomData.settings);
+  return changedKeys;
+}
 
 async function emitRoomEventWithVoiceCuePrewarm(io, roomCode, eventName, payload, { timeoutMs = 1800 } = {}) {
   const voiceCues = Array.isArray(payload && payload.voiceCues) ? payload.voiceCues : [];
@@ -523,14 +593,20 @@ function registerSocketHandlers(io) {
       const { room, name, roomData } = joined;
       if (roomData.host !== name || roomData.isGameActive) return;
 
+      const previousSettings = { ...(roomData.settings || {}) };
       const cleaned = sanitizeSettings(newSettings);
       if (Object.prototype.hasOwnProperty.call(cleaned, 'contentPackId')) {
         cleaned.contentPackId = coercePackId(cleaned.contentPackId);
       }
       roomData.settings = { ...roomData.settings, ...cleaned };
       roomData.settings.contentPackId = coercePackId(roomData.settings.contentPackId);
+      const changedKeys = getChangedSettingKeys(previousSettings, roomData.settings);
+      if (!changedKeys.length) return;
 
-      io.to(room).emit('settingsUpdated', roomData.settings);
+      emitSettingsSync(io, room, roomData, {
+        changedKeys,
+        changedBy: name
+      });
       markRoomsDirty();
     });
 
@@ -1208,8 +1284,17 @@ function registerSocketHandlers(io) {
         p.ready = false;
       });
       roomData.messages = [];
+      const resetKeys = resetRoomSettingsToDefaults(roomData);
 
       emitRoomData(io, room, roomData);
+      if (resetKeys.length) {
+        emitSettingsSync(io, room, roomData, {
+          changedKeys: resetKeys,
+          changedBy: 'system',
+          system: true,
+          summary: 'Match complete: settings reset to defaults.'
+        });
+      }
       markRoomsDirty();
     });
 

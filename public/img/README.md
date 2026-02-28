@@ -1,7 +1,9 @@
-# public/img
+# public/img/
 
-Static image assets used by the client.
+Last updated: February 28, 2026
 
-- `emotions/` — Round 4 evaluator reaction icons
+Static image assets.
 
-Asset references are currently used by `public/js/round4Eval.js`.
+- `icons/` - PWA and app icon set.
+- `emotions/` - Round 4 emotion icons.
+- `eval_portraits/` - join-screen Eval plaque portraits.

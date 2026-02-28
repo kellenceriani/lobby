@@ -693,6 +693,65 @@ function getPackScenarioCards(packRuntime) {
     }));
 }
 
+const THEME_CATEGORY_ALIASES = {
+  all: [],
+  food: ['food', 'performance', 'social'],
+  action: ['action', 'adventure', 'mystery', 'building'],
+  adventure: ['adventure', 'action', 'mystery'],
+  sports: ['sports', 'performance', 'action'],
+  performance: ['performance', 'social', 'sports'],
+  absurd: ['absurd', 'mystery', 'adventure']
+};
+
+const THEME_TWIST_ADDS = {
+  food: {
+    easy: ['WITH A BLIND TASTE PANEL'],
+    normal: ['WITH LIMITED INGREDIENT WINDOWS'],
+    hard: ['WHILE THE MENU CHANGES EVERY ROUND']
+  },
+  action: {
+    easy: ['WITH NONSTOP PRESSURE'],
+    normal: ['WITH HOSTILE INTERFERENCE ACTIVE'],
+    hard: ['WHILE COLLATERAL RISK NEVER DROPS']
+  },
+  adventure: {
+    easy: ['WITH MAP UPDATES DELAYED'],
+    normal: ['WHILE TERRAIN SHIFTS MID-RUN'],
+    hard: ['WITH NO SAFE RETREAT ROUTE']
+  },
+  sports: {
+    easy: ['UNDER CHAMPIONSHIP CLOCK RULES'],
+    normal: ['WITH LIVE SCORE SWINGS'],
+    hard: ['WHILE REF CALLS CHANGE MOMENTUM']
+  },
+  performance: {
+    easy: ['IN FRONT OF A LIVE CROWD'],
+    normal: ['WITH JUDGES SCORING EVERY MOVE'],
+    hard: ['WHILE PUBLIC VOTE SHIFTS CONSTANTLY']
+  },
+  absurd: {
+    easy: ['UNDER CHAOS RULES'],
+    normal: ['WHILE LOGIC BREAKS PERIODICALLY'],
+    hard: ['AS REALITY REWRITES YOUR PLAN']
+  }
+};
+
+function resolveThemeAliases(theme = 'all') {
+  const safeTheme = String(theme || 'all').toLowerCase();
+  const aliases = THEME_CATEGORY_ALIASES[safeTheme];
+  if (Array.isArray(aliases) && aliases.length) return aliases.slice();
+  if (safeTheme === 'all') return [];
+  return [safeTheme];
+}
+
+function getThemeTwistAdds(theme = 'all', difficulty = 'normal') {
+  const safeTheme = String(theme || 'all').toLowerCase();
+  const safeDifficulty = ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
+  const bucket = THEME_TWIST_ADDS[safeTheme];
+  if (!bucket || !Array.isArray(bucket[safeDifficulty])) return [];
+  return bucket[safeDifficulty].slice();
+}
+
 function buildScenarioCategoryPool(theme = 'all', packRuntime = null) {
   const requestedTheme = String(theme || 'all').toLowerCase();
   const baseCategories = requestedTheme === 'all'
@@ -709,14 +768,18 @@ function buildScenarioCategoryPool(theme = 'all', packRuntime = null) {
 function generateScenario(theme = 'all', packRuntime = null) {
   const packCards = getPackScenarioCards(packRuntime);
   const requestedTheme = String(theme || 'all').toLowerCase();
-  const eligiblePackCards = packCards.filter((card) => (
-    requestedTheme === 'all'
-      ? true
-      : String(card.category || '').toLowerCase() === requestedTheme
-  ));
+  const themedCategories = new Set(resolveThemeAliases(requestedTheme));
+  const themedPackCards = packCards.filter((card) => {
+    if (requestedTheme === 'all') return true;
+    return themedCategories.has(String(card.category || '').toLowerCase());
+  });
+  const packCardPool = themedPackCards.length ? themedPackCards : packCards;
+  const packChance = requestedTheme === 'all'
+    ? 0.78
+    : (themedPackCards.length ? 0.9 : 0.72);
 
-  if (eligiblePackCards.length && Math.random() < 0.75) {
-    const selectedCard = eligiblePackCards[Math.floor(Math.random() * eligiblePackCards.length)];
+  if (packCardPool.length && Math.random() < packChance) {
+    const selectedCard = packCardPool[Math.floor(Math.random() * packCardPool.length)];
     return {
       scenario: applyPromptBrevity(selectedCard.text, 'scenario'),
       category: selectedCard.category || 'pack'
@@ -745,18 +808,20 @@ function getPackTwistAdds(packRuntime, difficulty) {
   return Array.isArray(twists) ? twists.slice() : [];
 }
 
-function generateTwists(difficulty = 'normal', count = 4, scenarioText = '', packRuntime = null) {
+function generateTwists(difficulty = 'normal', count = 4, scenarioText = '', packRuntime = null, theme = 'all') {
   if (difficulty && typeof difficulty === 'object') {
     const options = difficulty;
     return generateTwists(
       options.difficulty || 'normal',
       options.count || 4,
       options.scenarioText || options.scenario || '',
-      options.packRuntime || options.pack || null
+      options.packRuntime || options.pack || null,
+      options.theme || options.scenarioTheme || 'all'
     );
   }
 
   const safeDifficulty = ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
+  const safeTheme = String(theme || 'all').toLowerCase();
   const targetCount = Math.max(1, Math.min(12, Number(count) || 4));
   const easyTwists = TWIST_TEMPLATES.easy;
   const normalTwists = TWIST_TEMPLATES.normal;
@@ -771,12 +836,16 @@ function generateTwists(difficulty = 'normal', count = 4, scenarioText = '', pac
     pool = [...easyTwists.slice(0, 2), ...normalTwists, ...hardTwists.slice(0, 2)];
   }
   pool.push(...getPackTwistAdds(packRuntime, safeDifficulty));
+  pool.push(...getThemeTwistAdds(safeTheme, safeDifficulty));
+
+  const themeSignal = resolveThemeAliases(safeTheme).join(' ');
+  const dynamicScenarioSeed = [String(scenarioText || ''), themeSignal].filter(Boolean).join(' ');
 
   const dynamicPool = [];
   for (let i = 0; i < (targetCount * 3); i++) {
     dynamicPool.push(composeDynamicTwist({
       difficulty: safeDifficulty,
-      scenarioText
+      scenarioText: dynamicScenarioSeed
     }));
   }
 
@@ -794,7 +863,7 @@ function generateScenarios(count = 3, theme = 'all', difficulty = 'normal', pack
   for (let i = 0; i < count; i++) {
     const generated = generateScenario(theme, packRuntime);
     const scenario = generated.scenario;
-    const twists = generateTwists(difficulty, 6, scenario, packRuntime);
+    const twists = generateTwists(difficulty, 6, scenario, packRuntime, theme);
     scenarios.push({ scenario, twists, category: generated.category });
   }
   return scenarios;
@@ -1271,10 +1340,12 @@ function generateFinalScenario(difficulty = 'normal', packRuntime = null) {
   return applyPromptBrevity(fillTemplate(chosenPattern, values), 'finalScenario');
 }
 
-function generateFinalTwist(difficulty = 'normal', scenarioText = '', packRuntime = null) {
+function generateFinalTwist(difficulty = 'normal', scenarioText = '', packRuntime = null, theme = 'all') {
   const packTwists = getPackFinalTwistPool(packRuntime, difficulty);
-  if (packTwists.length && Math.random() < 0.65) {
-    return applyPromptBrevity(randomFrom(packTwists), 'finalTwist');
+  const themedTwists = getThemeTwistAdds(theme, difficulty);
+  const curatedPool = Array.from(new Set([...packTwists, ...themedTwists]));
+  if (curatedPool.length && Math.random() < 0.65) {
+    return applyPromptBrevity(randomFrom(curatedPool), 'finalTwist');
   }
 
   const domains = inferTwistDomains(scenarioText);
@@ -1291,11 +1362,11 @@ function generateFinalTwist(difficulty = 'normal', scenarioText = '', packRuntim
   return applyPromptBrevity([prefix, domainConstraint].filter(Boolean).join(' | '), 'finalTwist');
 }
 
-function generateFinalScenarioAndTwist(difficulty = 'normal', packRuntime = null) {
+function generateFinalScenarioAndTwist(difficulty = 'normal', packRuntime = null, theme = 'all') {
   const scenario = generateFinalScenario(difficulty, packRuntime);
   return {
     scenario,
-    twist: generateFinalTwist(difficulty, scenario, packRuntime)
+    twist: generateFinalTwist(difficulty, scenario, packRuntime, theme)
   };
 }
 
@@ -1570,10 +1641,11 @@ function prepareFinalRoundState(game, roomCode) {
 
   if (!game.pendingFinalRound || !game.pendingFinalRound.scenario || !game.pendingFinalRound.twist) {
     const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
+    const theme = game.settings && game.settings.scenarioTheme ? game.settings.scenarioTheme : 'all';
     const pack = resolveContentPack(game && game.packMeta && game.packMeta.id
       ? game.packMeta.id
       : (game.settings && game.settings.contentPackId));
-    const finalConditions = generateFinalScenarioAndTwist(difficulty, pack);
+    const finalConditions = generateFinalScenarioAndTwist(difficulty, pack, theme);
     game.pendingFinalRound = {
       scenario: finalConditions.scenario,
       twist: finalConditions.twist,
@@ -1585,6 +1657,32 @@ function prepareFinalRoundState(game, roomCode) {
   }
 
   return game.pendingFinalRound;
+}
+
+function buildDefaultRoomSettings(source = {}) {
+  return {
+    difficulty: 'normal',
+    scenarioTheme: 'all',
+    plotTwists: true,
+    maxPlayers: Math.min(6, Math.max(3, Number(source && source.maxPlayers) || 6)),
+    customScenario: '',
+    contentPackId: 'default'
+  };
+}
+
+function getChangedRoomSettingKeys(previousSettings = {}, nextSettings = {}) {
+  const keys = new Set([
+    ...Object.keys(previousSettings || {}),
+    ...Object.keys(nextSettings || {})
+  ]);
+  return Array.from(keys).filter((key) => {
+    const before = previousSettings[key];
+    const after = nextSettings[key];
+    if (typeof before === 'string' || typeof after === 'string') {
+      return String(before || '').trim() !== String(after || '').trim();
+    }
+    return before !== after;
+  });
 }
 
 function createRoom(roomCode) {
@@ -1599,14 +1697,7 @@ function createRoom(roomCode) {
       updatedBy: '',
       updatedAt: 0
     },
-    settings: {
-      difficulty: 'normal',
-      scenarioTheme: 'all',
-      plotTwists: true,
-      maxPlayers: 6,
-      customScenario: '',
-      contentPackId: 'default'
-    },
+    settings: buildDefaultRoomSettings(),
     messages: [],
     reactions: {}
   };
@@ -1626,7 +1717,7 @@ function createGameInstance(roomCode, players, settings) {
     const customScenario = applyPromptBrevity(settings.customScenario.trim(), 'scenario');
     scenarios[customIndex] = {
       scenario: customScenario,
-      twists: generateTwists(difficulty, 6, customScenario, pack),
+      twists: generateTwists(difficulty, 6, customScenario, pack, theme),
       category: 'custom'
     };
   }
@@ -1685,7 +1776,10 @@ function getDraftSeconds(settings) {
   return 45;
 }
 
-function getVoteSeconds() {
+function getVoteSeconds(settings) {
+  const difficulty = (settings && settings.difficulty) || 'normal';
+  if (difficulty === 'easy') return 35;
+  if (difficulty === 'hard') return 24;
   return 30;
 }
 
@@ -1920,7 +2014,13 @@ async function revealPlotTwist(io, roomCode) {
     : (game.settings && game.settings.contentPackId));
   const generatedTwists = (Array.isArray(scenario && scenario.twists) && scenario.twists.length)
     ? scenario.twists
-    : generateTwists(difficulty, 6, game.currentScenario || (scenario && scenario.scenario) || '', pack);
+    : generateTwists(
+      difficulty,
+      6,
+      game.currentScenario || (scenario && scenario.scenario) || '',
+      pack,
+      game.settings && game.settings.scenarioTheme ? game.settings.scenarioTheme : 'all'
+    );
   game.currentTwist = generatedTwists[Math.floor(Math.random() * generatedTwists.length)] || 'NO RULE BREAKERS';
 
   game.activePhase = 'TWIST';
@@ -1992,6 +2092,7 @@ function startVoting(io, roomCode) {
   game.roundResolutionLocks = game.roundResolutionLocks || {};
   game.roundResolutionLocks[game.currentRound] = false;
 
+  const voteSeconds = getVoteSeconds(game.settings);
   const teamsDisplay = game.players.map(p => ({
     name: p.name,
     team: p.team,
@@ -2000,7 +2101,7 @@ function startVoting(io, roomCode) {
 
   io.to(roomCode).emit('votingPhaseStart', {
     teams: teamsDisplay,
-    votingTimeRemaining: getVoteSeconds(),
+    votingTimeRemaining: voteSeconds,
     scenario: game.currentScenario,
     twist: game.currentTwist,
     packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
@@ -2028,7 +2129,7 @@ function startVoting(io, roomCode) {
     });
 
     setTimeout(() => tallyResults(io, roomCode), 1200);
-  }, getVoteSeconds() * 1000);
+  }, voteSeconds * 1000);
   voteTimeouts[roomCode] = voteTimeout;
   markRoomsDirty();
 }
@@ -2599,6 +2700,20 @@ async function endGame(io, roomCode) {
   await emitWithVoiceCuePrewarm(io, roomCode, 'gameEnded', gameEndedPayload, { timeoutMs: 2200 });
 
   room.isGameActive = false;
+  const previousSettings = { ...(room.settings || {}) };
+  room.settings = buildDefaultRoomSettings(previousSettings);
+  const resetKeys = getChangedRoomSettingKeys(previousSettings, room.settings);
+  if (resetKeys.length) {
+    io.to(roomCode).emit('settingsUpdated', room.settings);
+    io.to(roomCode).emit('settingsChangePing', {
+      changedKeys: resetKeys,
+      changedBy: 'system',
+      system: true,
+      summary: 'Match complete: settings reset to defaults.',
+      settings: room.settings,
+      timestamp: Date.now()
+    });
+  }
   markRoomsDirty();
   setTimeout(() => {
     room.gameState = null;

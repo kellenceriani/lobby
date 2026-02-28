@@ -1,11 +1,19 @@
-# public/css
+# public/css/
 
-UI styles split by feature surface.
+Last updated: February 28, 2026
 
-- `base.css` — baseline tokens, resets, global utility styles
-- `lobby.css` — join/lobby/tab/chat/settings presentation
-- `game.css` — round gameplay screens (draft/twist/voting)
-- `results.css` — round/final scoreboard visuals
-- `round4Eval.css` — Round 4 evaluator cards, summaries, leaderboard
+- `base.css` - reset, tokens, shared components.
+- `lobby.css` - join/lobby/chat/settings presentation.
+- `settings.css` - Settings OS styles.
+- `joinEvalFallingPlaques.css` - join-screen falling Eval plaques.
+- `game.css` - rounds 1-3 gameplay screens.
+- `results.css` - round/final results layouts.
+- `round4Eval.css`, `round4Eval-ovr.css` - Round 4 and OVR modal styling.
 
-When changing markup in `public/index.html`, verify matching selectors here.
+When changing `index.html` IDs/classes, verify selectors across all files above.
+
+Settings OS styling guardrails:
+
+- Keep Settings selectors scoped under `.settings-os` to avoid bleed from `base.css` and `lobby.css`.
+- Preserve modal/body scroll-lock behavior used by the settings sheet (`body.settings-sheet-open` flows).
+- Prefer targeted selector edits over global overrides to avoid reintroducing transparency/stacking regressions.

@@ -1,19 +1,24 @@
-# Context Engine Scaffold
+# Context Evaluation Pipeline
 
-This folder is the new home for the non-LLM "AI-like" evaluation system.
+Last updated: February 28, 2026
 
-Design goal:
-- Keep gameplay fast and deterministic.
-- Improve contextual judgment quality using structured rules, resolver quality, and reusable scoring modules.
-- Make future upgrades easy by separating pipeline stages.
+This directory contains the active deterministic evaluation pipeline used by runtime services.
 
-Current status:
-- Scaffold only. Runtime still uses the legacy evaluator through `../entryEvaluationService.js`.
+Major areas:
 
-Planned flow:
-1. `context/` parses scenario + twist into normalized requirements/constraints.
-2. `resolver/` resolves entry identity and evidence from external sources + local knowledge.
-3. `scoring/` computes sub-scores (fit/base/rarity/creativity/confidence).
-4. `pipeline/` orchestrates round and final evaluation.
-5. `explain/` builds UI-friendly breakdown payloads.
-6. `diagnostics/` provides telemetry and replay benchmark summaries.
+- `context/` - parse scenario/twist into structured signals.
+- `resolver/` - identity resolution and source adapters.
+- `scoring/` - weighting model + context signal computation.
+- `pipeline/` - entry batch orchestration.
+- `cache/` - evaluation caching.
+- `diagnostics/` - telemetry and explainability diagnostics.
+- `explain/` - client-facing reason payload assembly.
+
+Deterministic stage model:
+
+1. Resolve identity and confidence.
+2. Parse context constraints/signals.
+3. Judge context fit into clamped sub-scores.
+4. Apply authoritative weighting + explainability assembly.
+
+No live LLM runtime is used in the critical scoring path.

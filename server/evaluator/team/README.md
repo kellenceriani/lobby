@@ -1,9 +1,7 @@
-# server/evaluator/team
+# server/evaluator/team/
 
-Team-level scoring modules.
+Last updated: February 28, 2026
 
-- `chemistryCalculator.js`: multi-phase synergy engine with bonuses/penalties and detail lines
+- `chemistryCalculator.js` - team synergy and penalty model.
 
-Tune with caution:
-- chemistry affects final team OVR directly
-- interactions are rule-heavy and can stack quickly
+Chemistry directly affects final team strength and should be tuned carefully.

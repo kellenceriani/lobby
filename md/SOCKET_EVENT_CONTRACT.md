@@ -1,87 +1,97 @@
 # Socket Event Contract
 
-Last updated: February 24, 2026
+Last updated: February 28, 2026
 
-This document maps the current client/server event API used by Socket.IO.
-
-## Client -> Server Events
+## Client -> Server
 
 - `joinRoom` `{ name, room, joinAsHost }`
-- `updateSettings` `settingsObject`
+- `updateSettings` `settingsObject` (host only, lobby only)
 - `toggleReady`
 - `sendMessage` `string`
 - `sendReaction` `string`
-- `startGame`
+- `startGame` (host only)
 - `draftCharacter` `string`
 - `lockDraft`
+- `requestDraftWaitPreview`
 - `castVote` `playerName`
 - `lockVote`
 - `readyForNextRound`
 - `evaluateRound4`
 - `requestFinalResults`
 - `playAgain`
+- `queueNarratorVoice` `{ voiceId }`
 
-## Server -> Client Events
+## Server -> Client
+
+Lobby/system:
 
 - `roomData`
 - `settingsUpdated`
+- `settingsChangePing`
+- `narratorVoiceQueued` (and legacy alias `kokoroNarratorQueued`)
+- `joinError`
+- `gameError`
+
+Chat:
+
 - `newMessage`
+
+Gameplay:
+
 - `gameStarting`
 - `roundStart`
 - `scenarioRevealed`
 - `draftSuccess`
 - `draftUpdate`
+- `draftError`
 - `playerLocked`
+- `draftWaitIntelPreview`
 - `plotTwistRevealed`
 - `votingPhaseStart`
 - `voteUpdate`
 - `voteLockUpdate`
 - `voteTallying`
+- `voteTallyProgress`
 - `roundResults`
+
+Round 4 / final:
+
 - `round4Start`
 - `round4Evaluated`
 - `round4EvaluationError`
 - `finalResultsWaiting`
 - `finalRoundResults`
 - `gameEnded`
-- `joinError`
-- `gameError`
-- `draftError`
 
-## Behavioral Guarantees
+## Key Guarantees
 
-- `round4Evaluated` may be emitted to one requester first (cached replay path) or room-wide when freshly computed.
-- `finalRoundResults` is room-wide and only sent after all active players emit `requestFinalResults`.
-- `roomData` is the canonical lobby sync payload after join/ready/disconnect/playAgain changes.
-- `roomData` now includes `packCatalog` (available content packs + featured pack id) and `selectedPackMeta`.
-- `roundResults` now includes both vote-driven points and intel-driven additions for rounds 1-3.
-- `gameStarting`, `scenarioRevealed`, `round4Start`, `roundResults`, `finalRoundResults`, and `gameEnded` may include `packMeta` for themed UI/branding continuity.
-- `voteTallying` is emitted when voting closes (timer or all-lock), allowing clients to show a short tally/loading state before `roundResults`.
+- Server is authoritative for room state and scoring.
+- `settingsUpdated` is full-state; `settingsChangePing` is change-notification metadata.
+- Round 4 scoring is guarded against duplicate application.
+- Final results emit only after all connected eligible players request them.
 
-## Important Payload Notes
+## Room Data Shape (high level)
 
-- `roundResults` includes:
-  - `roundPoints`, `voteCount`, `leaderboard`, `pointBreakdown`, `round`
-  - `packMeta` `{ id, label, description, themeTags[], visuals, availability }`
-  - `roundIntelSummary` (per player):
-    - `averageScore`, `averageOVR`, `averageRelevance`, `averageAdaptability`, `averageConfidence`, `averageFetchDurationMs`, `trustedCount`
-- `roomData.settings` may include `contentPackId`
-- `roomData.packCatalog` includes:
-  - `packs[]` (catalog entries for host selector / themed UI)
-  - `featuredPackId`
-  - `loadedAt`, `loadWarnings[]`, `loadErrors[]` (QA/debug support)
+`roomData` includes:
 
-## Error Surfaces
+- `players`
+- `host`
+- `isGameActive`
+- `settings`
+- `messages`
+- `voiceConfig`
+- `packCatalog`
+- `selectedPackMeta`
 
-- `joinError`: invalid join payload, duplicate name, full room, active game, join rate limit.
-- `gameError`: unauthorized host actions, start preconditions, chat message rate limit.
-- `draftError`: draft rate limit, lock violations, insufficient picks to lock.
-- `round4EvaluationError`: incorrect phase or evaluator execution failure.
+## Settings Notes
 
-## Change Protocol
+Settings currently include:
 
-If event names, payload shape, or sequencing changes:
-1. Update this file.
-2. Update `server/socket/socketHandlers.js`.
-3. Update matching listeners/emitters in `public/js/app.js` and `public/js/round4Eval.js`.
-4. Run end-to-end manual flow (join -> round 4 -> final results).
+- `difficulty`
+- `scenarioTheme`
+- `contentPackId`
+- `plotTwists`
+- `customScenario`
+- `maxPlayers`
+
+Host changes are diffed server-side before `settingsChangePing` is emitted.

@@ -1,11 +1,21 @@
-# public/js
+# public/js/
 
-Client runtime scripts.
+Last updated: February 28, 2026
 
-- `app.js`: primary socket event wiring and screen transitions
-- `state.js`: in-memory client state + timer management
-- `ui.js`: screen helpers, toasts, UI toggles, utility rendering
-- `round4Eval.js`: Round 4 progressive reveal and final result sync UI
+- `app.js` - main client orchestrator: socket events, phase UI, audio controls, startup preflight.
+- `settings.js` - Settings OS navigation and summary rendering.
+- `joinEvalFallingPlaques.js` - join-screen Eval plaque layer + portrait prewarm bridge.
+- `state.js` - shared in-memory client state.
+- `ui.js` - generic UI helpers and screen/tab switches.
+- `round4Eval.js`, `round4EvalRevealCinematics.js`, `round4EvalSharedAudio.js` - Round 4 flow.
 
-Important coupling:
-- Socket event names must remain aligned with `server/socket/socketHandlers.js`
+Event coupling must stay aligned with `server/socket/socketHandlers.js` and `md/SOCKET_EVENT_CONTRACT.md`.
+
+Settings OS integration contract:
+
+- Do not remove/rename compatibility IDs consumed by `app.js` and `settings.js` without coordinated updates.
+- Critical IDs include:
+  - `settingsContent`, `settingsReadonlyHome`, `hostNote`, `hostBadge`
+  - `difficulty`, `scenarioTheme`, `contentPack`, `customScenario`, `plotTwists`
+  - `nowModeLabel`, `nowDifficultyLabel`, `nowPackLabel`
+- `settingsUpdated` and `settingsChangePing` handling must stay in sync with server payload shape.

@@ -1,9 +1,9 @@
-# server/evaluator/core
+# server/evaluator/core/
 
-Evaluator foundations:
+Last updated: February 28, 2026
 
-- `constants.js` — scoring tiers, trait dictionaries, keyword groups, alias maps
-- `validation.js` — input safety and format validation
-- `fetchers.js` — Wikipedia/Wikidata/Fandom/OMDb lookups + caching
-- `textUtils.js` — normalization, typo resolution, tokenization, similarity
-- `candidateScoring.js` — confidence scoring and best-candidate selection
+- `constants.js` - domain dictionaries and weighting constants.
+- `validation.js` - entry input guards.
+- `fetchers.js` - external source fetch + caching helpers.
+- `textUtils.js` - normalization and token utilities.
+- `candidateScoring.js` - candidate confidence scoring.

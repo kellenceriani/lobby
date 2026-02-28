@@ -2909,12 +2909,12 @@ function syncAudioControlUI() {
   setAudioButtonPressed(document.getElementById('audioRevealToggle'), audioState.revealEnabled, { on: 'On', off: 'Off' });
   setAudioButtonPressed(document.getElementById('audioCardToggle'), audioState.cardEnabled, { on: 'On', off: 'Off' });
   setAudioButtonPressed(document.getElementById('audioVoiceToggle'), audioState.voiceEnabled !== false, { on: 'On', off: 'Off' });
-  if (!KOKORO_ONLY_VOICE_SYSTEM) {
-    setAudioButtonPressed(document.getElementById('audioVoiceExpressiveToggle'), audioState.voiceExpressiveMode !== false, {
-      on: 'Expressive',
-      off: 'Neutral'
-    });
-  }
+  // if (!KOKORO_ONLY_VOICE_SYSTEM) {
+  //   setAudioButtonPressed(document.getElementById('audioVoiceExpressiveToggle'), audioState.voiceExpressiveMode !== false, {
+  //     on: 'Expressive',
+  //     off: 'Neutral'
+  //   });
+  // }
 
   setAudioButtonPressed(document.getElementById('audioQuickMusicToggleBtn'), (audioState.muted ? false : audioState.musicEnabled), {
     on: 'Music On',
@@ -6807,7 +6807,13 @@ socket.on('roomData', (data) => {
 
   const settingsContent = document.getElementById('settingsContent');
   const hostNote = document.getElementById('hostNote');
+  const settingsReadonlyHome = document.getElementById('settingsReadonlyHome');
+  const hostBadge = document.getElementById('hostBadge');
   renderContentPackOptions();
+
+  // Settings OS (new Settings tab UI)
+  if (hostBadge) hostBadge.style.display = isHost ? 'inline-flex' : 'none';
+  if (settingsReadonlyHome) settingsReadonlyHome.style.display = isHost ? 'none' : 'grid';
 
   if (isHost) {
     settingsContent.style.display = 'block';
@@ -6824,6 +6830,10 @@ socket.on('roomData', (data) => {
     settingsContent.style.display = 'none';
     hostNote.style.display = 'block';
     document.getElementById('hostNameDisplay').textContent = data.host || 'No host selected yet (a player must join as host)';
+  }
+
+  if (typeof window !== 'undefined' && window.SettingsOS && typeof window.SettingsOS.refreshNowPlaying === 'function') {
+    window.SettingsOS.refreshNowPlaying();
   }
 
   const ul = document.getElementById('playerList');
@@ -9539,6 +9549,7 @@ document.addEventListener('visibilitychange', () => {
   syncMusicLoopState();
 });
 
+
 // Expose UI actions used by inline handlers
 window.joinRoom = joinRoom;
 window.leaveRoom = leaveRoom;
@@ -9563,6 +9574,14 @@ window.sendPlayAgain = sendPlayAgain;
 window.openFinalResultsArchive = openFinalResultsArchive;
 window.returnToRound4Finale = returnToRound4Finale;
 window.goToLobby = goToLobby;
+
+// Show/hide lobby footer only on lobby screen
+document.addEventListener('screenChanged', (event) => {
+  const screenId = event && event.detail ? event.detail.screenId : '';
+  const footer = document.getElementById('lobbyActionsBar');
+  if (!footer) return;
+  footer.style.display = (screenId === 'lobby') ? '' : 'none';
+});
 
 if (shouldAutoOpenRound4Loading()) {
   window.setTimeout(() => {

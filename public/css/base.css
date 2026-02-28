@@ -1411,3 +1411,51 @@ kbd {
     display: none !important;
   }
 }
+
+/* iOS/mobile fix for audio controls */
+@media only screen and (max-width: 480px),
+  (max-device-width: 480px) and (orientation: portrait) {
+  .audio-control-row.voice {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
+    padding: 18px 12px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+  }
+  .audio-control-row.voice .audio-chip-toggle,
+  .audio-control-row.voice .audio-kokoro-panel-toggle,
+  .audio-control-row.voice .audio-voice-unlock-btn {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 1.05rem;
+    padding: 14px 0;
+    border-radius: 14px;
+    margin: 0;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  }
+  #audioVoiceToggle {
+    margin-bottom: 0;
+  }
+  #audioKokoroPanelToggleBtn {
+    margin-top: 0;
+  }
+  .audio-control-copy {
+    margin-bottom: 10px;
+    text-align: left;
+  }
+  .audio-control-label {
+    font-size: 1.1rem;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    margin-bottom: 2px;
+  }
+  .audio-control-copy small {
+    font-size: 0.85rem;
+    opacity: 0.8;
+    margin-bottom: 8px;
+  }
+}

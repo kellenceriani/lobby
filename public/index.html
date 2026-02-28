@@ -1,3 +1,5 @@
+<!-- IMPORTANT: keep this element for app.js sync even if UI no longer shows "Twists" as a quick box -->
+<input id="plotTwists" type="checkbox" class="sr-only" aria-hidden="true" tabindex="-1" />
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,6 +16,7 @@
   <link rel="manifest" href="manifest.webmanifest?v=20260223-livefix1">
   <link rel="stylesheet" href="css/base.css?v=20260226-voice-router1">
   <link rel="stylesheet" href="css/lobby.css?v=20260226-voice-router1">
+  <link rel="stylesheet" href="css/settings.css?v=20260227-settings-os1">
   <link rel="stylesheet" href="css/game.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/results.css?v=20260223-livefix1">
 </head>
@@ -250,365 +253,630 @@
         </div>
       </div>
 
-      <!-- Settings Tab -->
-      <div id="settingsTab" class="tab-content">
-        <div id="settingsContent" class="settings-content-modern" style="display: none;">
-          <div class="settings-compact-row">
-            <div class="setting-item">
-              <label for="difficulty">
-                <strong>Difficulty</strong>
-                <select id="difficulty" onchange="updateSetting('difficulty', this.value)" aria-label="Game difficulty">
-                  <option value="easy">🟢 Easy (60s)</option>
-                  <option value="normal" selected>🟡 Normal (45s)</option>
-                  <option value="hard">🔴 Hard (30s)</option>
-                </select>
-              </label>
-            </div>
-            <div class="setting-item">
-              <label for="scenarioTheme">
-                <strong>Theme</strong>
-                <select id="scenarioTheme" onchange="updateSetting('scenarioTheme', this.value)" aria-label="Scenario theme">
-                  <option value="all" selected>🎲 All (Random)</option>
-                  <option value="food">🍳 Food & Cooking</option>
-                  <option value="action">⚔️ Action & Combat</option>
-                  <option value="adventure">🗺️ Adventure</option>
-                  <option value="sports">🏀 Sports & Games</option>
-                  <option value="performance">🎭 Performance</option>
-                  <option value="absurd">🌀 Weird & Absurd</option>
-                </select>
-              </label>
-            </div>
+        <!-- Settings Tab -->
+  <!-- Settings Tab (REPLACE the existing #settingsTab block with this entire section) -->
+  <div id="settingsTab" class="tab-content">
+    <section class="settings-os" aria-label="Settings">
+      <!-- Compact header / status -->
+      <header class="settings-os-header">
+        <div class="settings-os-titlebar">
+          <div class="settings-os-titlestack">
+            <h2 class="settings-os-title">Settings</h2>
+            <p class="settings-os-subtitle" id="settingsStatusLine" aria-live="polite">
+              Configure game rules, modes, and system options.
+            </p>
           </div>
-          <div class="setting-item">
-            <label for="customScenario">
-              <strong>Custom Scenario <span style="opacity: 0.6; font-size: 0.85em;">(Optional)</span></strong>
-              <input type="text" id="customScenario" placeholder="e.g., BUILD THE PERFECT TREEHOUSE" maxlength="60" onchange="updateSetting('customScenario', this.value.trim())" aria-label="Custom scenario">
-            </label>
-          </div>
-          <div class="setting-item">
-            <label for="contentPack">
-              <strong>Content Pack</strong>
-              <select id="contentPack" onchange="updateSetting('contentPackId', this.value)" aria-label="Content pack selection">
-                <option value="default" selected>Core Pack (Default)</option>
-              </select>
-              <small id="contentPackDescription" class="setting-help-text">Curated pack themes for scenarios, twists, and finals.</small>
-            </label>
-          </div>
-          <div class="setting-item">
-            <label class="checkbox-label">
-              <input type="checkbox" id="plotTwists" checked onchange="updateSetting('plotTwists', this.checked)">
-              <span>Enable Plot Twists</span>
-            </label>
-          </div>
-          <div class="host-badge">
+
+          <!-- Host badge (app.js will show/hide) -->
+          <div class="host-badge" id="hostBadge" style="display: none;">
             <strong>You are the HOST</strong>
           </div>
-
-          <section class="advanced-settings-lab-shell" aria-label="Advanced settings preview">
-            <div class="advanced-settings-lab-head">
-              <div>
-                <h3>Advanced Settings Lab</h3>
-                <p>UI/UX prototype only. Structure first, behavior later.</p>
-              </div>
-              <span class="advanced-settings-stage">Design Skeleton</span>
-            </div>
-
-            <div class="advanced-settings-mode-grid" role="list" aria-label="Preset modes preview">
-              <button type="button" class="advanced-mode-card is-featured" role="listitem">
-                <strong>Ceremony Focus</strong>
-                <span>Cleaner reveals, slower pacing, less info per moment</span>
-                <small>Recommended for mobile-first play</small>
-              </button>
-              <button type="button" class="advanced-mode-card" role="listitem">
-                <strong>Comp Stream</strong>
-                <span>More data shown, faster transitions, spectator energy</span>
-                <small>Future mode concept</small>
-              </button>
-              <button type="button" class="advanced-mode-card" role="listitem">
-                <strong>Chaos Night</strong>
-                <span>Twists up, pacing up, readability rails preserved</span>
-                <small>Future mode concept</small>
-              </button>
-            </div>
-
-            <details class="advanced-settings-panel" open>
-              <summary>Reveal Ceremony & Results Flow</summary>
-              <div class="advanced-settings-panel-body">
-                <label class="adv-skeleton-row">
-                  <span>Round 4 auto-advance speed</span>
-                  <input type="range" min="1" max="5" value="3" disabled aria-label="Round 4 auto-advance speed (preview only)">
-                  <em>Preview only</em>
-                </label>
-                <label class="adv-skeleton-row">
-                  <span>Final Results default tab</span>
-                  <select disabled aria-label="Final Results default tab (preview only)">
-                    <option selected>Bridge</option>
-                    <option>Elite Six</option>
-                    <option>Standings</option>
-                  </select>
-                  <em>Preview only</em>
-                </label>
-                <label class="adv-skeleton-toggle">
-                  <input type="checkbox" checked disabled>
-                  <span>Compact evaluator trace panels by default</span>
-                </label>
-                <label class="adv-skeleton-toggle">
-                  <input type="checkbox" checked disabled>
-                  <span>Mobile card fronts hide secondary metadata</span>
-                </label>
-              </div>
-            </details>
-
-            <details class="advanced-settings-panel">
-              <summary>Scoring Presentation</summary>
-              <div class="advanced-settings-panel-body">
-                <label class="adv-skeleton-toggle">
-                  <input type="checkbox" checked disabled>
-                  <span>Use collapsible round breakdown cards</span>
-                </label>
-                <label class="adv-skeleton-toggle">
-                  <input type="checkbox" disabled>
-                  <span>Show expanded evaluator trace automatically for top scorer</span>
-                </label>
-                <div class="adv-skeleton-note">Placeholder sections for future scoring, evaluator, and accessibility presets.</div>
-              </div>
-            </details>
-          </section>
-
         </div>
-        <div id="hostNote" class="host-note-modern" style="display: none;">
-          <p><strong>Host:</strong> <span id="hostNameDisplay">Loading...</span></p>
+
+        <!-- <div class="settings-radar" aria-hidden="true">
+          <div class="settings-radar-frame">
+            <div class="settings-radar-grid"></div>
+          </div>
+        </div> -->
+
+        <div class="settings-now cardish" role="region" aria-label="Current settings summary">
+          <div class="settings-summary-bar" aria-label="Current mode, difficulty, and pack">
+            <div class="summary-item">
+              <span class="summary-ico" aria-hidden="true">🎮</span>
+              <span class="summary-label">Mode</span>
+              <span class="summary-value" id="nowModeLabel">Classic</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-ico" aria-hidden="true">🎚️</span>
+              <span class="summary-label">Difficulty</span>
+              <span class="summary-value" id="nowDifficultyLabel">Normal</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-ico" aria-hidden="true">📦</span>
+              <span class="summary-label">Pack</span>
+              <span class="summary-value" id="nowPackLabel">Default</span>
+            </div>
+          </div>
+
+          <div class="settings-now-chips" aria-label="Active rule chips">
+            <span class="chip" id="chipPlotTwists">Plot Twists</span>
+            <span class="chip chip-muted" id="chipTeams">Teams</span>
+            <span class="chip chip-muted" id="chipNoVoting">No Voting</span>
+          </div>
         </div>
-        <section class="audio-control-deck" aria-labelledby="audioDeckTitle">
-          <div class="audio-control-deck-head">
-            <div class="audio-control-deck-titlewrap">
-              <h4 id="audioDeckTitle">Audio Control</h4>
-              <p id="audioUnlockStatus" class="audio-unlock-status" role="status" aria-live="polite">Audio initializing...</p>
-            </div>
-            <div class="audio-control-deck-actions">
-              <button id="audioMasterMuteBtn" class="btn btn-secondary audio-compact-btn" type="button" aria-pressed="false">All Audio: On</button>
-              <button id="audioDeckToggleBtn" class="btn btn-secondary audio-compact-btn ghost audio-deck-toggle" type="button" aria-expanded="false" aria-controls="audioControlDeckBody" aria-label="Expand audio controls">&gt;</button>
-            </div>
-          </div>
+      </header>
 
-          <div id="audioControlDeckBody" class="audio-control-deck-body" hidden>
-          <div class="audio-control-deck-grid" role="group" aria-label="Audio categories and levels">
-            <div class="audio-control-row master">
-              <div class="audio-control-copy">
-                <span class="audio-control-label">Master</span>
-                <small>Global output level</small>
-              </div>
-              <input id="audioMasterVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="90" aria-label="Master volume">
-              <span id="audioMasterVolumeValue" class="audio-control-value">90%</span>
-            </div>
-
-            <div class="audio-control-row">
-              <div class="audio-control-copy">
-                <span class="audio-control-label">Music</span>
-                <small>Background soundtrack loops</small>
-              </div>
-              <button id="audioMusicToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
-              <input id="audioMusicVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="42" aria-label="Music volume">
-              <span id="audioMusicVolumeValue" class="audio-control-value">42%</span>
-            </div>
-
-            <div class="audio-control-row">
-              <div class="audio-control-copy">
-                <span class="audio-control-label">UI / SFX</span>
-                <small>Clicks, chat, ready, countdown</small>
-              </div>
-              <button id="audioUiToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
-              <input id="audioUiVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="90" aria-label="UI and sound effects volume">
-              <span id="audioUiVolumeValue" class="audio-control-value">90%</span>
-            </div>
-
-            <div class="audio-control-row">
-              <div class="audio-control-copy">
-                <span class="audio-control-label">Reveal FX</span>
-                <small>Round 4 cinematic impacts and transitions</small>
-              </div>
-              <button id="audioRevealToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
-              <input id="audioRevealVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="88" aria-label="Reveal effects volume">
-              <span id="audioRevealVolumeValue" class="audio-control-value">88%</span>
-            </div>
-
-            <div class="audio-control-row">
-              <div class="audio-control-copy">
-                <span class="audio-control-label">Character Callouts</span>
-                <small>Class phrase callouts + OVR replay</small>
-              </div>
-              <button id="audioCardToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
-              <input id="audioCardVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="92" aria-label="Character callout voice volume">
-              <span id="audioCardVolumeValue" class="audio-control-value">92%</span>
-            </div>
-
-            <div class="audio-control-row voice">
-              <div class="audio-control-copy">
-                <span class="audio-control-label">Voice</span>
-                <small>Adaptive neural voices (server-neural + browser fallback)</small>
-              </div>
-              <button id="audioVoiceToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
-              <button id="audioVoiceExpressiveToggle" class="audio-chip-toggle audio-chip-toggle-wide" type="button" aria-pressed="true" hidden>Expressive</button>
-              <button id="audioVoiceUnlockBtn" class="btn btn-secondary audio-compact-btn ghost audio-voice-unlock-btn" type="button" hidden>Tap to Enable Voice</button>
-              <button id="audioKokoroPanelToggleBtn" class="btn btn-secondary audio-compact-btn ghost audio-kokoro-panel-toggle" type="button" aria-expanded="false" aria-controls="audioKokoroPanelShell">
-                <span class="audio-kokoro-panel-toggle-label">Neural Voices (4)</span>
-                <span id="audioKokoroPanelPing" class="audio-kokoro-panel-ping" hidden>1</span>
-                <span class="audio-kokoro-panel-toggle-chevron" aria-hidden="true">&#9662;</span>
-              </button>
-            </div>
-
-            <div class="audio-voice-studio" aria-label="Voice Studio">
-              <p id="audioKokoroPanelToggleSummary" class="audio-kokoro-collapsed-summary" role="status" aria-live="polite">Narrator: Ryan (UK Male) - Neural Dramatic (Suggested)</p>
-              <div id="audioKokoroPanelShell" class="audio-kokoro-panel-shell" hidden>
-              <div id="audioKokoroPanel" class="audio-kokoro-panel" aria-label="Enhanced Neural Voices">
-                <div class="audio-kokoro-header">
-                  <div class="audio-control-copy">
-                    <span class="audio-control-label">Adaptive Neural Voices (Narration)</span>
-                    <small>Host queues the narrator for the room. Entry callouts use automatic archetype routing with class phrase callouts and fallbacks.</small>
-                  </div>
-                </div>
-
-                <div id="audioKokoroQueuedBanner" class="audio-kokoro-queued-banner" hidden>
-                  <strong id="audioKokoroQueuedBannerText">Queued narrator: Ryan (UK Male) - Neural Dramatic (Suggested)</strong>
-                  <span id="audioKokoroQueuedBannerMeta">Queued for this room</span>
-                </div>
-
-                <div class="audio-voice-picker">
-                  <label for="audioKokoroNarratorSelect">Room Narrator Voice (host queues this for everyone)</label>
-                  <div class="audio-voice-picker-row">
-                    <select id="audioKokoroNarratorSelect" class="audio-kokoro-voice-select" aria-label="Adaptive narration voice">
-                      <option value="bm_george">Ryan (UK Male) - Neural Dramatic (Suggested)</option>
-                    </select>
-                    <button id="audioKokoroPreviewNarratorBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview Narration</button>
-                  </div>
-                </div>
-
-                <div class="audio-voice-picker">
-                  <label for="audioKokoroCharacterSelect">Character Archetype Preview (preview only - runtime always auto multi-provider archetype routing)</label>
-                  <div class="audio-voice-picker-row">
-                    <select id="audioKokoroCharacterSelect" class="audio-kokoro-voice-select" aria-label="Character archetype preview selector (preview only)">
-                      <option value="auto_archetype">Auto Mix (Runtime Default)</option>
-                    </select>
-                    <button id="audioKokoroPreviewCharacterBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview Archetype</button>
-                  </div>
-                </div>
-
-                <p id="audioKokoroStatus" class="audio-preview-scene-status audio-kokoro-status" role="status" aria-live="polite">
-                  Adaptive neural voice routing is the live backend. It auto-loads during startup/previews.
-                </p>
-              </div>
-              </div>
-
-              <p id="audioVoiceSelectionHint" class="audio-preview-scene-status audio-voice-selection-hint" role="status" aria-live="polite">
-                Adaptive neural voice routing is the active backend in this build. Narration uses the selected voice from the curated 4-voice cast (2 female + 2 male). Entry callouts use category phrase associations with archetype voice shaping. The archetype dropdown is preview-only.
-              </p>
-            </div>
-          </div>
-          <p id="audioVoiceStatus" class="audio-preview-scene-status audio-voice-status" role="status" aria-live="polite">Voice initializing...</p>
-
-          <div class="audio-control-deck-footer">
-            <label class="audio-scene-preview">
-              <span>Music Scene Preview</span>
-              <select id="audioPreviewSceneSelect">
-                <option value="join">Join</option>
-                <option value="lobby">Lobby</option>
-                <option value="entry">Entry Phase</option>
-                <option value="voting">Voting</option>
-                <option value="ceremony">Final Animation Ceremony</option>
-                <option value="round4Bg">Round 4 Background</option>
-              </select>
-            </label>
-            <button id="audioPreviewSceneBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview (6s)</button>
-            <button id="audioTestSoundscapeBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Test Mix</button>
-          </div>
-          <p id="audioPreviewSceneStatus" class="audio-preview-scene-status" role="status" aria-live="polite">Preview mode temporarily overrides live music, then restores the active scene.</p>
-          </div>
-        </section>
-        <details class="project-credits-drawer project-credits-drawer-settings">
-          <summary>
-            <span class="project-credits-summary-title"><span aria-hidden="true">&#x1F4DC;</span> Credits & Licensing</span>
-            <span class="project-credits-summary-meta">creator + assets + usage notes</span>
-          </summary>
-          <div class="project-credits-body">
-            <div class="project-credits-grid">
-              <section class="project-credits-card">
-                <h4><span aria-hidden="true">&#x1F3AE;</span> Creator & Brand</h4>
-                <p>LobbyWARS concept, UI/UX direction, gameplay systems, and current project implementation are credited to Kellen Ceriani.</p>
-              </section>
-              <section class="project-credits-card">
-                <h4><span aria-hidden="true">&#x1F4E7;</span> Contact & Profiles</h4>
-                <p>Use the Portfolio / GitHub / LinkedIn / Email chips in the lobby header for creator contact, branding, and project identity links.</p>
-              </section>
-              <section class="project-credits-card">
-                <h4><span aria-hidden="true">&#x1F5BC;</span> Asset Notes</h4>
-                <p>Round 4 emotion PNGs are stored in <code>public/img/emotions</code>. Local README documents filenames/usage, but no source artist/license attribution is currently recorded in-repo.</p>
-              </section>
-              <section class="project-credits-card project-credits-card-audio">
-                <h4><span aria-hidden="true">&#x1F3B5;</span> Soundtrack Credits</h4>
-                <p class="project-credits-audio-intro">Background music is loaded locally from <code>audio/</code>. Scene mapping + Mixkit attribution:</p>
-                <div class="audio-credit-cluster" role="list" aria-label="Soundtrack scene credits">
-                  <div class="audio-credit-row" role="listitem">
-                    <span class="audio-credit-scene">Join</span>
-                    <div class="audio-credit-main">
-                      <code>DeepUrbanHouse - Join.mp3</code>
-                      <small>Very quiet base level • by Lily J</small>
-                    </div>
-                  </div>
-                  <div class="audio-credit-row" role="listitem">
-                    <span class="audio-credit-scene">Lobby</span>
-                    <div class="audio-credit-main">
-                      <code>HipHop - Lobby.mp3</code>
-                      <small>Normal base level • by Eugenio Mininni</small>
-                    </div>
-                  </div>
-                  <div class="audio-credit-row" role="listitem">
-                    <span class="audio-credit-scene">Entry</span>
-                    <div class="audio-credit-main">
-                      <code>Can't Get You Off My Mind - Entry.mp3</code>
-                      <small>Quiet base level • by Michael Ramir C.</small>
-                    </div>
-                  </div>
-                  <div class="audio-credit-row" role="listitem">
-                    <span class="audio-credit-scene">Voting</span>
-                    <div class="audio-credit-main">
-                      <code>Can't Get You Off My Mind - Entry.mp3</code>
-                      <small>Quiet/slightly louder + faster (1.5-2x) • by Michael Ramir C.</small>
-                    </div>
-                  </div>
-                  <div class="audio-credit-row" role="listitem">
-                    <span class="audio-credit-scene">Ceremony</span>
-                    <div class="audio-credit-main">
-                      <code>Complicated - Ceremony.mp3</code>
-                      <small>Normal w/ crescendo + decrescendo handoff • by Arulo</small>
-                    </div>
-                  </div>
-                  <div class="audio-credit-row" role="listitem">
-                    <span class="audio-credit-scene">Round 4 BG</span>
-                    <div class="audio-credit-main">
-                      <code>GamesWorldbeat - Round4BG.mp3</code>
-                      <small>Quiet base level • by Bernardo R.</small>
-                    </div>
-                  </div>
-                </div>
-                <div class="audio-credit-links">
-                  <a href="https://mixkit.co/free-stock-music/" target="_blank" rel="noopener noreferrer">Mixkit Free Stock Music</a>
-                  <a href="https://mixkit.co/license/" target="_blank" rel="noopener noreferrer">Mixkit License</a>
-                </div>
-              </section>
-              <section class="project-credits-card">
-                <h4><span aria-hidden="true">&#x2696;</span> Licensing / Rights</h4>
-                <p>Character names/images shown during gameplay may come from external sources and remain property of their respective owners. Add explicit asset attribution + project LICENSE files before commercial release.</p>
-              </section>
-            </div>
-            <div class="project-credits-foot">
-              <span><span aria-hidden="true">&#x1F517;</span> Portfolio repo README references an MIT license for the portfolio project.</span>
-              <span><span aria-hidden="true">&#x1F6E0;</span> Open-source dependency credits should remain documented in package manifests / repo docs.</span>
-            </div>
-          </div>
-        </details>
+      <div id="hostNote" class="settings-host-note" role="note" style="display: none;">
+        <p><strong>Host:</strong> <span id="hostNameDisplay">Loading...</span></p>
+        <p>Only the host can change game settings.</p>
       </div>
 
-      <!-- Chat Tab -->
+      <div id="settingsContent" class="settings-os-home" style="display: none;">
+        <nav class="settings-collections" aria-label="Settings collections">
+          <div class="settings-collections-track" role="tablist" aria-label="Collections">
+            <button class="collection-pill active" type="button" role="tab" aria-selected="true" data-collection="core">Core</button>
+            <button class="collection-pill" type="button" role="tab" aria-selected="false" data-collection="party">Party</button>
+            <button class="collection-pill" type="button" role="tab" aria-selected="false" data-collection="competitive">Competitive</button>
+            <button class="collection-pill" type="button" role="tab" aria-selected="false" data-collection="creator">Creator</button>
+            <button class="collection-pill" type="button" role="tab" aria-selected="false" data-collection="solo">Solo</button>
+            <button class="collection-pill" type="button" role="tab" aria-selected="false" data-collection="dev">Dev</button>
+            <button class="collection-pill" type="button" role="tab" aria-selected="false" data-collection="secondscreen">2nd Screen</button>
+            <button class="collection-pill" type="button" role="tab" aria-selected="false" data-collection="comingsoon">Coming Soon</button>
+          </div>
+        </nav>
+
+        <section class="settings-carousel" aria-label="Mode cards">
+          <button class="carousel-arrow carousel-arrow-prev" type="button" data-carousel-arrow="prev" aria-label="Previous modes">
+            <span aria-hidden="true">‹</span>
+          </button>
+          <button class="carousel-arrow carousel-arrow-next" type="button" data-carousel-arrow="next" aria-label="Next modes">
+            <span aria-hidden="true">›</span>
+          </button>
+          <div class="settings-carousel-track" id="modeCardTrack">
+            <article class="mode-card" data-collection="core" data-mode="coreRules" tabindex="0" role="button" aria-label="Open Core Rules">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">⚙️</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Core Rules</h3>
+                  <p class="mode-card-sub">Difficulty, theme, packs, twists.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-strong">Editable</span>
+                <span class="chip">Foundational</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="party" data-mode="partySelection" tabindex="0" role="button" aria-label="Open Party Selection (future)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">🎉</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Party Selection</h3>
+                  <p class="mode-card-sub">Lobby votes/decides the mode.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Future</span>
+                <span class="chip">Social</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="competitive" data-mode="teamsMode" tabindex="0" role="button" aria-label="Open Teams Mode (future)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">🧩</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Teams Mode</h3>
+                  <p class="mode-card-sub">2v2 or 3v3 formats.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Future</span>
+                <span class="chip">2v2 / 3v3</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="competitive" data-mode="noVoting" tabindex="0" role="button" aria-label="Open No Voting (future)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">🤖</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">No Voting</h3>
+                  <p class="mode-card-sub">Pure AI evaluation, no influence.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Future</span>
+                <span class="chip">AI-only</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="creator" data-mode="categoryFeature" tabindex="0" role="button" aria-label="Open Category Feature (future)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">🏷️</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Category Feature</h3>
+                  <p class="mode-card-sub">Typed category becomes top priority.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Future</span>
+                <span class="chip">Creator</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="creator" data-mode="scenarioTwistEntries" tabindex="0" role="button" aria-label="Open Scenario/Twist Entries (future)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">🌀</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Scenario/Twist Entries</h3>
+                  <p class="mode-card-sub">Players seed scenarios/twists.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Future</span>
+                <span class="chip">Asymmetric</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="solo" data-mode="dailyChallenge" tabindex="0" role="button" aria-label="Open Challenge of the Day (future)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">📅</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Challenge of the Day</h3>
+                  <p class="mode-card-sub">1-player daily experience.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Future</span>
+                <span class="chip">Solo</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="dev" data-mode="devTestMode" tabindex="0" role="button" aria-label="Open Dev/Test Mode (future)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">🧪</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Dev/Test Mode</h3>
+                  <p class="mode-card-sub">Dummy lobby + UI harness.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Future</span>
+                <span class="chip">Experimental</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="secondscreen" data-mode="secondScreen" tabindex="0" role="button" aria-label="Open Second Screen (coming soon)">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">📺</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Second Screen</h3>
+                  <p class="mode-card-sub">Jackbox-style TV experience.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-strong">Coming Soon</span>
+                <span class="chip">Pair Code</span>
+              </div>
+            </article>
+
+            <article class="mode-card" data-collection="comingsoon" data-mode="comingSoonHub" tabindex="0" role="button" aria-label="Open Coming Soon hub">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">✨</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Coming Soon</h3>
+                  <p class="mode-card-sub">Preview what’s next.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip">Preview</span>
+                <span class="chip">Pin ideas</span>
+              </div>
+            </article>
+          </div>
+
+          <div class="settings-carousel-hint" aria-hidden="true">
+            Swipe for more • Tap a card to configure
+          </div>
+        </section>
+
+        <section class="settings-powerstrip" aria-label="Quick controls">
+          <!-- removed powerstrip quick controls safely -->
+        </section>
+      </div>
+
+      <div class="settings-os-home settings-os-home-readonly" id="settingsReadonlyHome">
+        <div class="readonly-banner cardish" role="region" aria-label="Host-only banner">
+          <div class="readonly-banner-row">
+            <span class="readonly-ico" aria-hidden="true">🔒</span>
+            <div class="readonly-copy">
+              <strong>Host-only controls</strong>
+              <p>Explore modes here, but only the host can apply changes.</p>
+            </div>
+          </div>
+          <div class="readonly-actions">
+            <button class="btn-secondary" type="button" data-action="requestHost">Request change</button>
+          </div>
+        </div>
+
+        <section class="settings-carousel" aria-label="Mode cards preview">
+          <div class="settings-carousel-track is-locked" aria-hidden="false">
+            <article class="mode-card is-locked" tabindex="0">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">⚙️</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Core Rules</h3>
+                  <p class="mode-card-sub">View current values.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip chip-muted">Locked</span>
+                <span class="chip">Read-only</span>
+              </div>
+            </article>
+
+            <article class="mode-card is-locked" tabindex="0">
+              <div class="mode-card-head">
+                <div class="mode-card-icon" aria-hidden="true">✨</div>
+                <div class="mode-card-titlewrap">
+                  <h3 class="mode-card-title">Coming Soon</h3>
+                  <p class="mode-card-sub">Preview future modes.</p>
+                </div>
+              </div>
+              <div class="mode-card-chips">
+                <span class="chip">Preview</span>
+                <span class="chip chip-muted">Locked</span>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <div class="mode-sheet" id="modeInspector" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Mode settings">
+        <div class="mode-sheet-backdrop" data-action="closeSheet" aria-hidden="true"></div>
+
+        <div class="mode-sheet-panel" role="document">
+          <div class="mode-sheet-handle" aria-hidden="true"></div>
+
+          <header class="mode-sheet-header">
+            <div class="mode-sheet-titlewrap">
+              <h3 class="mode-sheet-title" id="modeSheetTitle">Core Rules</h3>
+              <p class="mode-sheet-sub" id="modeSheetSub">Adjust foundational game settings.</p>
+            </div>
+            <div class="mode-sheet-actions">
+              <button class="btn-secondary" type="button" data-action="resetMode">Reset</button>
+              <button class="btn-primary" type="button" data-action="closeSheet">Done</button>
+            </div>
+          </header>
+
+          <div class="mode-sheet-body">
+            <details class="mode-acc" open>
+              <summary class="mode-acc-summary">
+                <span class="mode-acc-title">Basics</span>
+                <span class="mode-acc-hint">Most common settings</span>
+              </summary>
+
+              <div class="mode-acc-content">
+                <div class="settings-grid">
+                  <div class="field">
+                    <label for="difficulty"><strong>🎚️ Difficulty</strong></label>
+                    <select id="difficulty" onchange="updateSetting('difficulty', this.value)" aria-label="Game difficulty">
+                      <option value="easy">Easy</option>
+                      <option value="normal" selected>Normal</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </div>
+
+                  <div class="field">
+                    <label for="scenarioTheme"><strong>🎭 Theme</strong></label>
+                    <select id="scenarioTheme" onchange="updateSetting('scenarioTheme', this.value)" aria-label="Scenario theme">
+                      <option value="all" selected>All (Random)</option>
+                      <option value="food">Food & Cooking</option>
+                      <option value="action">Action & Combat</option>
+                      <option value="adventure">Adventure</option>
+                      <option value="sports">Sports & Games</option>
+                      <option value="performance">Performance</option>
+                      <option value="absurd">Weird & Absurd</option>
+                    </select>
+                  </div>
+
+                  <div class="field field-wide">
+                    <label for="contentPack"><strong>📦 Content Pack</strong></label>
+                    <select id="contentPack" onchange="updateSetting('contentPackId', this.value); updateContentPackDescription(this.value)" aria-label="Content pack selection">
+                      <option value="default" selected>Core Pack (Default)</option>
+                    </select>
+                    <p id="contentPackDescription" class="field-help" aria-live="polite"></p>
+                  </div>
+
+                  <div class="field field-wide">
+                    <label for="customScenario"><strong>Custom Scenario</strong></label>
+                    <input type="text" id="customScenario" placeholder="Enter custom scenario..." maxlength="60" onchange="updateSetting('customScenario', this.value.trim())" aria-label="Custom scenario" />
+                    <p class="field-help">Optional. If set, it becomes the scenario for the round.</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <details class="mode-acc">
+              <summary class="mode-acc-summary">
+                <span class="mode-acc-title">Advanced</span>
+                <span class="mode-acc-hint">More control, less clutter</span>
+              </summary>
+
+              <div class="mode-acc-content">
+                <div class="advanced-placeholder">
+                  <p>This section is intentionally structured to scale as you add advanced modes (Teams, No Voting, Category Priority, Scenario/Twist seeding, etc.).</p>
+                  <ul class="soon-list" role="list">
+                    <li><strong>Teams Mode</strong> (2v2 / 3v3)</li>
+                    <li><strong>No Voting</strong> (AI-only)</li>
+                    <li><strong>Category Feature</strong> (priority evaluation)</li>
+                    <li><strong>Scenario/Twist Entries</strong> (player-seeded)</li>
+                  </ul>
+                </div>
+              </div>
+            </details>
+
+            <details class="mode-acc">
+              <summary class="mode-acc-summary">
+                <span class="mode-acc-title">Party</span>
+                <span class="mode-acc-hint">Group decisions & voting</span>
+              </summary>
+              <div class="mode-acc-content">
+                <div class="advanced-placeholder">
+                  <p>Future: enable “Party Selection” so the lobby votes on modes/settings, with clean mobile UI.</p>
+                </div>
+              </div>
+            </details>
+
+            <details class="mode-acc">
+              <summary class="mode-acc-summary">
+                <span class="mode-acc-title">Experimental</span>
+                <span class="mode-acc-hint">Dev/Test & Second Screen</span>
+              </summary>
+              <div class="mode-acc-content">
+                <div class="advanced-placeholder">
+                  <p>Future: Dev/Test mode with dummy data, and a Jackbox-style Second Screen pairing flow.</p>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <section class="systems-block" aria-label="Audio and credits">
+
+      <section class="audio-control-deck" aria-labelledby="audioDeckTitle">
+                <div class="audio-control-deck-head">
+                  <div class="audio-control-deck-titlewrap">
+                    <h4 id="audioDeckTitle">Audio Control</h4>
+                    <p id="audioUnlockStatus" class="audio-unlock-status" role="status" aria-live="polite">Audio initializing...</p>
+                  </div>
+                  <div class="audio-control-deck-actions">
+                    <button id="audioMasterMuteBtn" class="btn btn-secondary audio-compact-btn" type="button" aria-pressed="false">All Audio: On</button>
+                    <button id="audioDeckToggleBtn" class="btn btn-secondary audio-compact-btn ghost audio-deck-toggle" type="button" aria-expanded="false" aria-controls="audioControlDeckBody" aria-label="Expand audio controls">&gt;</button>
+                  </div>
+                </div>
+      
+                <div id="audioControlDeckBody" class="audio-control-deck-body" hidden>
+                <div class="audio-control-deck-grid" role="group" aria-label="Audio categories and levels">
+                  <div class="audio-control-row master">
+                    <div class="audio-control-copy">
+                      <span class="audio-control-label">Master</span>
+                      <small>Global output level</small>
+                    </div>
+                    <input id="audioMasterVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="90" aria-label="Master volume">
+                    <span id="audioMasterVolumeValue" class="audio-control-value">90%</span>
+                  </div>
+      
+                  <div class="audio-control-row">
+                    <div class="audio-control-copy">
+                      <span class="audio-control-label">Music</span>
+                      <small>Background soundtrack loops</small>
+                    </div>
+                    <button id="audioMusicToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+                    <input id="audioMusicVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="42" aria-label="Music volume">
+                    <span id="audioMusicVolumeValue" class="audio-control-value">42%</span>
+                  </div>
+      
+                  <div class="audio-control-row">
+                    <div class="audio-control-copy">
+                      <span class="audio-control-label">UI / SFX</span>
+                      <small>Clicks, chat, ready, countdown</small>
+                    </div>
+                    <button id="audioUiToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+                    <input id="audioUiVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="90" aria-label="UI and sound effects volume">
+                    <span id="audioUiVolumeValue" class="audio-control-value">90%</span>
+                  </div>
+      
+                  <div class="audio-control-row">
+                    <div class="audio-control-copy">
+                      <span class="audio-control-label">Reveal FX</span>
+                      <small>Round 4 cinematic impacts and transitions</small>
+                    </div>
+                    <button id="audioRevealToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+                    <input id="audioRevealVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="88" aria-label="Reveal effects volume">
+                    <span id="audioRevealVolumeValue" class="audio-control-value">88%</span>
+                  </div>
+      
+                  <div class="audio-control-row">
+                    <div class="audio-control-copy">
+                      <span class="audio-control-label">Character Callouts</span>
+                      <small>Class phrase callouts + OVR replay</small>
+                    </div>
+                    <button id="audioCardToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+                    <input id="audioCardVolume" class="audio-slider" type="range" min="0" max="100" step="1" value="92" aria-label="Character callout voice volume">
+                    <span id="audioCardVolumeValue" class="audio-control-value">92%</span>
+                  </div>
+      
+                  <div class="audio-control-row voice">
+                    <div class="audio-control-copy">
+                      <span class="audio-control-label">Voice</span>
+                      <small>Adaptive neural voices (server-neural + browser fallback)</small>
+                    </div>
+                    <button id="audioVoiceToggle" class="audio-chip-toggle" type="button" aria-pressed="true">On</button>
+                      <!-- Removed audioVoiceExpressiveToggle button as it serves no purpose on mobile -->
+                    <button id="audioVoiceUnlockBtn" class="btn btn-secondary audio-compact-btn ghost audio-voice-unlock-btn" type="button" hidden>Tap to Enable Voice</button>
+                    <button id="audioKokoroPanelToggleBtn" class="btn btn-secondary audio-compact-btn ghost audio-kokoro-panel-toggle" type="button" aria-expanded="false" aria-controls="audioKokoroPanelShell">
+                      <span class="audio-kokoro-panel-toggle-label">Neural Voices (4)</span>
+                      <span id="audioKokoroPanelPing" class="audio-kokoro-panel-ping" hidden>1</span>
+                      <span class="audio-kokoro-panel-toggle-chevron" aria-hidden="true">&#9662;</span>
+                    </button>
+                  </div>
+      
+                  <div class="audio-voice-studio" aria-label="Voice Studio">
+                    <p id="audioKokoroPanelToggleSummary" class="audio-kokoro-collapsed-summary" role="status" aria-live="polite">Narrator: Ryan (UK Male) - Neural Dramatic (Suggested)</p>
+                    <div id="audioKokoroPanelShell" class="audio-kokoro-panel-shell" hidden>
+                    <div id="audioKokoroPanel" class="audio-kokoro-panel" aria-label="Enhanced Neural Voices">
+                      <div class="audio-kokoro-header">
+                        <div class="audio-control-copy">
+                          <span class="audio-control-label">Adaptive Neural Voices (Narration)</span>
+                          <small>Host queues the narrator for the room. Entry callouts use automatic archetype routing with class phrase callouts and fallbacks.</small>
+                        </div>
+                      </div>
+      
+                      <div id="audioKokoroQueuedBanner" class="audio-kokoro-queued-banner" hidden>
+                        <strong id="audioKokoroQueuedBannerText">Queued narrator: Ryan (UK Male) - Neural Dramatic (Suggested)</strong>
+                        <span id="audioKokoroQueuedBannerMeta">Queued for this room</span>
+                      </div>
+      
+                      <div class="audio-voice-picker">
+                        <label for="audioKokoroNarratorSelect">Room Narrator Voice (host queues this for everyone)</label>
+                        <div class="audio-voice-picker-row">
+                          <select id="audioKokoroNarratorSelect" class="audio-kokoro-voice-select" aria-label="Adaptive narration voice">
+                            <option value="bm_george">Ryan (UK Male) - Neural Dramatic (Suggested)</option>
+                          </select>
+                          <button id="audioKokoroPreviewNarratorBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview Narration</button>
+                        </div>
+                      </div>
+      
+                      <div class="audio-voice-picker">
+                        <label for="audioKokoroCharacterSelect">Character Archetype Preview (preview only - runtime always auto multi-provider archetype routing)</label>
+                        <div class="audio-voice-picker-row">
+                          <select id="audioKokoroCharacterSelect" class="audio-kokoro-voice-select" aria-label="Character archetype preview selector (preview only)">
+                            <option value="auto_archetype">Auto Mix (Runtime Default)</option>
+                          </select>
+                          <button id="audioKokoroPreviewCharacterBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview Archetype</button>
+                        </div>
+                      </div>
+      
+                      <p id="audioKokoroStatus" class="audio-preview-scene-status audio-kokoro-status" role="status" aria-live="polite">
+                        Adaptive neural voice routing is the live backend. It auto-loads during startup/previews.
+                      </p>
+                    </div>
+                    </div>
+      
+                    <p id="audioVoiceSelectionHint" class="audio-preview-scene-status audio-voice-selection-hint" role="status" aria-live="polite">
+                      Adaptive neural voice routing is the active backend in this build. Narration uses the selected voice from the curated 4-voice cast (2 female + 2 male). Entry callouts use category phrase associations with archetype voice shaping. The archetype dropdown is preview-only.
+                    </p>
+                  </div>
+                </div>
+                <p id="audioVoiceStatus" class="audio-preview-scene-status audio-voice-status" role="status" aria-live="polite">Voice initializing...</p>
+      
+                <div class="audio-control-deck-footer">
+                  <label class="audio-scene-preview">
+                    <span>Music Scene Preview</span>
+                    <select id="audioPreviewSceneSelect">
+                      <option value="join">Join</option>
+                      <option value="lobby">Lobby</option>
+                      <option value="entry">Entry Phase</option>
+                      <option value="voting">Voting</option>
+                      <option value="ceremony">Final Animation Ceremony</option>
+                      <option value="round4Bg">Round 4 Background</option>
+                    </select>
+                  </label>
+                  <button id="audioPreviewSceneBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Preview (6s)</button>
+                  <button id="audioTestSoundscapeBtn" class="btn btn-secondary audio-compact-btn ghost" type="button">Test Mix</button>
+                </div>
+                <p id="audioPreviewSceneStatus" class="audio-preview-scene-status" role="status" aria-live="polite">Preview mode temporarily overrides live music, then restores the active scene.</p>
+                </div>
+              </section>
+              <details class="project-credits-drawer project-credits-drawer-settings">
+                <summary>
+                  <span class="project-credits-summary-title"><span aria-hidden="true">&#x1F4DC;</span> Credits & Licensing</span>
+                  <span class="project-credits-summary-meta">creator + assets + usage notes</span>
+                </summary>
+                <div class="project-credits-body">
+                  <div class="project-credits-grid">
+                    <section class="project-credits-card">
+                      <h4><span aria-hidden="true">&#x1F3AE;</span> Creator & Brand</h4>
+                      <p>LobbyWARS concept, UI/UX direction, gameplay systems, and current project implementation are credited to Kellen Ceriani.</p>
+                    </section>
+                    <section class="project-credits-card">
+                      <h4><span aria-hidden="true">&#x1F4E7;</span> Contact & Profiles</h4>
+                      <p>Use the Portfolio / GitHub / LinkedIn / Email chips in the lobby header for creator contact, branding, and project identity links.</p>
+                    </section>
+                    <section class="project-credits-card">
+                      <h4><span aria-hidden="true">&#x1F5BC;</span> Asset Notes</h4>
+                      <p>Round 4 emotion PNGs are stored in <code>public/img/emotions</code>. Local README documents filenames/usage, but no source artist/license attribution is currently recorded in-repo.</p>
+                    </section>
+                    <section class="project-credits-card project-credits-card-audio">
+                      <h4><span aria-hidden="true">&#x1F3B5;</span> Soundtrack Credits</h4>
+                      <p class="project-credits-audio-intro">Background music is loaded locally from <code>audio/</code>. Scene mapping + Mixkit attribution:</p>
+                      <div class="audio-credit-cluster" role="list" aria-label="Soundtrack scene credits">
+                        <div class="audio-credit-row" role="listitem">
+                          <span class="audio-credit-scene">Join</span>
+                          <div class="audio-credit-main">
+                            <code>DeepUrbanHouse - Join.mp3</code>
+                            <small>Very quiet base level • by Lily J</small>
+                          </div>
+                        </div>
+                        <div class="audio-credit-row" role="listitem">
+                          <span class="audio-credit-scene">Lobby</span>
+                          <div class="audio-credit-main">
+                            <code>HipHop - Lobby.mp3</code>
+                            <small>Normal base level • by Eugenio Mininni</small>
+                          </div>
+                        </div>
+                        <div class="audio-credit-row" role="listitem">
+                          <span class="audio-credit-scene">Entry</span>
+                          <div class="audio-credit-main">
+                            <code>Can't Get You Off My Mind - Entry.mp3</code>
+                            <small>Quiet base level • by Michael Ramir C.</small>
+                          </div>
+                        </div>
+                        <div class="audio-credit-row" role="listitem">
+                          <span class="audio-credit-scene">Voting</span>
+                          <div class="audio-credit-main">
+                            <code>Can't Get You Off My Mind - Entry.mp3</code>
+                            <small>Quiet/slightly louder + faster (1.5-2x) • by Michael Ramir C.</small>
+                          </div>
+                        </div>
+                        <div class="audio-credit-row" role="listitem">
+                          <span class="audio-credit-scene">Ceremony</span>
+                          <div class="audio-credit-main">
+                            <code>Complicated - Ceremony.mp3</code>
+                            <small>Normal w/ crescendo + decrescendo handoff • by Arulo</small>
+                          </div>
+                        </div>
+                        <div class="audio-credit-row" role="listitem">
+                          <span class="audio-credit-scene">Round 4 BG</span>
+                          <div class="audio-credit-main">
+                            <code>GamesWorldbeat - Round4BG.mp3</code>
+                            <small>Quiet base level • by Bernardo R.</small>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="audio-credit-links">
+                        <a href="https://mixkit.co/free-stock-music/" target="_blank" rel="noopener noreferrer">Mixkit Free Stock Music</a>
+                        <a href="https://mixkit.co/license/" target="_blank" rel="noopener noreferrer">Mixkit License</a>
+                      </div>
+                    </section>
+                    <section class="project-credits-card">
+                      <h4><span aria-hidden="true">&#x2696;</span> Licensing / Rights</h4>
+                      <p>Character names/images shown during gameplay may come from external sources and remain property of their respective owners. Add explicit asset attribution + project LICENSE files before commercial release.</p>
+                    </section>
+                  </div>
+                  <div class="project-credits-foot">
+                    <span><span aria-hidden="true">&#x1F517;</span> Portfolio repo README references an MIT license for the portfolio project.</span>
+                    <span><span aria-hidden="true">&#x1F6E0;</span> Open-source dependency credits should remain documented in package manifests / repo docs.</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+      </section>
+    </section>
+  </div>
+
+<!-- Chat Tab -->
       <div id="chatTab" class="tab-content chat-tab-modern">
         <div class="chat-thread-modern" aria-label="Room chat thread">
           <div class="chat-thread-header">Messages</div>
@@ -645,7 +913,7 @@
     </div>
 
     <!-- Bottom Action Bar (Sticky) -->
-    <div class="lobby-actions-sticky">
+    <div class="lobby-actions-sticky" id="lobbyActionsBar" style="display: none;">
       <button id="readyBtn" class="btn btn-ready" onclick="toggleReady()" aria-label="Toggle ready status">
         <span class="ready-indicator">○</span> NOT READY
       </button>
@@ -654,7 +922,7 @@
         START
       </button>
       <button class="btn btn-danger btn-leave" onclick="leaveRoom()" aria-label="Leave room">
-        <svg class="icon-btn" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v2a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0v2z"/><path fill-rule="evenodd" d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3z"/></svg>
+        <svg class="icon-btn" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0v2z"/><path fill-rule="evenodd" d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3z"/></svg>
         LEAVE
       </button>
     </div>
@@ -901,7 +1169,7 @@
               <span id="evalVisualBlendPct">0%</span>
             </div>
             <div id="evalVisualGraph" class="eval-visual-graph" aria-hidden="true">
-              <span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span>
+              <span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span><span class="eval-visual-bar"></span>
             </div>
             <div class="eval-progress-stack">
               <div class="eval-progress-label-row">
@@ -1058,6 +1326,7 @@
   <script src="js/round4EvalSharedAudio.js?v=20260226-cleanup1"></script>
   <script src="js/round4EvalRevealCinematics.js?v=20260226-cleanup1"></script>
   <script src="js/round4Eval.js?v=20260226-voice-router1"></script>
+  <script type="module" src="js/settings.js?v=20260227-settings-os1"></script>
   <script type="module" src="js/app.js?v=20260226-voice-router1"></script>
   <link rel="stylesheet" href="css/round4Eval.css?v=20260226-voice-ui1">
   <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260226-voice-ui1">

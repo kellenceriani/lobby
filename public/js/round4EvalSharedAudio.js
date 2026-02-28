@@ -21,10 +21,10 @@ function ensureSharedAudioReady() {
   } catch (error) {
     unlocked = false;
   }
-  // Aggressively prewarm browser fallback voices on iOS/mobile
+  // Prewarm iOS/browser fallback voice assignments through the shared audio bridge.
   try {
-    if (typeof window !== 'undefined' && window.AdaptiveTtsVoiceEngine && typeof window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback === 'function') {
-      window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback({ primeUtterance: true, timeoutMs: 1500 });
+    if (bridge && typeof bridge.prepareVoiceFallback === 'function') {
+      Promise.resolve(bridge.prepareVoiceFallback({ primeUtterance: true, timeoutMs: 1500 })).catch(() => {});
     }
   } catch (error) {
     if (window && window.console && window.console.warn) {

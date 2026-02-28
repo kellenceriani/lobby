@@ -302,10 +302,11 @@ function ensureRevealAudioReady() {
   if (context && context.state === 'suspended') {
     context.resume().catch(() => null);
   }
-  // Prewarm browser fallback voices for iOS/mobile
+  // Prewarm browser fallback voices for iOS/mobile via the shared audio bridge.
   try {
-    if (typeof window !== 'undefined' && window.AdaptiveTtsVoiceEngine && typeof window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback === 'function') {
-      window.AdaptiveTtsVoiceEngine.prototype.prepareBrowserFallback({ primeUtterance: true, timeoutMs: 1500 });
+    const bridge = getSharedAudioBridge();
+    if (bridge && typeof bridge.prepareVoiceFallback === 'function') {
+      Promise.resolve(bridge.prepareVoiceFallback({ primeUtterance: true, timeoutMs: 1500 })).catch(() => {});
     }
   } catch (error) {
     if (window && window.console && window.console.warn) {

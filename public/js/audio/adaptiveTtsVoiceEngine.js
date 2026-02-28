@@ -8,6 +8,7 @@ function detectDeviceType() {
 }
 
 import { clamp, hashString, normalizeCollapsedText as normalizeText, nowMs } from './coreUtils.js';
+import { pickBestIosVoiceForCuratedId } from './iosVoiceMap.js';
 
 const DEFAULT_API_CATALOG_URL = '/api/tts/catalog';
 const DEFAULT_API_SYNTH_URL = '/api/tts/synthesize';
@@ -280,13 +281,13 @@ export class AdaptiveTtsVoiceEngine {
       const lang = String(voice && voice.lang || '').toLowerCase();
       return lang.startsWith('en');
     });
-    // Filter for neural/natural/enhanced, never use 'default', 'siri', 'robot', or 'compact'
+    // Filter for neural/natural/enhanced, never use low-quality fallback engines.
     const qualityPool = englishPool.filter((voice) => {
       const name = String(voice && voice.name || '').toLowerCase();
       const uri = String(voice && voice.voiceURI || '').toLowerCase();
       return (
         /(neural|natural|enhanced|premium)/.test(name + uri)
-        && !/(default|siri|robot|compact|espeak|festival)/.test(name + uri)
+        && !/(default|robot|compact|espeak|festival)/.test(name + uri)
       );
     });
     const pool = qualityPool.length ? qualityPool : englishPool;
@@ -302,25 +303,33 @@ export class AdaptiveTtsVoiceEngine {
 
     const nextAssignments = new Map();
     const usedVoiceSigs = new Set();
+    const preferIosCuratedVoices = this.deviceType === 'ios';
     voiceIds.forEach((voiceId) => {
       const hints = BROWSER_FALLBACK_HINTS[voiceId] || BROWSER_FALLBACK_HINTS.af_heart || { hints: [] };
+      let picked = null;
+      if (preferIosCuratedVoices) {
+        picked = pickBestIosVoiceForCuratedId(pool, voiceId, {
+          excludeStableIds: usedVoiceSigs
+        });
+      }
       // Sort by score, then by name for determinism
       const ranked = rankSpeechSynthesisVoices(pool, hints.hints).sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
         return String(a.voice.name).localeCompare(String(b.voice.name));
       });
-      let picked = null;
-      for (let i = 0; i < ranked.length; i += 1) {
-        const candidate = ranked[i] && ranked[i].voice;
-        const sig = getSpeechVoiceStableId(candidate);
-        if (!candidate) continue;
-        // Never use a voice that is 'default', 'siri', 'robot', or 'compact'
-        const name = String(candidate && candidate.name || '').toLowerCase();
-        if (/(default|siri|robot|compact|espeak|festival)/.test(name)) continue;
-        if (!sig || !usedVoiceSigs.has(sig)) {
-          picked = candidate;
-          if (sig) usedVoiceSigs.add(sig);
-          break;
+      if (!picked) {
+        for (let i = 0; i < ranked.length; i += 1) {
+          const candidate = ranked[i] && ranked[i].voice;
+          const sig = getSpeechVoiceStableId(candidate);
+          if (!candidate) continue;
+          // Never use a voice that is default/robotic/compact fallback quality.
+          const name = String(candidate && candidate.name || '').toLowerCase();
+          if (/(default|robot|compact|espeak|festival)/.test(name)) continue;
+          if (!sig || !usedVoiceSigs.has(sig)) {
+            picked = candidate;
+            if (sig) usedVoiceSigs.add(sig);
+            break;
+          }
         }
       }
       if (!picked) {
@@ -436,35 +445,34 @@ export class AdaptiveTtsVoiceEngine {
 
       // Aggressively prime on iOS/mobile (user gesture required)
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const shouldPrime = primeUtterance === true || isIOS;
+      const recentlyPrimed = this.browserFallbackPrimed && (nowMs() - Number(this.browserFallbackPrimeAt || 0)) < 12000;
+      const synthBusy = Boolean(window.speechSynthesis.speaking || window.speechSynthesis.pending);
+      const shouldPrime = (primeUtterance === true || (isIOS && !recentlyPrimed)) && !synthBusy;
       if (shouldPrime) {
         try {
           await new Promise((resolve) => {
             let settled = false;
+            let settleTimer = null;
             const finish = () => {
               if (settled) return;
               settled = true;
+              if (settleTimer) {
+                window.clearTimeout(settleTimer);
+                settleTimer = null;
+              }
               resolve();
             };
             const utter = new SpeechSynthesisUtterance('.');
             utter.volume = 0;
             utter.rate = 1;
             utter.pitch = 1;
-            utter.onstart = () => {
-              window.setTimeout(() => {
-                try { window.speechSynthesis.cancel(); } catch (_error) {}
-                finish();
-              }, 20);
-            };
+            utter.onstart = () => window.setTimeout(finish, 30);
             utter.onend = finish;
             utter.onerror = finish;
             try { window.speechSynthesis.resume(); } catch (_error) {}
             try {
               window.speechSynthesis.speak(utter);
-              window.setTimeout(() => {
-                try { window.speechSynthesis.cancel(); } catch (_error) {}
-                finish();
-              }, 90);
+              settleTimer = window.setTimeout(finish, 220);
             } catch (_error) {
               finish();
             }
@@ -828,6 +836,9 @@ export class AdaptiveTtsVoiceEngine {
       voices = Array.isArray(window.speechSynthesis.getVoices()) ? window.speechSynthesis.getVoices() : [];
     } catch (_error) {}
     const picked = this._resolveAssignedBrowserFallbackVoice(voices, voiceId)
+      || (this.deviceType === 'ios'
+        ? pickBestIosVoiceForCuratedId(voices, voiceId)
+        : null)
       || pickBestSpeechSynthesisVoice(voices, hints.hints);
     if (picked) {
       try { utterance.voice = picked; } catch (_error) {}
@@ -906,13 +917,10 @@ export class AdaptiveTtsVoiceEngine {
     onStart = null,
     onEnd = null
   } = {}) {
-    // iOS: Always aggressively prewarm and unlock voices
-    this._warmBrowserFallbackVoices({ primeUtterance: true, timeoutMs: 1500, voiceIds: [voiceId] }).catch(() => {});
-
     const spokenText = normalizeText(text);
     if (!spokenText) return { handled: false, reason: 'empty_text' };
 
-    const safeSpeed = clamp(speed, 0.8, 1.4, 1); // iOS voices are sensitive to speed
+    const safeSpeed = clamp(speed, 0.82, 1.35, 1);
     const safePitch = clamp(pitch, 0.8, 1.2, 1);
     const safeVolume = clamp(volume, 0, 1, 1);
     let cancelled = false;
@@ -952,63 +960,31 @@ export class AdaptiveTtsVoiceEngine {
 
     (async () => {
       try {
-        // iOS: Always use browser fallback, never block on server
-        await this._warmBrowserFallbackVoices({ primeUtterance: true, timeoutMs: 1200, voiceIds: [voiceId] }).catch(() => {});
-        let voices = [];
-        try {
-          voices = Array.isArray(window.speechSynthesis.getVoices()) ? window.speechSynthesis.getVoices() : [];
-        } catch (_error) {}
-        // Try to resolve a good voice, but fallback to any English voice if needed
-        let picked = this._resolveAssignedBrowserFallbackVoice(voices, voiceId);
-        if (!picked) {
-          // Fallback: pick any English voice
-          picked = voices.find(v => String(v.lang || '').toLowerCase().startsWith('en')) || voices[0] || null;
-        }
-        if (!picked) {
-          // Visual warning for missing voice
-          if (typeof window !== 'undefined') {
-            const msg = `[TTS] No usable iOS browser voice for '${voiceId}'. Skipping.`;
-            if (window.console && window.console.warn) window.console.warn(msg);
-            if (typeof window.showTtsWarningToast === 'function') {
-              window.showTtsWarningToast(msg);
-            }
-          }
-          safeEnd('error');
-          return;
-        }
-        let utterance;
-        try {
-          utterance = new SpeechSynthesisUtterance(spokenText);
-        } catch (_error) {
-          safeEnd('error');
-          return;
-        }
-        try { utterance.voice = picked; } catch (_error) {}
-        try { if (picked.lang) utterance.lang = picked.lang; } catch (_error) {}
-        try { utterance.rate = safeSpeed; } catch (_error) {}
-        try { utterance.pitch = safePitch; } catch (_error) {}
-        try { utterance.volume = safeVolume; } catch (_error) {}
+        // iOS: Always use browser fallback speech; server synthesis stays optional background prep.
+        const needsPrime = !this.browserFallbackPrimed || (nowMs() - Number(this.browserFallbackPrimeAt || 0)) > 10000;
+        await this._warmBrowserFallbackVoices({
+          primeUtterance: needsPrime,
+          timeoutMs: 1200,
+          voiceIds: [voiceId]
+        }).catch(() => {});
+        if (cancelled || !this.activeJob || this.activeJob.id !== jobId) return;
 
-        utterance.onstart = () => {
-          if (cancelled) return;
-          safeStart();
-        };
-        utterance.onend = () => {
-          if (cancelled) return;
-          safeEnd('end');
-        };
-        utterance.onerror = () => {
-          if (cancelled) return;
-          safeEnd('error');
-        };
-        this.activeSpeechUtterance = utterance;
-        try {
-          try { window.speechSynthesis.resume(); } catch (_error) {}
-          window.speechSynthesis.speak(utterance);
-        } catch (_error) {
-          this.activeSpeechUtterance = null;
-          safeEnd('error');
-        }
+        const didStart = this._speakViaBrowserFallback({
+          text: spokenText,
+          voiceId,
+          speed: safeSpeed,
+          pitch: safePitch,
+          volume: safeVolume,
+          onStart: () => {
+            if (cancelled) return;
+            safeStart();
+          },
+          onEnd: (status) => {
+            if (cancelled) return;
+            safeEnd(status || 'end');
+          }
+        });
+        if (!didStart) safeEnd('error');
       } catch (error) {
         this.error = String(error && (error.message || error) || 'iOS TTS playback failed');
         this._notifyStateChange();

@@ -8,6 +8,9 @@ Last updated: February 28, 2026
   - settings propagation
   - round transitions
   - final sync and replay paths
+- Keep iOS/desktop audio parity guardrails in place:
+  - deterministic curated iOS voice mapping for narrator/archetype runtime IDs
+  - interruption-safe unlock/warmup behavior (no click-driven speech/music cutouts)
 - Add contract-level payload validation for critical socket events in dev mode.
 - Add deterministic seed mode for scenario/twist generation replay.
 - Add telemetry regression tests for diagnostics classifiers (validation flags, title-diff risk classes, quality gates).

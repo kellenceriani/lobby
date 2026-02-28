@@ -55,6 +55,18 @@ Blocking startup tasks (before join unlock) include:
 
 Deferred tasks continue in background after join unlock.
 
+## Voice + Audio Runtime Guarantees
+
+- Voice playback never blocks server/game phase progression.
+- Clients may mute/disable voice at any time; reveal and results sequencing continues with timeout guards.
+- Round 4 loading waits for narration only within bounded local windows and immediately exits if voice is unavailable.
+- iOS/browser-fallback voice routing is deterministic:
+  - Curated cast IDs (`af_heart`, `af_bella`, `am_michael`, `bm_george`) map to best available local iOS voices.
+  - Mapping is stable per voice catalog snapshot and avoids low-quality compact/robotic engines.
+- Unlock/prime routines are idempotent after first success:
+  - No repeated per-click voice priming that can cancel active speech.
+  - No repeated managed-media warmups that can duck active lobby music during routine UI interactions.
+
 ## Deterministic Evaluation Architecture
 
 Live evaluation follows a deterministic context-engine shape (no live LLM runtime in scoring paths):

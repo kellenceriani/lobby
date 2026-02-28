@@ -20,51 +20,135 @@
       { "text": "SAVE A NEON ARCADE DISTRICT", "category": "action" },
       { "text": "ESCORT A PIXEL PRINCESS THROUGH A GLITCH STORM", "category": "adventure" },
       { "text": "DEFEND A CITY FROM AN 8-BIT KAIJU", "category": "action" },
-      { "text": "WIN A LASER-TAG CHAMPIONSHIP ON A SPACE MALL", "category": "sports" },
-      { "text": "REBOOT A COLLAPSING VIRTUAL KINGDOM", "category": "building" },
-      { "text": "STOP A BOSS RUSH INSIDE A GAME CARTRIDGE", "category": "mystery" },
+      { "text": "WIN A LASER-TAG CHAMPIONSHIP ON A SPACE MALL", "category": "action" },
+      { "text": "REBOOT A COLLAPSING VIRTUAL KINGDOM", "category": "absurd" },
+      { "text": "STOP A BOSS RUSH INSIDE A GAME CARTRIDGE", "category": "absurd" },
       { "text": "PERFORM A COMEBACK SHOW IN A POWER-OUTAGE ARCADE", "category": "performance" },
       { "text": "SURVIVE A HIGH-SCORE HUNT ACROSS A GLITCH CITY", "category": "adventure" },
-      { "text": "NEGOTIATE PEACE BETWEEN RIVAL SPEEDRUN CLANS", "category": "social" },
+      { "text": "NEGOTIATE PEACE BETWEEN RIVAL SPEEDRUN CLANS", "category": "absurd" },
       { "text": "RESCUE CIVILIANS FROM A PINBALL FACTORY MELTDOWN", "category": "action" },
-      { "text": "STEAL BACK THE MASTER KEY TO THE NEON GRID", "category": "mystery" },
-      { "text": "RUN AN EMERGENCY PATCH FOR A SENTIENT ARCADE", "category": "building" }
+      { "text": "STEAL BACK THE MASTER KEY TO THE NEON GRID", "category": "adventure" },
+      { "text": "RUN AN EMERGENCY PATCH FOR A SENTIENT ARCADE", "category": "absurd" },
+      { "text": "SHUT DOWN A ROGUE MECHA PARADE ON MAIN STREET", "category": "action" },
+      { "text": "HOLD THE LINE AT A POWER CORE IN BONUS ROUND", "category": "action" },
+      { "text": "ESCAPE A BOSS TRAIN CHARGING THROUGH SKY RAILS", "category": "action" },
+      { "text": "BREAK A SIEGE OF DRONE MINIONS AT JOYSTICK PLAZA", "category": "action" },
+      { "text": "CAPTURE A WILD GLITCH TITAN BEFORE IT SPLITS", "category": "action" },
+      { "text": "DEFUSE A PLASMA REACTOR INSIDE THE TOKEN VAULT", "category": "action" },
+      { "text": "CLEAR A METRO TUNNEL FILLED WITH LASER TRAPS", "category": "action" },
+      { "text": "FIGHT THROUGH A TRIPLE BOSS ENCOUNTER IN ZERO GRAVITY", "category": "action" },
+      { "text": "MAP A LOST LEVEL HIDDEN BENEATH THE ARCADE", "category": "adventure" },
+      { "text": "CROSS A SKY BRIDGE OF DISAPPEARING TILES", "category": "adventure" },
+      { "text": "CHASE A TIME THIEF THROUGH THREE ERA-LOCKED WORLDS", "category": "adventure" },
+      { "text": "NAVIGATE A MAZE THAT REWRITES ITS EXIT EACH TURN", "category": "adventure" },
+      { "text": "HUNT A LEGENDARY CARTRIDGE IN A SUNKEN MALL", "category": "adventure" },
+      { "text": "DELIVER A CURE PATCH TO THE FAR SIDE OF CYBER BAY", "category": "adventure" },
+      { "text": "RACE A RIVAL CREW TO THE LAST SAVE POINT", "category": "adventure" },
+      { "text": "SCOUT A FORBIDDEN SERVER TEMPLE FULL OF FAKE DOORS", "category": "adventure" },
+      { "text": "GUIDE A REFUGEE CARAVAN THROUGH AN AVATAR DESERT", "category": "adventure" },
+      { "text": "OUTSMART A VENDING MACHINE THAT BECAME MAYOR", "category": "absurd" },
+      { "text": "HERD SENTIENT POWER-UPS INTO A SAFE CONTAINMENT ZONE", "category": "absurd" },
+      { "text": "FIX A DANCE BATTLE COURT JUDGED BY AI CLOWNS", "category": "absurd" },
+      { "text": "PREVENT A GLITCH WEDDING BETWEEN TWO FINAL BOSSES", "category": "absurd" },
+      { "text": "CATCH A CHORUS OF NPCS SINGING SECRET PASSWORDS", "category": "absurd" },
+      { "text": "CALM A PANIC WHEN THE MOON TURNS INTO A HEALTH BAR", "category": "absurd" },
+      { "text": "BARGAIN WITH A TALKING CHECKPOINT THAT DEMANDS TRIBUTE", "category": "absurd" },
+      { "text": "STOP A MEME PLAGUE FROM OVERRIDING PLAYER NAMES", "category": "absurd" },
+      { "text": "BROADCAST A VICTORY SPEECH DURING A SIGNAL JAM", "category": "performance" },
+      { "text": "HOST A LIVE COMMENTARY WHILE FIGHTING MINIBOSSES", "category": "performance" },
+      { "text": "LEAD A HALFTIME HYPE SET FOR A CITYWIDE RAID", "category": "performance" },
+      { "text": "CALL A CLUTCH STRATEGY ON A GLITCHED ESPORTS STAGE", "category": "performance" },
+      { "text": "DELIVER PATCH NOTES TO A BOOING CROWD OF AVATARS", "category": "performance" },
+      { "text": "EMCEE A PEACE SUMMIT BETWEEN RIVAL GUILD LEADERS", "category": "performance" },
+      { "text": "RUN A TRAINING CAMP STREAM FOR NEW HERO RECRUITS", "category": "performance" },
+      { "text": "SELL A LAST-STAND PLAN TO A FRACTURED RESISTANCE", "category": "performance" },
+      { "text": "PERFORM A DISTRACTION ROUTINE IN FRONT OF BOSS CAMERAS", "category": "performance" },
+      { "text": "ANNOUNCE EVAC ROUTES TO PANICKED ARCADE CITIZENS", "category": "performance" },
+      { "text": "CLOSE THE FINAL ROUND WITH A ZERO-LAG RALLY SPEECH", "category": "performance" }
     ],
     "twistAdds": {
       "easy": [
         "WITH ONLY THREE BUTTONS",
         "UNDER STROBE LIGHTS",
-        "WHILE THE CROWD SHOUTS WRONG DIRECTIONS"
+        "WHILE THE CROWD SHOUTS WRONG DIRECTIONS",
+        "WITH LOW HEALTH REGEN",
+        "WHILE YOUR MINI-MAP FLICKERS",
+        "WITH ONE TEAMMATE ON TUTORIAL CONTROLS",
+        "WHILE BONUS ITEMS DROP IN RANDOM PLACES",
+        "WITH AUDIO CUES MUTED",
+        "WHILE NPCS BLOCK SHORTCUTS",
+        "WITH A TIMER THAT PAUSES ON PERFECT MOVES",
+        "WHILE YOUR LOADOUT SHUFFLES EVERY CHECKPOINT",
+        "WITH FRIENDLY DRONES OFFERING HINTS"
       ],
       "normal": [
         "WITH INPUT LAG SPIKES",
         "WHILE THE MAP SCROLLS SIDEWAYS",
         "UNDER A LIVE SPEEDRUN TIMER",
-        "AND CHECKPOINTS KEEP MOVING"
+        "AND CHECKPOINTS KEEP MOVING",
+        "WHILE BOSS PHASES ROTATE OUT OF ORDER",
+        "WITH ENERGY CELLS SPAWNING HALF AS OFTEN",
+        "WHILE ENEMY WAVES SCALE TO YOUR LAST WIN",
+        "WITH A RIVAL TEAM BROADCASTING TAUNTS",
+        "WHILE OBJECTIVES RANDOMIZE EACH ROUND",
+        "WITH PORTALS OPENING IN THE WRONG SECTOR",
+        "WHILE WEATHER EFFECTS DISABLE LONG-RANGE TOOLS",
+        "WITH A CROWD VOTE ALTERING THE NEXT MECHANIC"
       ],
       "hard": [
         "WHILE GLITCH COPIES SPAWN EACH PHASE",
         "UNDER PERMADEATH RULES",
-        "WITH BOSSES ADAPTING TO EVERY WIN"
+        "WITH BOSSES ADAPTING TO EVERY WIN",
+        "WHILE YOUR HUD HIDES CRITICAL STATUS",
+        "WITH RESPAWNS LOCKED UNTIL PHASE CLEAR",
+        "WHILE ALL SAFE ZONES ROTATE CONSTANTLY",
+        "WITH A DOUBLE BOSS TIMER YOU CANNOT PAUSE",
+        "WHILE POWER CORES OVERHEAT AFTER EACH ABILITY",
+        "WITH FRIEND-OR-FOE MARKERS DISABLED",
+        "WHILE THE FINAL DOOR REQUIRES PERFECT COMBOS",
+        "WITH NO INVENTORY BETWEEN STAGES",
+        "WHILE A SHADOW TEAM MIRRORS YOUR EXACT MOVES"
       ]
     },
     "final": {
       "scenarioPool": [
         "SECURE A CITYWIDE ARCADE POWER GRID BEFORE SHUTDOWN",
         "REBUILD A FRACTURED NEON RESISTANCE ACROSS A GLITCH METRO",
-        "COORDINATE A LAST-STAGE EVACUATION THROUGH A PIXEL WARZONE"
+        "COORDINATE A LAST-STAGE EVACUATION THROUGH A PIXEL WARZONE",
+        "LIBERATE THE CENTRAL SERVER SPIRE FROM A BOSS COALITION",
+        "RESTORE TIME FLOW AFTER THE FINAL LEVEL LOOP BREAKS",
+        "DEFEND THE LAST SAFE HUB UNTIL DAYBREAK PATCH DEPLOYS",
+        "LEAD A MULTI-DISTRICT COUNTERSTRIKE AGAINST THE OVERCLOCK KING",
+        "SHUT DOWN A PLANET-SIZED ARCADE CORE BEFORE MELTDOWN",
+        "UNITE RIVAL GUILDS FOR A SINGLE WORLD-BOSS RAID",
+        "RECOVER THE MASTER SAVE FILE FROM A VOID SECTOR",
+        "RESTART CIVILIAN LIFE WHILE HOLDING OFF NIGHTLY RAID WAVES",
+        "BREAK A CITYWIDE CURSE LOCKING EVERYONE IN HARD MODE"
       ],
       "twistPool": {
         "easy": [
-          "WITH BONUS LIVES SHARED ACROSS THE TEAM"
+          "WITH BONUS LIVES SHARED ACROSS THE TEAM",
+          "WHILE SAFE ROOMS STAY OPEN LONGER",
+          "WITH FREE REVIVES ON THE FIRST WIPE",
+          "WHILE SUPPORT NPCS HANDLE MINOR DEFENSES",
+          "WITH EXTRA ENERGY PICKUPS EACH PHASE",
+          "WHILE THE CROWD BUFFS MORALE AFTER EVERY OBJECTIVE"
         ],
         "normal": [
           "WHILE CHECKPOINTS RESET EVERY 90 SECONDS",
-          "WITH ONLY ONE WORKING HUD"
+          "WITH ONLY ONE WORKING HUD",
+          "WHILE OBJECTIVE MARKERS SWAP WITHOUT WARNING",
+          "WITH YOUR FAST TRAVEL NETWORK PARTIALLY DISABLED",
+          "WHILE AMMO PRINTERS REQUIRE MANUAL OVERRIDE",
+          "WITH A LIVE AUDIENCE VOTING ON MODIFIERS"
         ],
         "hard": [
           "UNDER A HARDCORE NO-RESPAWN FINAL",
-          "WHILE THE BOSS COPIES YOUR LAST STRATEGY"
+          "WHILE THE BOSS COPIES YOUR LAST STRATEGY",
+          "WITH THE MAP COLLAPSING FROM THE EDGES",
+          "WHILE TEAM COMMS CUT OUT EVERY OTHER PHASE",
+          "WITH FINAL-BLOW WINDOWS LASTING ONLY SECONDS",
+          "WHILE THE LAST BOSS GAINS NEW FORMS ON EACH KO"
         ]
       }
     }

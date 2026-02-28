@@ -690,6 +690,8 @@ const audioState = {
   speechVoicesLoaded: false,
   speechVoicesLoading: false,
   htmlUnlockElement: null,
+  mobileTouchHintShown: false,
+  mobileTouchHintTimer: null,
   lastManagedMediaPlayErrorSig: '',
   lastManagedMediaPlayErrorAt: 0,
   hasPlayedLobbyEntry: false,
@@ -1936,7 +1938,7 @@ function trySpeakVoiceCueWithKokoro({ cue, plan, volume, start, end } = {}) {
   }
   if (audioState.voiceEnabled === false) return finishNoop('cancelled');
   if (audioState.muted) return finishNoop('muted');
-  if (!audioState.unlocked || !audioState.voiceUnlocked) return finishNoop('cancelled');
+  if (!audioState.voiceUnlocked) return finishNoop('cancelled');
   if (!audioState.htmlMediaUnlocked) {
     tryUnlockHtmlMediaStack();
   }
@@ -1961,7 +1963,10 @@ function trySpeakVoiceCueWithKokoro({ cue, plan, volume, start, end } = {}) {
   const hasCachedClip = typeof engine.hasCachedClip === 'function'
     ? engine.hasCachedClip({ text, voiceId, speed, pitch })
     : false;
-  if (!allowLiveGenerate && !hasCachedClip) {
+  const browserFallbackOnly = typeof engine.isBrowserFallbackOnly === 'function'
+    ? engine.isBrowserFallbackOnly()
+    : false;
+  if (!allowLiveGenerate && !hasCachedClip && !browserFallbackOnly) {
     scheduleKokoroVoiceCuePrefetch([cue], { source: 'playback-cache-miss', delayMs: 0 });
     if (!audioState.kokoroReady && !audioState.kokoroLoading) {
       void ensureKokoroStartupWarmup({ source: 'cue-prefetch' });
@@ -3039,6 +3044,9 @@ function syncAudioControlUI() {
   }
 
   syncVoiceStudioUi();
+  if (!audioState.unlocked && !audioState.mobileTouchHintShown) {
+    scheduleMobileTouchAudioHint({ delayMs: 1200 });
+  }
 }
 
 function applyAudioLevels() {
@@ -4866,6 +4874,8 @@ function tryUnlockHtmlMediaStack() {
 function warmupManagedMediaElementForIos(el) {
   if (!el) return;
   try {
+    const isActivelyPlaying = Boolean(!el.paused && !el.ended && Number(el.currentTime) > 0);
+    if (isActivelyPlaying) return;
     const warmupToken = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     el.__iosWarmupToken = warmupToken;
     const originalSrc = el.src || '';
@@ -4968,9 +4978,20 @@ function maybeCleanupAudioUnlockHandlers() {
 }
 
 function unlockAudioFromGesture(event = null) {
+  const needsVoiceUnlock = audioState.voiceUnlocked !== true;
+  const needsWebAudioUnlock = audioState.unlocked !== true;
+  const needsHtmlMediaUnlock = audioState.htmlMediaUnlocked !== true;
+  const fullyUnlocked = !needsVoiceUnlock && !needsWebAudioUnlock && !needsHtmlMediaUnlock;
+
+  if (fullyUnlocked) {
+    maybeCleanupAudioUnlockHandlers();
+    return;
+  }
+
   if (
     audioState.kokoroEnabled === true
     && audioState.voiceEnabled !== false
+    && (needsVoiceUnlock || audioState.kokoroCastWarmupDone !== true)
     && (Date.now() - Number(kokoroGesturePrimeAt || 0)) > 1200
   ) {
     kokoroGesturePrimeAt = Date.now();
@@ -4979,12 +5000,14 @@ function unlockAudioFromGesture(event = null) {
       if (engine && typeof engine.prepareBrowserFallback === 'function') {
         void engine.prepareBrowserFallback({
           voiceIds: KOKORO_CURATED_VOICE_IDS,
-          primeUtterance: true,
+          primeUtterance: needsVoiceUnlock,
           timeoutMs: 900
         }).catch(() => {});
       }
     } catch (_error) {}
-    void ensureKokoroFullCastWarmup({ source: 'gesture-unlock' }).catch(() => {});
+    if (audioState.kokoroCastWarmupDone !== true) {
+      void ensureKokoroFullCastWarmup({ source: 'gesture-unlock' }).catch(() => {});
+    }
   }
 
   const ctx = getAudioContext();
@@ -4997,24 +5020,41 @@ function unlockAudioFromGesture(event = null) {
   } catch (voiceError) {
   }
   if (!ctx) {
+    if (needsHtmlMediaUnlock) {
+      tryUnlockHtmlMediaStack();
+    }
     syncAudioControlUI();
     return;
   }
 
   initializeAudioGraph();
-  tryUnlockHtmlMediaStack();
-  // iOS often requires warming each actual HTMLAudio element in the same gesture.
-  primeManagedHtmlAudioElementsForUnlock({ markPrimed: false });
+  if (needsHtmlMediaUnlock) {
+    tryUnlockHtmlMediaStack();
+    if (!audioState.managedHtmlMediaPrimed) {
+      // iOS often needs one non-playing touch warmup pass for managed audio elements.
+      primeManagedHtmlAudioElementsForUnlock({ markPrimed: true });
+    }
+  }
   const onUnlock = () => {
+    const wasUnlocked = audioState.unlocked === true;
     audioState.unlocked = true;
+    audioState.mobileTouchHintShown = true;
+    if (audioState.mobileTouchHintTimer) {
+      window.clearTimeout(audioState.mobileTouchHintTimer);
+      audioState.mobileTouchHintTimer = null;
+    }
     try {
       const manager = getVoiceManager();
       if (manager) manager.unlock();
     } catch (voiceError) {
     }
     applyAudioLevels();
-    scheduleTone({ frequency: 220, duration: 20, type: 'sine', volume: 0.0002, bus: 'sfx' });
-    primeManagedHtmlAudioElementsForUnlock({ markPrimed: false });
+    if (!wasUnlocked) {
+      scheduleTone({ frequency: 220, duration: 20, type: 'sine', volume: 0.0002, bus: 'sfx' });
+    }
+    if (needsHtmlMediaUnlock && !audioState.managedHtmlMediaPrimed) {
+      primeManagedHtmlAudioElementsForUnlock({ markPrimed: true });
+    }
     syncMusicLoopState();
     maybeCleanupAudioUnlockHandlers();
   };
@@ -5047,6 +5087,23 @@ function installAudioUnlockHandlers() {
       document.removeEventListener(eventName, handler, options);
     });
   };
+}
+
+function scheduleMobileTouchAudioHint({ delayMs = 1500 } = {}) {
+  if (!isLikelyMobileDevice()) return;
+  if (audioState.mobileTouchHintShown) return;
+  if (audioState.unlocked || audioState.muted) return;
+  if (audioState.mobileTouchHintTimer) return;
+  const safeDelayMs = Math.max(200, Number(delayMs) || 1500);
+  audioState.mobileTouchHintTimer = window.setTimeout(() => {
+    audioState.mobileTouchHintTimer = null;
+    if (audioState.mobileTouchHintShown || audioState.unlocked || audioState.muted) return;
+    const currentScreen = document.querySelector('.screen.active');
+    const activeId = String(currentScreen && currentScreen.id || '').toLowerCase();
+    if (activeId && activeId !== 'join' && activeId !== 'lobby') return;
+    audioState.mobileTouchHintShown = true;
+    showToast('Tap once anywhere to start music and voice on mobile/iOS.', 'info', 3200);
+  }, safeDelayMs);
 }
 
 function playRound4RevealAccent(profile = null, stage = 'impact') {
@@ -6103,6 +6160,17 @@ function publishGlobalAudioBridge() {
     },
     getVoiceState() {
       return getVoiceManager().getState();
+    },
+    prepareVoiceFallback(options = {}) {
+      const engine = getKokoroVoiceEngine();
+      if (!engine || typeof engine.prepareBrowserFallback !== 'function') {
+        return Promise.resolve({ ok: false, reason: 'engine-missing' });
+      }
+      return engine.prepareBrowserFallback({
+        voiceIds: Array.isArray(options && options.voiceIds) ? options.voiceIds : KOKORO_CURATED_VOICE_IDS,
+        primeUtterance: options && options.primeUtterance === true,
+        timeoutMs: Math.max(200, Number(options && options.timeoutMs) || 1200)
+      });
     },
     openQuickPanel() {
       setAudioQuickPanelOpen(true);
@@ -9668,6 +9736,7 @@ window.addEventListener('beforeunload', () => {
 
 installAudioUnlockHandlers();
 setupAudioControls();
+scheduleMobileTouchAudioHint();
 void runStartupBootstrapPreflight();
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && audioState.unlocked) {

@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="css/settings.css?v=20260227-settings-os1">
   <link rel="stylesheet" href="css/game.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/results.css?v=20260223-livefix1">
+  <link rel="stylesheet" href="css/joinEvalFallingPlaques.css?v=20260223-livefix1">
 </head>
 <body>
 
@@ -261,10 +262,10 @@
       <header class="settings-os-header">
         <div class="settings-os-titlebar">
           <div class="settings-os-titlestack">
-            <h2 class="settings-os-title">Settings</h2>
+            <!-- <h2 class="settings-os-title">Settings</h2>
             <p class="settings-os-subtitle" id="settingsStatusLine" aria-live="polite">
               Configure game rules, modes, and system options.
-            </p>
+            </p> -->
           </div>
 
           <!-- Host badge (app.js will show/hide) -->
@@ -297,9 +298,8 @@
               <span class="summary-value" id="nowPackLabel">Default</span>
             </div>
           </div>
-
           <div class="settings-now-chips" aria-label="Active rule chips">
-            <span class="chip" id="chipPlotTwists">Plot Twists</span>
+            <span class="chip chip-strong" id="chipPlotTwists">Plot Twists</span>
             <span class="chip chip-muted" id="chipTeams">Teams</span>
             <span class="chip chip-muted" id="chipNoVoting">No Voting</span>
           </div>
@@ -500,7 +500,7 @@
 
         <section class="settings-carousel" aria-label="Mode cards preview">
           <div class="settings-carousel-track is-locked" aria-hidden="false">
-            <article class="mode-card is-locked" tabindex="0">
+            <article class="mode-card is-locked" tabindex="0" data-mode="coreRules" role="button">
               <div class="mode-card-head">
                 <div class="mode-card-icon" aria-hidden="true">⚙️</div>
                 <div class="mode-card-titlewrap">
@@ -514,7 +514,7 @@
               </div>
             </article>
 
-            <article class="mode-card is-locked" tabindex="0">
+            <article class="mode-card is-locked" tabindex="0" data-mode="comingSoon" role="button">
               <div class="mode-card-head">
                 <div class="mode-card-icon" aria-hidden="true">✨</div>
                 <div class="mode-card-titlewrap">
@@ -556,88 +556,97 @@
               </summary>
 
               <div class="mode-acc-content">
-                <div class="settings-grid">
-                  <div class="field">
-                    <label for="difficulty"><strong>🎚️ Difficulty</strong></label>
-                    <select id="difficulty" onchange="updateSetting('difficulty', this.value)" aria-label="Game difficulty">
-                      <option value="easy">Easy</option>
-                      <option value="normal" selected>Normal</option>
-                      <option value="hard">Hard</option>
-                    </select>
-                  </div>
+  <div class="settings-grid">
 
-                  <div class="field">
-                    <label for="scenarioTheme"><strong>🎭 Theme</strong></label>
-                    <select id="scenarioTheme" onchange="updateSetting('scenarioTheme', this.value)" aria-label="Scenario theme">
-                      <option value="all" selected>All (Random)</option>
-                      <option value="food">Food & Cooking</option>
-                      <option value="action">Action & Combat</option>
-                      <option value="adventure">Adventure</option>
-                      <option value="sports">Sports & Games</option>
-                      <option value="performance">Performance</option>
-                      <option value="absurd">Weird & Absurd</option>
-                    </select>
-                  </div>
+    <!-- Difficulty -->
+    <div class="field">
+      <label for="difficulty"><strong>🎚️ Difficulty</strong></label>
+      <select id="difficulty" onchange="updateSetting('difficulty', this.value)" aria-label="Game difficulty">
+        <option value="easy">🟢 Easy</option>
+        <option value="normal" selected>🟡 Normal</option>
+        <option value="hard">🔴 Hard</option>
+      </select>
+    </div>
 
-                  <div class="field field-wide">
-                    <label for="contentPack"><strong>📦 Content Pack</strong></label>
-                    <select id="contentPack" onchange="updateSetting('contentPackId', this.value); updateContentPackDescription(this.value)" aria-label="Content pack selection">
-                      <option value="default" selected>Core Pack (Default)</option>
-                    </select>
-                    <p id="contentPackDescription" class="field-help" aria-live="polite"></p>
-                  </div>
+    <!-- Theme -->
+    <div class="field">
+      <label for="scenarioTheme"><strong>🎭 Theme</strong></label>
+      <select id="scenarioTheme" onchange="updateSetting('scenarioTheme', this.value)" aria-label="Scenario theme">
+        <option value="all" selected>🎲 All (Random)</option>
+        <option value="food">🍳 Food & Cooking</option>
+        <option value="action">⚔️ Action & Combat</option>
+        <option value="adventure">🗺️ Adventure</option>
+        <option value="sports">🏆 Sports & Games</option>
+        <option value="performance">🎤 Performance</option>
+        <option value="absurd">🌀 Weird & Absurd</option>
+      </select>
+    </div>
 
-                  <div class="field field-wide">
-                    <label for="customScenario"><strong>Custom Scenario</strong></label>
-                    <input type="text" id="customScenario" placeholder="Enter custom scenario..." maxlength="60" onchange="updateSetting('customScenario', this.value.trim())" aria-label="Custom scenario" />
-                    <p class="field-help">Optional. If set, it becomes the scenario for the round.</p>
-                  </div>
-                </div>
-              </div>
-            </details>
+    <!-- Content Pack -->
+    <div class="field field-wide">
+      <label for="contentPack"><strong>📦 Content Pack</strong></label>
+      <select id="contentPack" onchange="updateSetting('contentPackId', this.value); updateContentPackDescription(this.value)" aria-label="Content pack selection">
+        <option value="default" selected>📘 Core Pack (Default)</option>
+      </select>
+      <p id="contentPackDescription" class="field-help" aria-live="polite"></p>
+    </div>
 
-            <details class="mode-acc">
-              <summary class="mode-acc-summary">
-                <span class="mode-acc-title">Advanced</span>
-                <span class="mode-acc-hint">More control, less clutter</span>
-              </summary>
+    <!-- Custom Scenario -->
+    <div class="field field-wide">
+      <label for="customScenario"><strong>✏️ Custom Scenario</strong></label>
+      <input type="text" id="customScenario" placeholder="Enter custom scenario..." maxlength="60" onchange="updateSetting('customScenario', this.value.trim())" aria-label="Custom scenario" />
+      <p class="field-help">📝 Optional — if set, this becomes the scenario for the round.</p>
+    </div>
 
-              <div class="mode-acc-content">
-                <div class="advanced-placeholder">
-                  <p>This section is intentionally structured to scale as you add advanced modes (Teams, No Voting, Category Priority, Scenario/Twist seeding, etc.).</p>
-                  <ul class="soon-list" role="list">
-                    <li><strong>Teams Mode</strong> (2v2 / 3v3)</li>
-                    <li><strong>No Voting</strong> (AI-only)</li>
-                    <li><strong>Category Feature</strong> (priority evaluation)</li>
-                    <li><strong>Scenario/Twist Entries</strong> (player-seeded)</li>
-                  </ul>
-                </div>
-              </div>
-            </details>
+  </div>
+</div>
+</details>
 
-            <details class="mode-acc">
-              <summary class="mode-acc-summary">
-                <span class="mode-acc-title">Party</span>
-                <span class="mode-acc-hint">Group decisions & voting</span>
-              </summary>
-              <div class="mode-acc-content">
-                <div class="advanced-placeholder">
-                  <p>Future: enable “Party Selection” so the lobby votes on modes/settings, with clean mobile UI.</p>
-                </div>
-              </div>
-            </details>
+<!-- Advanced -->
+<details class="mode-acc">
+  <summary class="mode-acc-summary">
+    <span class="mode-acc-title">🛠️ Advanced</span>
+    <span class="mode-acc-hint">More control, less clutter</span>
+  </summary>
 
-            <details class="mode-acc">
-              <summary class="mode-acc-summary">
-                <span class="mode-acc-title">Experimental</span>
-                <span class="mode-acc-hint">Dev/Test & Second Screen</span>
-              </summary>
-              <div class="mode-acc-content">
-                <div class="advanced-placeholder">
-                  <p>Future: Dev/Test mode with dummy data, and a Jackbox-style Second Screen pairing flow.</p>
-                </div>
-              </div>
-            </details>
+  <div class="mode-acc-content">
+    <div class="advanced-placeholder">
+      <p>⚙️ This section is intentionally structured to scale as you add advanced modes (Teams, No Voting, Category Priority, Scenario/Twist seeding, etc.).</p>
+      <ul class="soon-list" role="list">
+        <li><strong>👥 Teams Mode</strong> (2v2 / 3v3)</li>
+        <li><strong>🤖 No Voting</strong> (AI-only)</li>
+        <li><strong>⭐ Category Feature</strong> (priority evaluation)</li>
+        <li><strong>🧠 Scenario/Twist Entries</strong> (player-seeded)</li>
+      </ul>
+    </div>
+  </div>
+</details>
+
+<!-- Party -->
+<details class="mode-acc">
+  <summary class="mode-acc-summary">
+    <span class="mode-acc-title">🎉 Party</span>
+    <span class="mode-acc-hint">Group decisions & voting</span>
+  </summary>
+  <div class="mode-acc-content">
+    <div class="advanced-placeholder">
+      <p>🗳️ Future: enable “Party Selection” so the lobby votes on modes/settings, with clean mobile UI.</p>
+    </div>
+  </div>
+</details>
+
+<!-- Experimental -->
+<details class="mode-acc">
+  <summary class="mode-acc-summary">
+    <span class="mode-acc-title">🧪 Experimental</span>
+    <span class="mode-acc-hint">Dev/Test & Second Screen</span>
+  </summary>
+  <div class="mode-acc-content">
+    <div class="advanced-placeholder">
+      <p>🧑‍💻 Future: Dev/Test mode with dummy data, and a 📱 Jackbox-style Second Screen pairing flow.</p>
+    </div>
+  </div>
+</details>
           </div>
         </div>
       </div>
@@ -1326,6 +1335,7 @@
   <script src="js/round4EvalSharedAudio.js?v=20260226-cleanup1"></script>
   <script src="js/round4EvalRevealCinematics.js?v=20260226-cleanup1"></script>
   <script src="js/round4Eval.js?v=20260226-voice-router1"></script>
+  <script type="module" src="js/joinEvalFallingPlaques.js?v=20260226-cleanup1"></script>  
   <script type="module" src="js/settings.js?v=20260227-settings-os1"></script>
   <script type="module" src="js/app.js?v=20260226-voice-router1"></script>
   <link rel="stylesheet" href="css/round4Eval.css?v=20260226-voice-ui1">

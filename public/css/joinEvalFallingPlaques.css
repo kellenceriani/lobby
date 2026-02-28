@@ -1,0 +1,353 @@
+/* =========================================================
+   JOIN SCREEN – FALLING EVAL PLAQUES (ROUND 4 CLEAN GLASS v2)
+
+   Goals:
+   - Visually match the cleaner Round 4 evaluator-card language
+   - Be extremely resistant to global CSS overrides across the game
+
+   Strategy:
+   - New, fully-namespaced classes (jevfp-*)
+   - Hard reset using `all: unset` on the plaque root + controlled re-application
+   - Scoped ONLY inside #join to avoid impacting other screens
+   ========================================================= */
+
+/* Ensure join is a containing block (lobby.css already does this, but keep it local). */
+#join { position: relative; overflow: hidden; }
+#join .panel { position: relative; z-index: 3; }
+
+#join .jevfp-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+  isolation: isolate;
+}
+
+/* ---------------- Hard reset + sizing ---------------- */
+#join .jevfp-layer .jevfp-plaque {
+  /* Reset EVERYTHING so global typography/layout rules can't scramble it. */
+  all: unset;
+
+  /* Re-apply required basics. */
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  box-sizing: border-box;
+
+  width: clamp(276px, 82vw, 352px);
+  padding: 14px;
+  border-radius: 20px;
+  overflow: hidden;
+
+  /* Typography (match Round 4 vibe more than Comic Sans). */
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-size: 14px;
+  line-height: 1.15;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+
+  /* Visual shell (Round 4-ish glass). */
+  background:
+    radial-gradient(circle at 14% 14%, rgba(255,255,255,0.18), transparent 44%),
+    radial-gradient(circle at 92% 92%, rgba(var(--jevfp-tier-rgb), 0.26), transparent 60%),
+    linear-gradient(160deg, rgba(18, 24, 35, 0.92), rgba(10, 14, 22, 0.94));
+
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 22px 64px rgba(0,0,0,0.44),
+    inset 0 0 0 1px rgba(255,255,255,0.05),
+    inset 0 18px 52px rgba(255,255,255,0.06);
+
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  opacity: var(--jevfp-opacity, 0.80);
+
+  /* Animation. */
+  transform: translate3d(0, -190%, 0);
+  animation: jevfpFall var(--jevfp-fall-dur, 18s) linear infinite;
+  animation-delay: var(--jevfp-fall-delay, 0s);
+  will-change: transform;
+
+  /* Make internal painting self-contained (prevents weird blending side effects). */
+  contain: layout paint style;
+
+  /* Tier defaults (diamond). */
+  --jevfp-tier-rgb: 74, 163, 255;
+  --jevfp-tier-soft: 208, 231, 255;
+}
+
+#join .jevfp-layer .jevfp-plaque,
+#join .jevfp-layer .jevfp-plaque * {
+  box-sizing: border-box !important;
+}
+
+#join .jevfp-layer .jevfp-plaque * {
+  /* Ensure children aren't inheriting random game-wide font rules. */
+  font: inherit;
+  color: inherit;
+}
+
+/* Left tier stripe (very subtle, like Round 4 card edges). */
+#join .jevfp-layer .jevfp-plaque::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(var(--jevfp-tier-rgb), 0.90), rgba(var(--jevfp-tier-rgb), 0)) 0 0 / 10px 100% no-repeat,
+    linear-gradient(180deg, rgba(255,255,255,0.14), transparent 40%, rgba(0,0,0,0.24)) 0 0 / 100% 100% no-repeat;
+  opacity: 0.95;
+}
+
+/* Soft "sheen" sweep. */
+#join .jevfp-layer .jevfp-plaque::after {
+  content: "";
+  position: absolute;
+  inset: -60% -90%;
+  border-radius: 52px;
+  transform: rotate(16deg);
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.10) 24%,
+    rgba(var(--jevfp-tier-rgb), 0.14) 48%,
+    rgba(255,255,255,0.10) 64%,
+    transparent 82%
+  );
+  opacity: 0.40;
+  animation: jevfpSheen 4.8s ease-in-out infinite;
+}
+
+@keyframes jevfpSheen {
+  0%, 100% { transform: translateX(-4%) rotate(16deg); opacity: 0.32; }
+  50%      { transform: translateX( 4%) rotate(16deg); opacity: 0.48; }
+}
+
+/* ---------------- Content layout ---------------- */
+#join .jevfp-layer .jevfp {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Header: portrait + name + ovr */
+#join .jevfp-layer .jevfp-head {
+  display: grid;
+  grid-template-columns: 82px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+#join .jevfp-layer .jevfp-photo {
+  width: 82px;
+  height: 82px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.32), inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+#join .jevfp-layer .jevfp-photo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transform: scale(1.04);
+  filter: contrast(1.06) saturate(1.08);
+}
+
+#join .jevfp-layer .jevfp-who {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 8px;
+}
+
+#join .jevfp-layer .jevfp-name {
+  font-size: 1.22rem;
+  font-weight: 950;
+  letter-spacing: 0.01em;
+  color: rgba(255,255,255,0.96);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#join .jevfp-layer .jevfp-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: linear-gradient(90deg, rgba(var(--jevfp-tier-rgb), 0.22), rgba(255,255,255,0.06));
+
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.92);
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#join .jevfp-layer .jevfp-tier i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(var(--jevfp-tier-rgb), 0.98);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.10), 0 0 18px rgba(var(--jevfp-tier-rgb), 0.45);
+  flex: 0 0 auto;
+}
+
+#join .jevfp-layer .jevfp-ovr {
+  width: 78px;
+  height: 74px;
+  border-radius: 18px;
+
+  display: grid;
+  place-items: center;
+  text-align: center;
+
+  border: 1px solid rgba(255,255,255,0.16);
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,0.18), transparent 46%),
+    linear-gradient(135deg, rgba(var(--jevfp-tier-rgb), 0.26), rgba(0,0,0,0.30));
+  box-shadow: 0 10px 22px rgba(0,0,0,0.34), inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+
+#join .jevfp-layer .jevfp-ovr small {
+  font-size: 0.56rem;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.70);
+  line-height: 1;
+}
+
+#join .jevfp-layer .jevfp-ovr strong {
+  font-size: 1.44rem;
+  font-weight: 1000;
+  line-height: 1;
+  color: rgba(var(--jevfp-tier-soft), 0.98);
+  text-shadow: 0 0 16px rgba(var(--jevfp-tier-rgb), 0.30);
+}
+
+/* ---------------- Stat tiles (Round 4 style) ---------------- */
+#join .jevfp-layer .jevfp-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+#join .jevfp-layer .jevfp-tile {
+  border-radius: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.05);
+  min-width: 0;
+}
+
+#join .jevfp-layer .jevfp-tile[data-span="full"] { grid-column: 1 / -1; }
+
+#join .jevfp-layer .jevfp-k {
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.62);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#join .jevfp-layer .jevfp-v {
+  margin-top: 6px;
+  font-size: 0.88rem;
+  font-weight: 950;
+  color: rgba(255,255,255,0.94);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#join .jevfp-layer .jevfp-delta {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+#join .jevfp-layer .jevfp-delta.pos { color: rgba(132, 255, 188, 0.96); }
+#join .jevfp-layer .jevfp-delta.neu { color: rgba(255, 230, 140, 0.96); }
+#join .jevfp-layer .jevfp-delta.neg { color: rgba(255, 140, 140, 0.96); }
+
+#join .jevfp-layer .jevfp-conf {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#join .jevfp-layer .jevfp-conf i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.35);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.08);
+}
+
+#join .jevfp-layer .jevfp-conf.low { color: rgba(255, 140, 140, 0.96); }
+#join .jevfp-layer .jevfp-conf.low i { background: rgba(255, 140, 140, 0.96); box-shadow: 0 0 16px rgba(255, 140, 140, 0.22); }
+#join .jevfp-layer .jevfp-conf.medium { color: rgba(255, 230, 140, 0.96); }
+#join .jevfp-layer .jevfp-conf.medium i { background: rgba(255, 230, 140, 0.96); box-shadow: 0 0 16px rgba(255, 230, 140, 0.22); }
+#join .jevfp-layer .jevfp-conf.high { color: rgba(132, 255, 188, 0.96); }
+#join .jevfp-layer .jevfp-conf.high i { background: rgba(132, 255, 188, 0.96); box-shadow: 0 0 16px rgba(132, 255, 188, 0.22); }
+
+/* Phrase (footer line) */
+#join .jevfp-layer .jevfp-phrase {
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.12);
+  font-size: 0.74rem;
+  font-weight: 900;
+  color: rgba(255,255,255,0.78);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------- Tier palettes ---------------- */
+#join .jevfp-layer .jevfp-tier-elite { --jevfp-tier-rgb: 243, 156, 18; --jevfp-tier-soft: 255, 237, 194; }
+#join .jevfp-layer .jevfp-tier-diamond { --jevfp-tier-rgb: 74, 163, 255; --jevfp-tier-soft: 208, 231, 255; }
+#join .jevfp-layer .jevfp-tier-gold { --jevfp-tier-rgb: 255, 201, 54; --jevfp-tier-soft: 255, 244, 205; }
+#join .jevfp-layer .jevfp-tier-silver { --jevfp-tier-rgb: 181, 188, 199; --jevfp-tier-soft: 235, 239, 245; }
+#join .jevfp-layer .jevfp-tier-bronze { --jevfp-tier-rgb: 184, 115, 51; --jevfp-tier-soft: 255, 229, 205; }
+
+/* ---------------- Motion ---------------- */
+@keyframes jevfpFall {
+  0% {
+    transform: translate3d(0, -190%, 0) scale(var(--jevfp-scale, 1)) rotate(var(--jevfp-rot, 0deg));
+  }
+  50% {
+    transform: translate3d(var(--jevfp-drift-x, 0px), 60vh, 0) scale(var(--jevfp-scale, 1)) rotate(calc(var(--jevfp-rot, 0deg) + var(--jevfp-drift-tilt, 0deg)));
+  }
+  100% {
+    transform: translate3d(0, 135vh, 0) scale(var(--jevfp-scale, 1)) rotate(calc(var(--jevfp-rot, 0deg) + 10deg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #join .jevfp-layer .jevfp-plaque { display: none !important; animation: none !important; }
+}

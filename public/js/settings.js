@@ -103,6 +103,11 @@ function bindModeCards() {
   track.addEventListener('click', (e) => {
     const card = e.target.closest('.mode-card');
     if (!card) return;
+    // If locked, show preview modal
+    if (card.classList.contains('is-locked')) {
+      openModePreview(card.dataset.mode || 'coreRules');
+      return;
+    }
     openMode(card.dataset.mode || 'coreRules');
   });
 
@@ -111,20 +116,195 @@ function bindModeCards() {
     const card = e.target.closest('.mode-card');
     if (!card) return;
     e.preventDefault();
+    if (card.classList.contains('is-locked')) {
+      openModePreview(card.dataset.mode || 'coreRules');
+      return;
+    }
     openMode(card.dataset.mode || 'coreRules');
   });
-
-  // Read-only preview cards: show a toast if available
-  const lockedCards = Array.from(document.querySelectorAll('.settings-os-home-readonly .mode-card.is-locked'));
-  lockedCards.forEach((card) => {
-    card.addEventListener('click', () => {
-      if (typeof window.showToast === 'function') {
-        window.showToast('Only the host can edit settings. You can still preview what’s coming.', 'info');
+  // Also bind for locked cards in the read-only section (not in #modeCardTrack)
+  const readonlyLockedCards = Array.from(document.querySelectorAll('.settings-os-home-readonly .mode-card.is-locked'));
+  readonlyLockedCards.forEach((card) => {
+    card.addEventListener('click', (e) => {
+      openModePreview(card.dataset.mode || 'coreRules');
+    });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openModePreview(card.dataset.mode || 'coreRules');
       }
     });
   });
 }
 
+// Show a read-only/preview modal for locked cards
+function openModePreview(modeKey) {
+  const sheet = $('modeInspector');
+  if (!sheet) return;
+  const title = $('modeSheetTitle');
+  const sub = $('modeSheetSub');
+  const body = sheet.querySelector('.mode-sheet-body');
+  if (!body) return;
+
+  // Remove all children from body
+  while (body.firstChild) body.removeChild(body.firstChild);
+
+if (modeKey === 'coreRules') {
+  if (title) title.textContent = ' Core Rules (Preview)';
+  if (sub) sub.textContent = '👀 View-only preview. Only the host can edit.';
+
+  // Render a disabled version of the core rules UI
+  const preview = document.createElement('div');
+  preview.className = 'core-rules-preview';
+  preview.innerHTML = `
+    <details class="mode-acc" open>
+      <summary class="mode-acc-summary">
+        <span class="mode-acc-title"> Basics</span>
+        <span class="mode-acc-hint"> Most common settings</span>
+      </summary>
+      <div class="mode-acc-content">
+        <div class="settings-grid">
+          <div class="field">
+            <label for="preview-difficulty"><strong>🎚️ Difficulty</strong></label>
+            <select id="preview-difficulty" disabled aria-label="Game difficulty">
+              <option value="easy">🟢 Easy</option>
+              <option value="normal">🟡 Normal</option>
+              <option value="hard">🔴 Hard</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="preview-scenarioTheme"><strong>🎭 Theme</strong></label>
+            <select id="preview-scenarioTheme" disabled aria-label="Scenario theme">
+              <option value="all">🎲 All (Random)</option>
+              <option value="food">🍳 Food & Cooking</option>
+              <option value="action">⚔️ Action & Combat</option>
+              <option value="adventure">🗺️ Adventure</option>
+              <option value="sports">🏆 Sports & Games</option>
+              <option value="performance">🎤 Performance</option>
+              <option value="absurd">🌀 Weird & Absurd</option>
+            </select>
+          </div>
+
+          <div class="field field-wide">
+            <label for="preview-contentPack"><strong>📦 Content Pack</strong></label>
+            <select id="preview-contentPack" disabled aria-label="Content pack selection">
+              <option value="default"> Default [CORE]</option>
+            </select>
+            <p class="field-help">👁️ Preview only</p>
+          </div>
+
+          <div class="field field-wide">
+            <label for="preview-customScenario"><strong>✏️ Custom Scenario</strong></label>
+            <input
+              type="text"
+              id="preview-customScenario"
+              placeholder="Enter custom scenario..."
+              maxlength="60"
+              disabled
+              aria-label="Custom scenario"
+            />
+            <p class="field-help">📝 Optional — if set, this becomes the scenario for the round.</p>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="mode-acc">
+      <summary class="mode-acc-summary">
+        <span class="mode-acc-title">🛠️ Advanced</span>
+        <span class="mode-acc-hint"> More control, less clutter</span>
+      </summary>
+      <div class="mode-acc-content">
+        <div class="advanced-placeholder">
+          <p>⚙️ This section is intentionally structured to scale as you add advanced modes (Teams, No Voting, Category Priority, Scenario/Twist seeding, etc.).</p>
+          <ul class="soon-list" role="list">
+            <li><strong>👥 Teams Mode</strong> (2v2 / 3v3)</li>
+            <li><strong>🤖 No Voting</strong> (AI-only)</li>
+            <li><strong>⭐ Category Feature</strong> (priority evaluation)</li>
+            <li><strong>🧠 Scenario/Twist Entries</strong> (player-seeded)</li>
+          </ul>
+        </div>
+      </div>
+    </details>
+
+    <details class="mode-acc">
+      <summary class="mode-acc-summary">
+        <span class="mode-acc-title">🎉 Party</span>
+        <span class="mode-acc-hint"> Group decisions & voting</span>
+      </summary>
+      <div class="mode-acc-content">
+        <div class="advanced-placeholder">
+          <p>🧑‍🤝‍🧑 Future: enable “Party Selection” so the lobby votes on modes/settings, with clean mobile UI.</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="mode-acc">
+      <summary class="mode-acc-summary">
+        <span class="mode-acc-title">🧪 Experimental</span>
+        <span class="mode-acc-hint"> Dev/Test &  Second Screen</span>
+      </summary>
+      <div class="mode-acc-content">
+        <div class="advanced-placeholder">
+          <p>🧪 Future: Dev/Test mode with dummy data, and a 📲 Jackbox-style Second Screen pairing flow.</p>
+        </div>
+      </div>
+    </details>
+
+    <div class="preview-locked-banner">
+      <span class="chip chip-muted">🔒 Locked</span>
+      <span class="chip">👀 Preview</span>
+      <span class="preview-locked-msg">⛔ Selections are disabled. Only the host can edit core rules.</span>
+    </div>
+  `;
+  body.appendChild(preview);
+
+  // Set values to match current settings
+  const difficulty = $('difficulty')?.value || 'normal';
+  const theme = $('scenarioTheme')?.value || 'all';
+  const pack = $('contentPack')?.value || 'default';
+  const customScenario = $('customScenario')?.value || '';
+  body.querySelector('#preview-difficulty').value = difficulty;
+  body.querySelector('#preview-scenarioTheme').value = theme;
+  body.querySelector('#preview-contentPack').value = pack;
+  body.querySelector('#preview-customScenario').value = customScenario;
+  openSheet();
+  return;
+}
+
+// Coming Soon preview
+if (title) title.textContent = '🚧 Coming Soon (Preview)';
+if (sub) sub.textContent = '🧱 This mode is a placeholder in the UI right now.';
+
+const soon = document.createElement('div');
+soon.className = 'coming-soon-preview';
+soon.innerHTML = `
+  <div class="coming-soon-banner">
+
+    <ul class="soon-features-list">
+      <li><strong> Teams Mode</strong> <span class="chip chip-muted">⚔️ 2v2 / 3v3</span></li>
+      <li><strong> No Voting</strong> <span class="chip chip-muted">🧠 AI-only</span></li>
+      <li><strong> Category Feature</strong> <span class="chip chip-muted">🎯 Priority Evaluation</span></li>
+      <li><strong> Scenario/Twist Entries</strong> <span class="chip chip-muted">✍️ Player-seeded</span></li>
+      <li><strong> Party Selection</strong> <span class="chip chip-muted">🗳️ Lobby Voting</span></li>
+      <li><strong> Second Screen</strong> <span class="chip chip-muted">📺 TV/Pairing</span></li>
+      <li><strong> Dev/Test Mode</strong> <span class="chip chip-muted">🔬 Experimental</span></li>
+      <li><strong> Solo Challenge</strong> <span class="chip chip-muted">📆 Daily Mode</span></li>
+      <li><strong> Competitive Integrity</strong> <span class="chip chip-muted">⚖️ Fair Play</span></li>
+    </ul>
+
+    <div class="preview-locked-banner" style="margin-top:12px;">
+      <span class="chip">👀 Preview</span>
+      <span class="chip chip-muted">🔒 Locked</span>
+    </div>
+
+    <p class="coming-soon-footer">✨ Stay tuned for future updates!</p>
+  </div>
+`;
+body.appendChild(soon);
+openSheet();
+}
 function bindPowerStrip() {
   const root = document.querySelector('#settingsTab .settings-os');
   if (!root) return;

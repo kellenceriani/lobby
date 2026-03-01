@@ -76,6 +76,37 @@ const connectionDebugState = {
   lastShownAt: 0
 };
 
+const networkOutageUiState = {
+  lastToastAt: 0,
+  lastReason: ''
+};
+
+function updateNetworkOutageIndicators(reason = '', { showToastNotice = false } = {}) {
+  const detail = String(reason || '').trim() || 'server_unreachable';
+  const message = `Connection lost (${detail}). Waiting for server...`;
+
+  const round4Status = document.getElementById('evalFinalStatus');
+  if (round4Status) {
+    round4Status.textContent = message;
+  }
+
+  const loadingHint = document.getElementById('evalLoadingSubtitle');
+  if (loadingHint) {
+    loadingHint.textContent = 'Server is unreachable. Round 4 will resume automatically once reconnect succeeds.';
+  }
+
+  const now = Date.now();
+  if (showToastNotice && ((now - Number(networkOutageUiState.lastToastAt || 0)) > 8000 || networkOutageUiState.lastReason !== detail)) {
+    networkOutageUiState.lastToastAt = now;
+    networkOutageUiState.lastReason = detail;
+    showToast('Server connection lost. Trying to reconnect…', 'warning', 4200);
+  }
+}
+
+function clearNetworkOutageIndicators() {
+  networkOutageUiState.lastReason = '';
+}
+
 function resolveConnectionDebugEnabled() {
   try {
     const params = new URLSearchParams(window.location.search || '');
@@ -724,6 +755,19 @@ const chatPingState = {
   unreadCount: 0,
   roomCode: '',
   lastMessageTs: 0
+};
+
+const READY_TOGGLE_ARM_WINDOW_MS = 2600;
+const READY_TOGGLE_COOLDOWN_MS = 1200;
+const READY_TOGGLE_PENDING_TIMEOUT_MS = 3200;
+const readyToggleLockState = {
+  armed: false,
+  armTimer: null,
+  pending: false,
+  pendingTimer: null,
+  cooldownUntil: 0,
+  cooldownTimer: null,
+  lastHintAt: 0
 };
 
 const draftWaitIntelPreviewState = {
@@ -3220,10 +3264,51 @@ function ensureMusicDecks() {
       currentGain: 0,
       targetGain: 0,
       playbackRate: 1,
-      isPrimary: false
+      isPrimary: false,
+      mediaSourceNode: null,
+      mediaGainNode: null,
+      routedToGraph: false,
+      routingWarned: false
     };
   });
   return audioState.musicDecks;
+}
+
+function ensureMusicDeckWebAudioRouting(deck) {
+  if (!deck || !deck.el) return false;
+  if (deck.routedToGraph === true && deck.mediaGainNode) return true;
+
+  const ctx = getAudioContext();
+  if (!ctx || !audioState.musicGain || typeof ctx.createMediaElementSource !== 'function') {
+    return false;
+  }
+
+  try {
+    if (!deck.mediaSourceNode) {
+      deck.mediaSourceNode = ctx.createMediaElementSource(deck.el);
+    }
+    if (!deck.mediaGainNode) {
+      deck.mediaGainNode = ctx.createGain();
+      deck.mediaGainNode.gain.value = 0;
+    }
+    if (!deck.routedToGraph) {
+      deck.mediaSourceNode.connect(deck.mediaGainNode);
+      deck.mediaGainNode.connect(audioState.musicGain);
+      deck.routedToGraph = true;
+    }
+    try {
+      deck.el.volume = 1;
+    } catch (error) {
+    }
+    return true;
+  } catch (error) {
+    if (!deck.routingWarned) {
+      deck.routingWarned = true;
+      console.warn('[audio] music deck WebAudio routing unavailable; falling back to element volume control');
+    }
+    deck.routedToGraph = false;
+    return false;
+  }
 }
 
 function resolveMusicSceneKey(sceneKey = '') {
@@ -3292,8 +3377,15 @@ function syncManagedMediaAudioLevels() {
   ensureMusicDecks().forEach((deck) => {
     if (!deck || !deck.el) return;
     const effective = Math.max(0, Math.min(1, musicScalar * clampAudioLevel(deck.currentGain, 0)));
+    const routed = ensureMusicDeckWebAudioRouting(deck);
+    if (routed && deck.mediaGainNode) {
+      try {
+        deck.mediaGainNode.gain.value = effective;
+      } catch (error) {
+      }
+    }
     try {
-      deck.el.volume = effective;
+      deck.el.volume = routed ? 1 : effective;
     } catch (error) {
     }
 
@@ -4564,6 +4656,10 @@ function initializeAudioGraph() {
   audioState.revealGain.connect(audioState.masterGain);
   audioState.cardGain.connect(audioState.masterGain);
   audioState.masterGain.connect(ctx.destination);
+  // iOS Safari does not reliably honor element.volume; route managed music through WebAudio.
+  ensureMusicDecks().forEach((deck) => {
+    ensureMusicDeckWebAudioRouting(deck);
+  });
 }
 
 function ensureAudioRunning() {
@@ -6272,11 +6368,24 @@ function triggerTransientClass(element, className, duration = 220) {
   }, Math.max(120, Number(duration) || 220));
 }
 
+function formatChatTimestamp(timestamp) {
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(new Date(ts));
+  } catch (error) {
+    return '';
+  }
+}
+
 function buildChatItem(msg) {
   const li = document.createElement('li');
   const isMine = msg.player === player.name;
   const toneIndex = getChatToneIndex(msg.player);
-  li.className = `chat-row ${isMine ? 'mine' : 'theirs'}`;
+  li.className = `chat-row ${isMine ? 'mine' : 'theirs'}${msg.isReaction ? ' is-reaction' : ''}`;
   li.setAttribute('role', 'listitem');
 
   const bubble = document.createElement('article');
@@ -6297,6 +6406,14 @@ function buildChatItem(msg) {
   text.textContent = msg.text;
   bubble.appendChild(text);
 
+  const timestamp = formatChatTimestamp(msg.timestamp);
+  if (timestamp) {
+    const meta = document.createElement('span');
+    meta.className = 'chat-meta';
+    meta.textContent = timestamp;
+    bubble.appendChild(meta);
+  }
+
   li.appendChild(bubble);
   return li;
 }
@@ -6308,9 +6425,17 @@ function renderChatMessages({ forceBottom = false } = {}) {
   const shouldPinToBottom = forceBottom || isChatNearBottom(chatContainer);
   chatContainer.innerHTML = '';
 
-  roomState.messages.forEach((msg) => {
-    chatContainer.appendChild(buildChatItem(msg));
-  });
+  if (!roomState.messages.length) {
+    const empty = document.createElement('li');
+    empty.className = 'chat-empty-state';
+    empty.setAttribute('role', 'listitem');
+    empty.textContent = 'No messages yet. Start the chaos.';
+    chatContainer.appendChild(empty);
+  } else {
+    roomState.messages.forEach((msg) => {
+      chatContainer.appendChild(buildChatItem(msg));
+    });
+  }
 
   if (shouldPinToBottom) {
     chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -6320,6 +6445,187 @@ function renderChatMessages({ forceBottom = false } = {}) {
 function getActiveLobbyTabName() {
   const active = document.querySelector('.tab-btn.active[data-tab]');
   return active ? String(active.getAttribute('data-tab') || '').trim() : '';
+}
+
+function isChatTabActive() {
+  return isLobbyScreenActive() && getActiveLobbyTabName() === 'chat';
+}
+
+function isMobileChatViewport() {
+  return isLikelyMobileDevice() || window.innerWidth <= 900;
+}
+
+function isChatInputFocused() {
+  const active = document.activeElement;
+  return Boolean(active && active.id === 'chatInput');
+}
+
+function syncLobbyFooterVisibility() {
+  const footer = document.getElementById('lobbyActionsBar');
+  const lobby = document.getElementById('lobby');
+  const lobbyContent = lobby ? lobby.querySelector('.lobby-content') : null;
+  const chatImmersive = isChatTabActive() && isMobileChatViewport();
+  const chatFocus = chatImmersive && isChatInputFocused();
+
+  if (footer) {
+    const shouldShowFooter = isLobbyScreenActive() && !chatImmersive;
+    footer.style.display = shouldShowFooter ? '' : 'none';
+  }
+
+  if (lobby) {
+    lobby.classList.toggle('is-chat-immersive', chatImmersive);
+    lobby.classList.toggle('is-chat-input-focus', chatFocus);
+  }
+
+  if (lobbyContent) {
+    lobbyContent.classList.toggle('is-chat-immersive', chatImmersive);
+  }
+
+  document.body.classList.toggle('chat-immersive-mode', chatImmersive);
+  document.body.classList.toggle('chat-input-focus-mode', chatFocus);
+}
+
+function syncChatViewportForFocus({ forceBottom = false } = {}) {
+  if (!isChatTabActive()) return;
+  if (forceBottom) {
+    renderChatMessages({ forceBottom: true });
+    return;
+  }
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+  if (isChatNearBottom(container, 120)) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function installChatLayoutController() {
+  if (window.__chatLayoutControllerInstalled) return;
+  window.__chatLayoutControllerInstalled = true;
+
+  const handleLayoutUpdate = ({ forceBottom = false } = {}) => {
+    syncLobbyFooterVisibility();
+    if (forceBottom) syncChatViewportForFocus({ forceBottom: true });
+  };
+
+  document.addEventListener('lobbyTabChanged', (event) => {
+    const tabName = event && event.detail ? event.detail.tabName : '';
+    const forceBottom = tabName === 'chat';
+    handleLayoutUpdate({ forceBottom });
+  });
+
+  document.addEventListener('screenChanged', () => {
+    handleLayoutUpdate({ forceBottom: false });
+  });
+
+  window.addEventListener('resize', () => {
+    handleLayoutUpdate({ forceBottom: false });
+  }, { passive: true });
+
+  if (window.visualViewport) {
+    const handleViewportShift = () => {
+      syncLobbyFooterVisibility();
+      if (isChatInputFocused()) {
+        syncChatViewportForFocus({ forceBottom: true });
+      }
+    };
+    window.visualViewport.addEventListener('resize', handleViewportShift, { passive: true });
+    window.visualViewport.addEventListener('scroll', handleViewportShift, { passive: true });
+  }
+
+  const chatInput = document.getElementById('chatInput');
+  if (chatInput) {
+    chatInput.addEventListener('focus', () => {
+      syncLobbyFooterVisibility();
+      window.setTimeout(() => {
+        syncChatViewportForFocus({ forceBottom: true });
+      }, 40);
+    });
+    chatInput.addEventListener('blur', () => {
+      window.setTimeout(() => {
+        syncLobbyFooterVisibility();
+      }, 120);
+    });
+  }
+
+  handleLayoutUpdate({ forceBottom: false });
+}
+
+function clearReadyToggleArm() {
+  readyToggleLockState.armed = false;
+  if (readyToggleLockState.armTimer) {
+    clearTimeout(readyToggleLockState.armTimer);
+    readyToggleLockState.armTimer = null;
+  }
+}
+
+function clearReadyTogglePending() {
+  readyToggleLockState.pending = false;
+  if (readyToggleLockState.pendingTimer) {
+    clearTimeout(readyToggleLockState.pendingTimer);
+    readyToggleLockState.pendingTimer = null;
+  }
+}
+
+function getReadyCooldownRemainingMs() {
+  return Math.max(0, Number(readyToggleLockState.cooldownUntil) - Date.now());
+}
+
+function scheduleReadyCooldownRefresh() {
+  if (readyToggleLockState.cooldownTimer) {
+    clearTimeout(readyToggleLockState.cooldownTimer);
+    readyToggleLockState.cooldownTimer = null;
+  }
+  const remaining = getReadyCooldownRemainingMs();
+  if (remaining <= 0) return;
+  readyToggleLockState.cooldownTimer = setTimeout(() => {
+    readyToggleLockState.cooldownTimer = null;
+    updateReadyButtonUi(player.ready);
+  }, remaining + 50);
+}
+
+function updateReadyButtonUi(isReady = false) {
+  const readyBtn = document.getElementById('readyBtn');
+  if (!readyBtn) return;
+
+  const cooldownMs = getReadyCooldownRemainingMs();
+  const armed = readyToggleLockState.armed === true && cooldownMs <= 0 && readyToggleLockState.pending !== true;
+  const pending = readyToggleLockState.pending === true;
+
+  readyBtn.className = 'btn btn-ready';
+  readyBtn.classList.toggle('pulsing', Boolean(isReady) && !armed && !pending && cooldownMs <= 0);
+  readyBtn.classList.toggle('ready-lock-armed', armed);
+  readyBtn.classList.toggle('ready-lock-pending', pending);
+  readyBtn.classList.toggle('ready-lock-cooldown', cooldownMs > 0 && !pending);
+  readyBtn.classList.toggle('btn-success', Boolean(isReady) && !armed && !pending && cooldownMs <= 0);
+
+  if (pending) {
+    readyBtn.disabled = true;
+    readyBtn.innerHTML = '<span class="ready-lock-icon">⏳</span><span class="ready-indicator">•</span><span class="ready-label">SYNCING...</span>';
+    return;
+  }
+
+  if (cooldownMs > 0) {
+    scheduleReadyCooldownRefresh();
+    readyBtn.disabled = true;
+    readyBtn.innerHTML = `<span class="ready-lock-icon">🔒</span><span class="ready-indicator">${isReady ? '✓' : '○'}</span><span class="ready-label">LOCKED ${Math.max(1, Math.ceil(cooldownMs / 1000))}s</span>`;
+    return;
+  }
+  if (readyToggleLockState.cooldownTimer) {
+    clearTimeout(readyToggleLockState.cooldownTimer);
+    readyToggleLockState.cooldownTimer = null;
+  }
+
+  readyBtn.disabled = false;
+  if (armed) {
+    readyBtn.innerHTML = `<span class="ready-lock-icon">🔓</span><span class="ready-indicator">${isReady ? '✓' : '○'}</span><span class="ready-label">CONFIRM ${isReady ? 'UNREADY' : 'READY'}</span>`;
+    return;
+  }
+
+  if (isReady) {
+    readyBtn.innerHTML = '<span class="ready-lock-icon">🔒</span><span class="ready-indicator">✓</span><span class="ready-label">READY</span>';
+    return;
+  }
+  readyBtn.innerHTML = '<span class="ready-lock-icon">🔐</span><span class="ready-indicator">○</span><span class="ready-label">NOT READY</span>';
 }
 
 function isLobbyScreenActive() {
@@ -6873,15 +7179,23 @@ function leaveRoom() {
 
 socket.on('connect', () => {
   console.log('✓ Socket connected:', socket.id);
+  clearNetworkOutageIndicators();
+  const round4Screen = document.getElementById('round4EvalScreen');
+  const round4Active = Boolean(round4Screen && round4Screen.classList.contains('active'));
+  if (isLobbyScreenActive() || round4Active) {
+    showToast('Reconnected to server.', 'info', 2200);
+  }
   showConnectionDebugToast('connected');
 });
 
 socket.on('disconnect', (reason) => {
+  updateNetworkOutageIndicators(reason, { showToastNotice: true });
   showConnectionDebugToast('disconnected', String(reason || 'unknown'));
 });
 
 socket.on('connect_error', (error) => {
   const detail = error && error.message ? error.message : 'connect_error';
+  updateNetworkOutageIndicators(detail, { showToastNotice: true });
   showConnectionDebugToast('error', detail);
 });
 
@@ -7061,14 +7375,15 @@ socket.on('roomData', (data) => {
     }
 
     if (currentPlayer) {
-      player.ready = currentPlayer.ready;
-      if (currentPlayer.ready) {
-        readyBtn.innerHTML = '<span class="ready-indicator">✓</span> READY';
-        readyBtn.className = 'btn btn-success btn-ready pulsing';
-      } else {
-        readyBtn.innerHTML = '<span class="ready-indicator">○</span> NOT READY';
-        readyBtn.className = 'btn btn-ready';
-      }
+      player.ready = Boolean(currentPlayer.ready);
+      clearReadyToggleArm();
+      clearReadyTogglePending();
+      updateReadyButtonUi(player.ready);
+    } else if (readyBtn) {
+      player.ready = false;
+      clearReadyToggleArm();
+      clearReadyTogglePending();
+      updateReadyButtonUi(false);
     }
   }
 
@@ -7154,6 +7469,44 @@ socket.on('narratorVoiceQueued', handleNarratorVoiceQueuedSocket);
 socket.on('kokoroNarratorQueued', handleNarratorVoiceQueuedSocket); // legacy alias
 
 function toggleReady() {
+  const cooldownMs = getReadyCooldownRemainingMs();
+  if (readyToggleLockState.pending || cooldownMs > 0) {
+    updateReadyButtonUi(player.ready);
+    return;
+  }
+
+  if (!readyToggleLockState.armed) {
+    readyToggleLockState.armed = true;
+    if (readyToggleLockState.armTimer) {
+      clearTimeout(readyToggleLockState.armTimer);
+    }
+    readyToggleLockState.armTimer = setTimeout(() => {
+      readyToggleLockState.armTimer = null;
+      readyToggleLockState.armed = false;
+      updateReadyButtonUi(player.ready);
+    }, READY_TOGGLE_ARM_WINDOW_MS);
+    updateReadyButtonUi(player.ready);
+    const now = Date.now();
+    if ((now - Number(readyToggleLockState.lastHintAt || 0)) > 900) {
+      readyToggleLockState.lastHintAt = now;
+      showToast(`Tap again to confirm ${player.ready ? 'not ready' : 'ready'}.`, 'info', 1500);
+    }
+    return;
+  }
+
+  clearReadyToggleArm();
+  readyToggleLockState.pending = true;
+  readyToggleLockState.cooldownUntil = Date.now() + READY_TOGGLE_COOLDOWN_MS;
+  if (readyToggleLockState.pendingTimer) {
+    clearTimeout(readyToggleLockState.pendingTimer);
+  }
+  readyToggleLockState.pendingTimer = setTimeout(() => {
+    readyToggleLockState.pendingTimer = null;
+    clearReadyTogglePending();
+    updateReadyButtonUi(player.ready);
+  }, READY_TOGGLE_PENDING_TIMEOUT_MS);
+
+  updateReadyButtonUi(player.ready);
   playReadyToggleSound(!player.ready);
   socket.emit('toggleReady');
 }
@@ -9736,6 +10089,8 @@ window.addEventListener('beforeunload', () => {
 
 installAudioUnlockHandlers();
 setupAudioControls();
+installChatLayoutController();
+updateReadyButtonUi(Boolean(player.ready));
 scheduleMobileTouchAudioHint();
 void runStartupBootstrapPreflight();
 document.addEventListener('visibilitychange', () => {
@@ -9773,14 +10128,6 @@ window.sendPlayAgain = sendPlayAgain;
 window.openFinalResultsArchive = openFinalResultsArchive;
 window.returnToRound4Finale = returnToRound4Finale;
 window.goToLobby = goToLobby;
-
-// Show/hide lobby footer only on lobby screen
-document.addEventListener('screenChanged', (event) => {
-  const screenId = event && event.detail ? event.detail.screenId : '';
-  const footer = document.getElementById('lobbyActionsBar');
-  if (!footer) return;
-  footer.style.display = (screenId === 'lobby') ? '' : 'none';
-});
 
 if (shouldAutoOpenRound4Loading()) {
   window.setTimeout(() => {

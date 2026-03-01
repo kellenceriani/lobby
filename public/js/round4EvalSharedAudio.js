@@ -239,16 +239,18 @@ function waitForSharedVoiceCueCompletion(cue = null, {
 }
 
 function waitForRevealLoadingNarrationToFinish({
-  timeoutMs = 9000,
-  minQuietMs = 220
+  timeoutMs = 1200,
+  minQuietMs = 120,
+  includeQueue = false
 } = {}) {
   const bridge = getSharedAudioBridge();
   if (!bridge || typeof bridge.getVoiceState !== 'function') {
     return Promise.resolve({ ok: true, skipped: true, reason: 'bridge-unavailable' });
   }
 
-  const safeTimeoutMs = Math.max(1500, Number(timeoutMs) || 9000);
-  const safeMinQuietMs = Math.max(0, Number(minQuietMs) || 220);
+  const safeTimeoutMs = Math.max(250, Number(timeoutMs) || 1200);
+  const safeMinQuietMs = Math.max(0, Number(minQuietMs) || 120);
+  const trackQueue = includeQueue === true;
   const startAt = Date.now();
   let quietSince = 0;
   let hinted = false;
@@ -291,13 +293,13 @@ function waitForRevealLoadingNarrationToFinish({
         return;
       }
 
-      const active = state.speaking || state.queued > 0;
+      const active = state.speaking || (trackQueue && state.queued > 0);
       if (active) {
         quietSince = 0;
         if (!hinted) {
           hinted = true;
           const hint = document.getElementById('evalPreloadHint');
-          if (hint) hint.textContent = 'Waiting for unfinished assets and narration to stop. ;)';
+          if (hint) hint.textContent = 'Finalizing reveal setup...';
         }
       } else if (!quietSince) {
         quietSince = now;

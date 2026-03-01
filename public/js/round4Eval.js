@@ -51,10 +51,18 @@ const round4State = {
   pageCollapsed: Object.create(null),
   pageNavActive: 'cards',
   pageNavMenuOpen: false,
-  pageNavGlobalHandlersBound: false
+  pageNavGlobalHandlersBound: false,
+  loadingAutoStartTimer: null,
+  loadingAutoStartAtMs: 0,
+  evaluationWatchdogTimer: null,
+  evaluationWatchdogAttempts: 0,
+  evaluationWatchdogStartedAtMs: 0
 };
 
 const IMAGE_PRELOAD_CACHE = new Map();
+const ROUND4_AUTO_START_MS = Math.max(1200, Number((typeof window !== 'undefined' && window.__ROUND4_AUTO_START_MS) || 6000));
+const ROUND4_EVAL_RETRY_BASE_MS = Math.max(1200, Number((typeof window !== 'undefined' && window.__ROUND4_EVAL_RETRY_BASE_MS) || 3500));
+const ROUND4_EVAL_RETRY_MAX_MS = Math.max(ROUND4_EVAL_RETRY_BASE_MS, Number((typeof window !== 'undefined' && window.__ROUND4_EVAL_RETRY_MAX_MS) || 9000));
 
 // Shared audio bridge + voice cue helpers moved to round4EvalSharedAudio.js (loaded before this file).
 // Reveal/cinematic helper banks moved to round4EvalRevealCinematics.js (loaded before this file).
@@ -490,6 +498,83 @@ function setLoadingBotContext(scenario, twist, speech) {
   if (preloadHint && speech) preloadHint.textContent = speech;
 }
 
+function clearLoadingAutoStartTimer() {
+  if (round4State.loadingAutoStartTimer) {
+    window.clearTimeout(round4State.loadingAutoStartTimer);
+    round4State.loadingAutoStartTimer = null;
+  }
+  round4State.loadingAutoStartAtMs = 0;
+}
+
+function scheduleRevealAutoStart() {
+  clearLoadingAutoStartTimer();
+  if (!round4State.loadingReadyToStart || round4State.rendered || round4State.revealStartTimer) return;
+  round4State.loadingAutoStartAtMs = Date.now() + ROUND4_AUTO_START_MS;
+  round4State.loadingAutoStartTimer = window.setTimeout(() => {
+    round4State.loadingAutoStartTimer = null;
+    round4State.loadingAutoStartAtMs = 0;
+    if (!round4State.loadingReadyToStart || round4State.rendered) return;
+    startRound4Reveal();
+  }, ROUND4_AUTO_START_MS);
+}
+
+function clearRound4EvaluationWatchdog() {
+  if (round4State.evaluationWatchdogTimer) {
+    window.clearTimeout(round4State.evaluationWatchdogTimer);
+    round4State.evaluationWatchdogTimer = null;
+  }
+}
+
+function getRound4EvaluationRetryDelayMs(attemptNumber = 0) {
+  const n = Math.max(1, Number(attemptNumber) || 1);
+  const scaled = ROUND4_EVAL_RETRY_BASE_MS + ((n - 1) * 1100);
+  return Math.max(ROUND4_EVAL_RETRY_BASE_MS, Math.min(ROUND4_EVAL_RETRY_MAX_MS, scaled));
+}
+
+function requestRound4Evaluation(reason = 'manual') {
+  if (!window.socket) return false;
+  if (round4State.evaluationId || round4State.rendered) return false;
+  round4State.evaluationWatchdogAttempts = Math.max(0, Number(round4State.evaluationWatchdogAttempts) || 0) + 1;
+  round4State.isEvaluating = true;
+  const socketConnected = Boolean(window.socket && window.socket.connected === true);
+  if (!socketConnected && round4State.evaluationWatchdogAttempts >= 3) {
+    const status = document.getElementById('evalFinalStatus');
+    if (status) {
+      status.textContent = 'Server connection lost. Waiting to reconnect before final evaluation can continue...';
+    }
+  }
+  window.socket.emit('evaluateRound4');
+  if (round4State.evaluationWatchdogAttempts > 1) {
+    const status = document.getElementById('evalFinalStatus');
+    if (status) {
+      status.textContent = `Re-syncing final evaluation (${round4State.evaluationWatchdogAttempts})...`;
+    }
+  }
+  return true;
+}
+
+function scheduleRound4EvaluationWatchdogTick() {
+  clearRound4EvaluationWatchdog();
+  if (!window.socket) return;
+  if (!round4State.isEvaluating || round4State.evaluationId || round4State.rendered) return;
+  const nextAttempt = Math.max(1, Number(round4State.evaluationWatchdogAttempts) + 1 || 1);
+  const delayMs = getRound4EvaluationRetryDelayMs(nextAttempt);
+  round4State.evaluationWatchdogTimer = window.setTimeout(() => {
+    round4State.evaluationWatchdogTimer = null;
+    if (!round4State.isEvaluating || round4State.evaluationId || round4State.rendered) return;
+    requestRound4Evaluation('watchdog');
+    scheduleRound4EvaluationWatchdogTick();
+  }, delayMs);
+}
+
+function startRound4EvaluationWatchdog({ resetAttempts = false } = {}) {
+  if (resetAttempts) {
+    round4State.evaluationWatchdogAttempts = 0;
+    round4State.evaluationWatchdogStartedAtMs = Date.now();
+  }
+  scheduleRound4EvaluationWatchdogTick();
+}
+
 function setLoadingReadyState(isReady) {
   round4State.loadingReadyToStart = Boolean(isReady);
   const button = document.getElementById('evalStartRevealBtn');
@@ -500,11 +585,13 @@ function setLoadingReadyState(isReady) {
   button.disabled = !round4State.loadingReadyToStart;
   button.classList.toggle('is-ready-live', round4State.loadingReadyToStart);
   button.classList.remove('is-near-ready');
+  clearLoadingAutoStartTimer();
 
   if (round4State.loadingReadyToStart) {
     button.textContent = 'START REVEAL CEREMONY';
-    if (hint) hint.textContent = 'Everything is staged, including announcer callouts. You can start the reveal locally as soon as you are ready.';
-    if (status) status.textContent = 'Showdown ready. Tap start to begin the final reveal.';
+    if (hint) hint.textContent = `Everything is staged. Reveal will auto-start in ${Math.round(ROUND4_AUTO_START_MS / 1000)}s if nobody taps start.`;
+    if (status) status.textContent = 'Showdown ready. Tap start now or wait for auto-start.';
+    scheduleRevealAutoStart();
   } else {
     button.textContent = 'PREPARING REVEAL CEREMONY...';
   }
@@ -544,6 +631,8 @@ function setHeaderContextPhase(phase) {
 function startRound4Reveal() {
   if (!round4State.preloadDone || !round4State.revealPrepared || !round4State.animationPrimed || !round4State.loadingReadyToStart || round4State.rendered || round4State.revealStartTimer) return;
 
+  clearLoadingAutoStartTimer();
+  clearRound4EvaluationWatchdog();
   ensureRevealAudioReady();
   const bridge = getSharedAudioBridge();
   if (bridge && typeof bridge.setMusicScene === 'function') {
@@ -672,6 +761,8 @@ function resetCinematicState() {
     window.clearTimeout(round4State.pendingFinalResultsTimer);
     round4State.pendingFinalResultsTimer = null;
   }
+  clearLoadingAutoStartTimer();
+  clearRound4EvaluationWatchdog();
 
   round4State.teams = [];
   round4State.queue = [];
@@ -702,6 +793,8 @@ function resetCinematicState() {
   round4State.pageLastTouchedAt = Object.create(null);
   round4State.pageNavActive = 'cards';
   round4State.pageNavMenuOpen = false;
+  round4State.evaluationWatchdogAttempts = 0;
+  round4State.evaluationWatchdogStartedAtMs = 0;
 
   const boards = document.getElementById('evalTeamBoards');
   if (boards) boards.classList.remove('is-elite-crash');
@@ -775,10 +868,11 @@ function initRound4Evaluation(data) {
   round4State.finalResultsRequested = false;
   round4State.allTeamEvaluations = null;
   round4State.finalLeaderboard = null;
+  round4State.evaluationWatchdogAttempts = 0;
+  round4State.evaluationWatchdogStartedAtMs = Date.now();
 
-  if (window.socket) {
-    window.socket.emit('evaluateRound4');
-  }
+  requestRound4Evaluation('init');
+  startRound4EvaluationWatchdog({ resetAttempts: false });
 }
 
 function getTeamOrderNames() {
@@ -1364,6 +1458,16 @@ function finishSequenceIfComplete() {
     continueBtn.disabled = false;
     continueBtn.textContent = 'LOCK IN & CONTINUE';
   }
+
+  if (round4State.pendingFinalResultsTimer) {
+    window.clearTimeout(round4State.pendingFinalResultsTimer);
+    round4State.pendingFinalResultsTimer = null;
+  }
+  round4State.pendingFinalResultsTimer = window.setTimeout(() => {
+    round4State.pendingFinalResultsTimer = null;
+    if (round4State.finalResultsRequested) return;
+    requestFinalResults();
+  }, 12000);
 
   const bridge = getSharedAudioBridge();
   if (bridge && typeof bridge.setMusicScene === 'function') {
@@ -2624,8 +2728,9 @@ function renderCinematicSequence() {
     primeAnimationPipeline(),
     prepareRevealAnnouncerVoiceWarmup(),
     waitForRevealLoadingNarrationToFinish({
-      timeoutMs: 9000,
-      minQuietMs: 260
+      timeoutMs: 600,
+      minQuietMs: 120,
+      includeQueue: false
     }),
     new Promise((resolve) => window.setTimeout(resolve, minLoadingReadyMs))
   ]).finally(() => {
@@ -2649,11 +2754,6 @@ function renderCinematicSequence() {
         round4State.pendingLoadingReadyVoiceCue = null;
         try {
           enqueueSharedVoiceCues([pendingReadyCue], { clear: false });
-          await waitForSharedVoiceCueCompletion(pendingReadyCue, {
-            minHoldMs: 120,
-            timeoutMs: Math.max(1800, Number(pendingReadyCue.estimatedMs || 0) + 1200),
-            startTimeoutMs: 4200
-          });
         } catch (error) {
         }
       }
@@ -2667,6 +2767,10 @@ function renderCinematicSequence() {
 function requestFinalResults() {
   if (round4State.finalResultsRequested || !window.socket) return;
   round4State.finalResultsRequested = true;
+  if (round4State.pendingFinalResultsTimer) {
+    window.clearTimeout(round4State.pendingFinalResultsTimer);
+    round4State.pendingFinalResultsTimer = null;
+  }
 
   const continueBtn = document.getElementById('evalContinueBtn');
   const status = document.getElementById('evalFinalStatus');
@@ -3325,6 +3429,7 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       }
 
       round4State.evaluationId = data.evaluationId || null;
+      clearRound4EvaluationWatchdog();
       round4State.allTeamEvaluations = data.allTeamEvaluations || data.teamEvaluations || {};
       round4State.finalLeaderboard = Array.isArray(data.finalLeaderboard) ? data.finalLeaderboard : [];
       round4State.revealConfig = data.revealTimeline || null;
@@ -3368,10 +3473,14 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
 
     window.socket.on('round4EvaluationError', (error) => {
       const message = error && error.message ? error.message : 'Unknown error';
-      alert(`Error evaluating teams: ${message}`);
       const loading = document.getElementById('evalLoading');
-      if (loading) loading.style.display = 'none';
+      if (loading) loading.style.display = 'flex';
+      const status = document.getElementById('evalFinalStatus');
+      if (status) status.textContent = `Final evaluation delayed (${message}). Retrying...`;
       setLoadingReadyState(false);
+      round4State.isEvaluating = true;
+      startRound4EvaluationWatchdog({ resetAttempts: false });
+      requestRound4Evaluation('round4EvaluationError');
     });
 
     window.socket.on('finalResultsWaiting', (data) => {

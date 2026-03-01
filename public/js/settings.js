@@ -482,9 +482,9 @@ function refreshNowPlaying() {
     absurd: 'Absurd'
   })[theme] || theme;
 
-  // "Mode" is a future concept; keep "Classic" for now.
+  // In the summary bar, "Mode" reflects the selected scenario theme.
   const modeLabelEl = $('nowModeLabel');
-  if (modeLabelEl) modeLabelEl.textContent = 'Classic';
+  if (modeLabelEl) modeLabelEl.textContent = themeLabel;
 
   const diffEl = $('nowDifficultyLabel');
   if (diffEl) diffEl.textContent = difficultyLabel;

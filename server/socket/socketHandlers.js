@@ -45,6 +45,12 @@ const NARRATOR_VOICE_IDS = new Set(['af_heart', 'af_bella', 'am_michael', 'bm_ge
 const EVAL_WARMUP_ON_DRAFT = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.EVAL_WARMUP_ON_DRAFT || 'true').toLowerCase()
 );
+const ROUND4_EVAL_WATCHDOG_MS = Math.max(4000, Math.min(120000, Number(process.env.ROUND4_EVAL_WATCHDOG_MS) || 16000));
+const ROUND4_TIMEOUT_FALLBACK_ENABLED = !['0', 'false', 'no', 'off'].includes(
+  String(process.env.ROUND4_TIMEOUT_FALLBACK_ENABLED || 'true').toLowerCase()
+);
+const ROUND4_FINAL_LOCK_TIMEOUT_MS = Math.max(8000, Math.min(180000, Number(process.env.ROUND4_FINAL_LOCK_TIMEOUT_MS) || 25000));
+const ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS = Math.max(0, Math.min(120000, Number(process.env.ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS) || 7000));
 const draftWarmupDedupe = new Map();
 const DRAFT_WARMUP_DEDUPE_WINDOW_MS = Math.max(3000, Number(process.env.DRAFT_WARMUP_DEDUPE_MS) || 45000);
 const ROOM_SETTINGS_DEFAULTS = Object.freeze({
@@ -119,21 +125,208 @@ function resetRoomSettingsToDefaults(roomData) {
 }
 
 async function emitRoomEventWithVoiceCuePrewarm(io, roomCode, eventName, payload, { timeoutMs = 1800 } = {}) {
+  io.to(roomCode).emit(eventName, payload);
   const voiceCues = Array.isArray(payload && payload.voiceCues) ? payload.voiceCues : [];
-  if (voiceCues.length) {
-    const roomData = rooms[roomCode];
-    const narratorVoiceId = roomData && roomData.voiceConfig && NARRATOR_VOICE_IDS.has(String(roomData.voiceConfig.narratorVoiceId || ''))
-      ? String(roomData.voiceConfig.narratorVoiceId)
-      : 'bm_george';
-    try {
+  if (!voiceCues.length) return;
+  const roomData = rooms[roomCode];
+  const narratorVoiceId = roomData && roomData.voiceConfig && NARRATOR_VOICE_IDS.has(String(roomData.voiceConfig.narratorVoiceId || ''))
+    ? String(roomData.voiceConfig.narratorVoiceId)
+    : 'bm_george';
+  Promise.resolve()
+    .then(async () => {
       await prewarmAdaptiveNarratorVoiceCues({
         cues: voiceCues,
         narratorVoiceId,
         timeoutMs
       });
-    } catch (_error) {}
-  }
-  io.to(roomCode).emit(eventName, payload);
+    })
+    .catch(() => {});
+}
+
+function withTimeout(promise, timeoutMs, label = 'operation_timeout') {
+  const safeTimeoutMs = Math.max(0, Number(timeoutMs) || 0);
+  if (safeTimeoutMs <= 0) return promise;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        const error = new Error(`${label}_${safeTimeoutMs}ms`);
+        error.code = 'ROUND4_EVAL_TIMEOUT';
+        error.timeoutMs = safeTimeoutMs;
+        reject(error);
+      }, safeTimeoutMs);
+    })
+  ]);
+}
+
+function buildRound4EmergencyFallbackScored(game, reason = 'round4_eval_timeout') {
+  const scenario = String(game && game.currentScenario || 'Final scenario');
+  const twist = String(game && game.currentTwist || 'NO PLOT TWIST');
+  const players = Array.isArray(game && game.players) ? game.players : [];
+  const teamEvaluations = {};
+  const roundPoints = {};
+  const pointBreakdown = {};
+  const finalLeaderboard = [];
+
+  players.forEach((player, playerIndex) => {
+    const roster = Array.isArray(player && player.finalTeam) ? player.finalTeam.slice(0, 6).filter(Boolean) : [];
+    const evaluations = roster.map((character) => ({
+      character,
+      emotion: 'neutral',
+      phrase: 'Fallback evaluation used while final scoring recovered.',
+      score: 10,
+      ovr: 55,
+      reason: 'Emergency Round 4 fallback',
+      notes: ['Temporary Round 4 fallback was applied to prevent loading deadlock.'],
+      imageUrl: null,
+      scoreMeta: {
+        relevancePoints: 0,
+        draftedFitTotal: 0,
+        draftedScenarioBonus: 0,
+        draftedTwistBonus: 0,
+        infoConfidence: 0,
+        trustedInfo: false,
+        fetchDurationMs: 0,
+        evaluationEngine: 'round4-emergency-fallback-v1',
+        evaluationEngineMode: String(process.env.EVAL_ENGINE_MODE || 'context').toLowerCase(),
+        contextFallbackError: String(reason || 'round4_eval_timeout')
+      },
+      breakdown: {
+        characterSummary: 'Emergency fallback evaluation used to keep match progression alive.',
+        scoreBreakdown: [{ step: 'Fallback', points: 10, description: 'Emergency Round 4 fallback.' }],
+        scenarioRelevance: 'Fallback evaluation.',
+        twistRelevance: 'Fallback evaluation.',
+        ovrBreakdown: {
+          base: 55,
+          rarityBonus: 0,
+          attributeBonus: 0,
+          fitMultiplier: 1,
+          fitDelta: 0,
+          finalOVR: 55
+        }
+      }
+    }));
+
+    const averageOVR = evaluations.length
+      ? Math.round(evaluations.reduce((sum, row) => sum + (Number(row && row.ovr) || 0), 0) / evaluations.length)
+      : 55;
+    const cumulativeOVR = evaluations.reduce((sum, row) => sum + (Number(row && row.ovr) || 0), 0);
+    const totalOVR = averageOVR;
+    const topPick = evaluations[0] ? evaluations[0].character : 'N/A';
+    const round4Points = Math.max(40, 120 - Math.min(20, playerIndex * 2));
+
+    teamEvaluations[player.name] = {
+      evaluations,
+      teamSummary: {
+        totalOVR,
+        cumulativeOVR,
+        chemistryBonus: 0,
+        chemistryDetails: ['Emergency fallback: chemistry unavailable.'],
+        chemistryRawScore: null,
+        chemistryBase: null,
+        averageOVR,
+        topPick,
+        highestOVR: evaluations.length ? 55 : 0,
+        evaluationCount: evaluations.length
+      }
+    };
+    roundPoints[player.name] = round4Points;
+    pointBreakdown[player.name] = [
+      'Emergency fallback applied',
+      `Scenario: ${scenario}`,
+      `Twist: ${twist}`,
+      `Fallback reason: ${String(reason || 'round4_eval_timeout')}`,
+      `Round 4 Total: ${round4Points}`
+    ];
+  });
+
+  players.forEach((player) => {
+    const teamData = teamEvaluations[player.name] || { teamSummary: {}, evaluations: [] };
+    finalLeaderboard.push({
+      playerName: player.name,
+      round4Points: roundPoints[player.name] || 0,
+      totalOVR: Number(teamData.teamSummary && teamData.teamSummary.totalOVR) || 0,
+      cumulativeOVR: Number(teamData.teamSummary && teamData.teamSummary.cumulativeOVR) || 0,
+      averageOVR: Number(teamData.teamSummary && teamData.teamSummary.averageOVR) || 0,
+      chemistryBonus: Number(teamData.teamSummary && teamData.teamSummary.chemistryBonus) || 0,
+      topPick: teamData.teamSummary && teamData.teamSummary.topPick ? teamData.teamSummary.topPick : 'N/A',
+      topPickImageUrl: null
+    });
+  });
+
+  finalLeaderboard.sort((a, b) => {
+    if ((b.round4Points || 0) !== (a.round4Points || 0)) return (b.round4Points || 0) - (a.round4Points || 0);
+    if ((b.totalOVR || 0) !== (a.totalOVR || 0)) return (b.totalOVR || 0) - (a.totalOVR || 0);
+    return String(a.playerName || '').localeCompare(String(b.playerName || ''));
+  });
+
+  return {
+    scenario,
+    twist,
+    teamEvaluations,
+    roundPoints,
+    pointBreakdown,
+    finalLeaderboard,
+    emergencyFallback: true,
+    emergencyFallbackReason: String(reason || 'round4_eval_timeout')
+  };
+}
+
+function getFinalResultsFailSafeState(roomData, game) {
+  const eligiblePlayers = getEligibleFinalPlayers(roomData, game);
+  const readyCount = eligiblePlayers.filter((playerName) => game.finalResultsReady[playerName] === true).length;
+  const allReady = eligiblePlayers.length > 0
+    && eligiblePlayers.every((playerName) => game.finalResultsReady[playerName] === true);
+
+  const gateStartedAt = Number(game.finalResultsGateStartedAtMs) || 0;
+  const elapsedMs = gateStartedAt > 0 ? Math.max(0, Date.now() - gateStartedAt) : 0;
+  const timeoutReached = gateStartedAt > 0 && elapsedMs >= ROUND4_FINAL_LOCK_TIMEOUT_MS;
+  const autoAdvanceReached = timeoutReached && elapsedMs >= (ROUND4_FINAL_LOCK_TIMEOUT_MS + ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS);
+  const hostName = roomData && roomData.host ? String(roomData.host) : '';
+  const hostEligible = hostName && eligiblePlayers.includes(hostName);
+  const hostReady = hostEligible && game.finalResultsReady[hostName] === true;
+
+  return {
+    eligiblePlayers,
+    readyCount,
+    allReady,
+    elapsedMs,
+    timeoutReached,
+    autoAdvanceReached,
+    hostEligible,
+    hostReady
+  };
+}
+
+function shouldForceEmitFinalResults(state) {
+  if (!state) return false;
+  if (state.allReady) return true;
+  if (state.timeoutReached && state.hostReady) return true;
+  if (state.autoAdvanceReached && state.readyCount > 0) return true;
+  return false;
+}
+
+function getFinalResultsForceReason(state) {
+  if (!state) return '';
+  if (state.allReady) return 'all_ready';
+  if (state.timeoutReached && state.hostReady) return 'host_timeout_override';
+  if (state.autoAdvanceReached && state.readyCount > 0) return 'auto_advance_timeout';
+  return '';
+}
+
+function armFinalResultsFailSafeTimers(io, room, game) {
+  if (!game || game.finalResultsFailSafeTimersArmed === true) return;
+  game.finalResultsFailSafeTimersArmed = true;
+
+  const runCheck = () => {
+    const roomData = getRoomData(room);
+    if (!roomData || roomData.gameState !== game) return;
+    updateFinalResultsWaiting(io, room, roomData, game);
+    markRoomsDirty();
+  };
+
+  setTimeout(runCheck, ROUND4_FINAL_LOCK_TIMEOUT_MS + 80);
+  setTimeout(runCheck, ROUND4_FINAL_LOCK_TIMEOUT_MS + ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS + 180);
 }
 
 function shouldRunDraftWarmup() {
@@ -493,18 +686,27 @@ function updateFinalResultsWaiting(io, room, roomData, game) {
   if (!game || !game.round4Results || game.finalResultsEmitted) return;
 
   game.finalResultsReady = game.finalResultsReady || {};
-  const eligiblePlayers = getEligibleFinalPlayers(roomData, game);
-  const readyCount = eligiblePlayers.filter((playerName) => game.finalResultsReady[playerName] === true).length;
+  const state = getFinalResultsFailSafeState(roomData, game);
+  const eligiblePlayers = state.eligiblePlayers;
+  const readyCount = state.readyCount;
 
   io.to(room).emit('finalResultsWaiting', {
     readyCount,
-    totalPlayers: eligiblePlayers.length
+    totalPlayers: eligiblePlayers.length,
+    timeoutMs: ROUND4_FINAL_LOCK_TIMEOUT_MS,
+    elapsedMs: state.elapsedMs,
+    hostOverrideEligible: state.hostEligible === true
   });
 
-  const allReady = eligiblePlayers.length > 0
-    && eligiblePlayers.every((playerName) => game.finalResultsReady[playerName] === true);
-
-  if (allReady) {
+  if (shouldForceEmitFinalResults(state)) {
+    const reason = getFinalResultsForceReason(state);
+    if (reason && reason !== 'all_ready') {
+      console.warn(
+        `[Round4 socket] Forcing final results for room ${room}` +
+        ` reason=${reason} ready=${readyCount}/${eligiblePlayers.length}` +
+        ` elapsedMs=${state.elapsedMs}`
+      );
+    }
     emitFinalRoundResults(io, room, game);
   }
 }
@@ -645,6 +847,11 @@ function registerSocketHandlers(io) {
     socket.on('queueKokoroNarratorVoice', handleQueueNarratorVoice); // legacy alias
 
     socket.on('toggleReady', () => {
+      if (!allowRequest(`${socket.id}:toggleReady`, 2500, 2)) {
+        socket.emit('gameError', 'Ready toggle locked briefly. Please wait a second.');
+        return;
+      }
+
       const joined = getJoinedRoom(socket);
       if (!joined) return;
 
@@ -1122,14 +1329,33 @@ function registerSocketHandlers(io) {
           : null;
         const round4Precompute = precomputeStore && precomputeStore.round4 ? precomputeStore.round4 : null;
         let scored;
-        if (round4Precompute && round4Precompute.result) {
-          scored = round4Precompute.result;
-          console.log(`[Eval precompute] Reused round 4 eval for room ${room}`);
-        } else if (round4Precompute && round4Precompute.promise) {
-          scored = await round4Precompute.promise;
-          console.log(`[Eval precompute] Awaited in-flight round 4 eval for room ${room}`);
-        } else {
-          scored = await evaluateRound4FromGame(game);
+        try {
+          const scoringPromise = (async () => {
+            if (round4Precompute && round4Precompute.result) {
+              console.log(`[Eval precompute] Reused round 4 eval for room ${room}`);
+              return round4Precompute.result;
+            }
+            if (round4Precompute && round4Precompute.promise) {
+              const result = await round4Precompute.promise;
+              console.log(`[Eval precompute] Awaited in-flight round 4 eval for room ${room}`);
+              return result;
+            }
+            return evaluateRound4FromGame(game);
+          })();
+          scored = await withTimeout(scoringPromise, ROUND4_EVAL_WATCHDOG_MS, 'round4_eval_watchdog');
+        } catch (evalError) {
+          const timedOut = evalError && evalError.code === 'ROUND4_EVAL_TIMEOUT';
+          if (!timedOut || !ROUND4_TIMEOUT_FALLBACK_ENABLED) {
+            throw evalError;
+          }
+          console.warn(
+            `[Round4 socket] Evaluation watchdog timeout in room ${room}. ` +
+            `Using emergency fallback payload after ${ROUND4_EVAL_WATCHDOG_MS}ms.`
+          );
+          scored = buildRound4EmergencyFallbackScored(
+            game,
+            evalError && evalError.message ? evalError.message : 'round4_eval_timeout'
+          );
         }
 
         if (!game.round4Applied) {
@@ -1229,8 +1455,11 @@ function registerSocketHandlers(io) {
           tiedPlayers: tiedTeams,
           roundPoints: scored.roundPoints,
           pointBreakdown: scored.pointBreakdown,
-          leaderboardData
+          leaderboardData,
+          finalResultsGateStartedAtMs: 0
         };
+        game.finalResultsGateStartedAtMs = 0;
+        game.finalResultsFailSafeTimersArmed = false;
 
         const totalTeams = Object.keys(scored.teamEvaluations || {}).length;
         const totalEntries = Object.values(scored.teamEvaluations || {}).reduce((sum, team) => (
@@ -1264,6 +1493,10 @@ function registerSocketHandlers(io) {
 
       game.finalResultsReady = game.finalResultsReady || {};
       game.finalResultsReady[name] = true;
+      if (!Number(game.finalResultsGateStartedAtMs)) {
+        game.finalResultsGateStartedAtMs = Date.now();
+        armFinalResultsFailSafeTimers(io, room, game);
+      }
 
       updateFinalResultsWaiting(io, room, roomData, game);
       markRoomsDirty();

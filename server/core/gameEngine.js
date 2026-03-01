@@ -66,21 +66,22 @@ const {
 const GAME_NARRATOR_VOICE_IDS = new Set(['af_heart', 'af_bella', 'am_michael', 'bm_george']);
 
 async function emitWithVoiceCuePrewarm(io, roomCode, eventName, payload, { timeoutMs = 1600 } = {}) {
+  io.to(roomCode).emit(eventName, payload);
   const voiceCues = Array.isArray(payload && payload.voiceCues) ? payload.voiceCues : [];
-  if (voiceCues.length) {
-    const room = rooms[roomCode];
-    const narratorVoiceId = room && room.voiceConfig && GAME_NARRATOR_VOICE_IDS.has(String(room.voiceConfig.narratorVoiceId || ''))
-      ? String(room.voiceConfig.narratorVoiceId)
-      : 'bm_george';
-    try {
+  if (!voiceCues.length) return;
+  const room = rooms[roomCode];
+  const narratorVoiceId = room && room.voiceConfig && GAME_NARRATOR_VOICE_IDS.has(String(room.voiceConfig.narratorVoiceId || ''))
+    ? String(room.voiceConfig.narratorVoiceId)
+    : 'bm_george';
+  Promise.resolve()
+    .then(async () => {
       await prewarmAdaptiveNarratorVoiceCues({
         cues: voiceCues,
         narratorVoiceId,
         timeoutMs
       });
-    } catch (_error) {}
-  }
-  io.to(roomCode).emit(eventName, payload);
+    })
+    .catch(() => {});
 }
 
 function normalizeWordCandidate(value) {
@@ -2145,6 +2146,8 @@ async function startFinalRound(io, roomCode) {
   game.round4Results = null;
   game.finalResultsReady = {};
   game.finalResultsEmitted = false;
+  game.finalResultsGateStartedAtMs = 0;
+  game.finalResultsFailSafeTimersArmed = false;
 
   const preparedFinal = prepareFinalRoundState(game, roomCode);
 

@@ -716,9 +716,16 @@ export class AdaptiveTtsVoiceEngine {
         result = await postForAudioWithTimeout(this.apiSynthUrl, normalized, { timeoutMs: 45000 });
       } catch (error) {
         const message = String(error && (error.message || error) || '');
-        if (/no_tts_provider_available/i.test(message) || /http_503/i.test(message)) {
+        if (
+          /no_tts_provider_available/i.test(message)
+          || /http_503/i.test(message)
+          || /failed to fetch/i.test(message)
+          || /networkerror/i.test(message)
+          || /load failed/i.test(message)
+          || /http_0/i.test(message)
+        ) {
           this.serverSynthesisAvailable = false;
-          this.serverSynthesisBackoffUntil = nowMs() + (5 * 60 * 1000);
+          this.serverSynthesisBackoffUntil = nowMs() + (45 * 1000);
           this.defaultDevice = 'browser-fallback';
           this.error = '';
           this._notifyStateChange();

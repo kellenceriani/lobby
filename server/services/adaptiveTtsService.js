@@ -175,6 +175,22 @@ function normalizePitch(value) {
   return clamp(value, 0.7, 1.35, 1);
 }
 
+function getInteractiveTtsTimeoutMs() {
+  return clamp(process.env.LOBBY_TTS_INTERACTIVE_TIMEOUT_MS, 1500, 30000, 5000);
+}
+
+function resolveProviderTimeoutMs(req = {}, fallbackMs = DEFAULT_TIMEOUT_MS, { min = 500, max = 120000 } = {}) {
+  const explicit = Number(req && req.timeoutMs);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return clamp(explicit, min, max, fallbackMs);
+  }
+  const profile = String(req && req.timeoutProfile || '').trim().toLowerCase();
+  if (profile === 'interactive_phase') {
+    return clamp(getInteractiveTtsTimeoutMs(), min, max, fallbackMs);
+  }
+  return clamp(fallbackMs, min, max, fallbackMs);
+}
+
 function safeJsonParse(text = '') {
   try {
     return JSON.parse(String(text || ''));
@@ -819,7 +835,7 @@ function spawnProcess(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS, cwd = und
   });
 }
 
-async function synthesizeWithEdgePython({ text, voiceId, speed, pitch, route }) {
+async function synthesizeWithEdgePython({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile }) {
   const edgeVoice = String(route && route.edgeVoice || '').trim();
   if (!edgeVoice) {
     const error = new Error('edge_voice_missing');
@@ -856,6 +872,11 @@ async function synthesizeWithEdgePython({ text, voiceId, speed, pitch, route }) 
   ].filter((item, index, arr) => item.command && arr.findIndex((x) => `${x.command}|${x.args.join(' ')}` === `${item.command}|${item.args.join(' ')}`) === index);
 
   let lastError = null;
+  const safeTimeoutMs = resolveProviderTimeoutMs(
+    { timeoutMs, timeoutProfile },
+    clamp(process.env.LOBBY_TTS_EDGE_TIMEOUT_MS, 5000, 90000, 35000),
+    { min: 1200, max: 90000 }
+  );
   for (let i = 0; i < runners.length; i += 1) {
     const runner = runners[i];
     try {
@@ -868,7 +889,7 @@ async function synthesizeWithEdgePython({ text, voiceId, speed, pitch, route }) 
         edgeRateFromSpeed(speed),
         edgePitchFromPitch(pitch),
         outPath
-      ], { timeoutMs: clamp(process.env.LOBBY_TTS_EDGE_TIMEOUT_MS, 5000, 90000, 35000) });
+      ], { timeoutMs: safeTimeoutMs });
 
       const buffer = await fsp.readFile(outPath);
       if (!buffer || !buffer.length) {
@@ -911,7 +932,7 @@ async function synthesizeWithEdgePython({ text, voiceId, speed, pitch, route }) 
   throw err;
 }
 
-async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route }) {
+async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile }) {
   const edgeVoice = String(route && route.edgeVoice || '').trim();
   if (!edgeVoice) {
     const error = new Error('edge_voice_missing');
@@ -926,7 +947,11 @@ async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route }) {
     throw error;
   }
 
-  const timeoutMs = clamp(process.env.LOBBY_TTS_EDGE_TIMEOUT_MS, 5000, 90000, 35000);
+  const safeTimeoutMs = resolveProviderTimeoutMs(
+    { timeoutMs, timeoutProfile },
+    clamp(process.env.LOBBY_TTS_EDGE_TIMEOUT_MS, 5000, 90000, 35000),
+    { min: 1200, max: 90000 }
+  );
   let timer = null;
   try {
     let buffer;
@@ -937,17 +962,17 @@ async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route }) {
       try {
         const timeoutPromise = new Promise((_, reject) => {
           timer = setTimeout(() => {
-            const err = new Error(`edge_node_timeout_${timeoutMs}ms`);
+            const err = new Error(`edge_node_timeout_${safeTimeoutMs}ms`);
             err.providerId = 'edge';
             reject(err);
-          }, timeoutMs);
+          }, safeTimeoutMs);
         });
         const ttsInstance = new mod.EdgeTTS({
           voice: edgeVoice,
           lang,
           rate: edgeRateFromSpeed(speed),
           pitch: edgePitchFromPitch(pitch),
-          timeout: timeoutMs
+          timeout: safeTimeoutMs
         });
         await Promise.race([
           Promise.resolve(ttsInstance.ttsPromise(text, outPath)),
@@ -964,10 +989,10 @@ async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route }) {
     } else {
       const timeoutPromise = new Promise((_, reject) => {
         timer = setTimeout(() => {
-          const err = new Error(`edge_node_timeout_${timeoutMs}ms`);
+          const err = new Error(`edge_node_timeout_${safeTimeoutMs}ms`);
           err.providerId = 'edge';
           reject(err);
-        }, timeoutMs);
+        }, safeTimeoutMs);
       });
       const result = await Promise.race([
         Promise.resolve(mod.tts(text, {
@@ -1015,18 +1040,18 @@ async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route }) {
   }
 }
 
-async function synthesizeWithEdge({ text, voiceId, speed, pitch, route }) {
+async function synthesizeWithEdge({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile }) {
   let nodeError = null;
   let pyError = null;
 
   try {
-    return await synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route });
+    return await synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
   } catch (error) {
     nodeError = error;
   }
 
   try {
-    return await synthesizeWithEdgePython({ text, voiceId, speed, pitch, route });
+    return await synthesizeWithEdgePython({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
   } catch (error) {
     pyError = error;
   }
@@ -1060,7 +1085,7 @@ function getPiperModelPathForRoute(route = {}) {
   return '';
 }
 
-async function synthesizeWithPiper({ text, speed, route }) {
+async function synthesizeWithPiper({ text, speed, route, timeoutMs, timeoutProfile }) {
   const bin = String(process.env.LOBBY_TTS_PIPER_BIN || 'piper').trim();
   const modelPath = getPiperModelPathForRoute(route);
   if (!modelPath) {
@@ -1073,13 +1098,18 @@ async function synthesizeWithPiper({ text, speed, route }) {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'lobby-piper-'));
   const outPath = path.join(tmpDir, 'out.wav');
   const lengthScale = clamp(1 / normalizeSpeed(speed), 0.65, 1.5, 1).toFixed(2);
+  const safeTimeoutMs = resolveProviderTimeoutMs(
+    { timeoutMs, timeoutProfile },
+    clamp(process.env.LOBBY_TTS_PIPER_TIMEOUT_MS, 5000, 120000, 45000),
+    { min: 1200, max: 120000 }
+  );
   try {
     await spawnProcess(bin, [
       '--model', modelPath,
       '--output_file', outPath,
       '--length_scale', lengthScale
     ], {
-      timeoutMs: clamp(process.env.LOBBY_TTS_PIPER_TIMEOUT_MS, 5000, 120000, 45000),
+      timeoutMs: safeTimeoutMs,
       input: text
     });
     const buffer = await fsp.readFile(outPath);
@@ -1114,7 +1144,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
   }
 }
 
-async function synthesizeWithHttpBridge({ providerId, text, voiceId, speed, pitch, route }) {
+async function synthesizeWithHttpBridge({ providerId, text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile }) {
   const url = getProviderEnv(providerId, 'URL');
   if (!url) {
     const error = new Error('bridge_url_missing');
@@ -1122,7 +1152,11 @@ async function synthesizeWithHttpBridge({ providerId, text, voiceId, speed, pitc
     throw error;
   }
   const token = getProviderEnv(providerId, 'BEARER');
-  const timeoutMs = clamp(getProviderEnv(providerId, 'TIMEOUT_MS'), 2000, 120000, 45000);
+  const safeTimeoutMs = resolveProviderTimeoutMs(
+    { timeoutMs, timeoutProfile },
+    clamp(getProviderEnv(providerId, 'TIMEOUT_MS'), 2000, 120000, 45000),
+    { min: 1200, max: 120000 }
+  );
   const body = {
     text,
     speed: normalizeSpeed(speed),
@@ -1140,7 +1174,7 @@ async function synthesizeWithHttpBridge({ providerId, text, voiceId, speed, pitc
       ...(token ? { authorization: `Bearer ${token}` } : {})
     },
     body: JSON.stringify(body)
-  }, timeoutMs);
+  }, safeTimeoutMs);
   if (!response || !response.ok) {
     throw new Error(`bridge_http_${response ? response.status : 'fail'}`);
   }
@@ -1233,7 +1267,7 @@ async function readCacheArtifact(cacheKey) {
   return null;
 }
 
-async function synthesizeAdaptiveTts({ text, voiceId, speed = 1, pitch = 1 } = {}) {
+async function synthesizeAdaptiveTts({ text, voiceId, speed = 1, pitch = 1, timeoutMs = null, timeoutProfile = '' } = {}) {
   const safeText = normalizeText(text);
   if (!safeText) {
     const error = new Error('empty_text');
@@ -1275,7 +1309,9 @@ async function synthesizeAdaptiveTts({ text, voiceId, speed = 1, pitch = 1 } = {
           voiceId,
           speed: safeSpeed,
           pitch: safePitch,
-          route
+          route,
+          timeoutMs,
+          timeoutProfile
         });
         providerAttempts.push({
           providerId,
@@ -1464,7 +1500,10 @@ async function prewarmAdaptiveNarratorVoiceCues({
   }
 
   const startedAt = Date.now();
-  const workPromise = Promise.allSettled(specs.map((spec) => synthesizeAdaptiveTts(spec)));
+  const workPromise = Promise.allSettled(specs.map((spec) => synthesizeAdaptiveTts({
+    ...spec,
+    timeoutProfile: 'interactive_phase'
+  })));
   let settled = [];
   let timedOut = false;
   if (timeoutMs > 0) {

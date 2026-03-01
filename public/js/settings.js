@@ -167,9 +167,9 @@ if (modeKey === 'coreRules') {
           <div class="field">
             <label for="preview-difficulty"><strong>🎚️ Difficulty</strong></label>
             <select id="preview-difficulty" disabled aria-label="Game difficulty">
-              <option value="easy">🟢 Easy</option>
-              <option value="normal">🟡 Normal</option>
-              <option value="hard">🔴 Hard</option>
+              <option value="easy">🟢 Easy (60s)</option>
+              <option value="normal">🟡 Normal (45s)</option>
+              <option value="hard">🔴 Hard (35s)</option>
             </select>
           </div>
 
@@ -467,9 +467,9 @@ function refreshNowPlaying() {
   const plotTwistsOn = $('plotTwists') ? Boolean($('plotTwists').checked) : true;
 
   const difficultyLabel = ({
-    easy: 'Easy',
-    normal: 'Normal',
-    hard: 'Hard'
+    easy: 'Easy (60s)',
+    normal: 'Normal (45s)',
+    hard: 'Hard (35s)'
   })[difficulty] || difficulty;
 
   const themeLabel = ({

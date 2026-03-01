@@ -629,6 +629,39 @@ const TWIST_MODIFIER_LIBRARY = {
   hard: ['AND EACH SUCCESS SPAWNS A HARDER OBJECTIVE', 'AND YOU CANNOT REPEAT A STRATEGY', 'AND FAILURE MULTIPLIES PRESSURE']
 };
 
+const TWIST_DIFFICULTY_CLAUSES = {
+  easy: [
+    'WITH ONE TEAMMATE HELPING',
+    'WITH EXTRA RECOVERY WINDOWS',
+    'WITH COACHING ALLOWED BETWEEN PHASES',
+    'WITH A SAFE RESET AFTER EACH ATTEMPT'
+  ],
+  normal: [
+    'WHILE THE CLOCK NEVER STOPS',
+    'WITH RULES SHIFTING EACH PHASE',
+    'WHILE RESOURCES SHRINK OVER TIME',
+    'WITH LIVE SCORE PRESSURE ACTIVE'
+  ],
+  hard: [
+    'WITHOUT TOUCHING THE PRIMARY OBJECTIVE DIRECTLY',
+    'WITH NO RETRIES OR RESPAWNS',
+    'WHILE EVERY MISTAKE ADDS A NEW PENALTY',
+    'WITH A MOVING WIN CONDITION'
+  ]
+};
+
+const TWIST_ABSURD_MARKERS = [
+  'PUDDING', 'SENTIENT CLOUD', '4D', 'QUANTUM', 'PARADOX', 'NON-EUCLIDEAN', 'ABSTRACT',
+  'YOU DON\'T EXIST', 'MEANING IS MEANINGLESS', 'METAPHORICAL', 'SPACE BETWEEN THOUGHTS',
+  'COLLECTIVE CONSCIOUSNESS', 'AS PURE ENERGY', 'REALITY IS SUBJECTIVE'
+];
+
+const SCENARIO_SOURCE = {
+  PACK: 'pack',
+  THEME: 'theme',
+  CORE: 'core'
+};
+
 function inferTwistDomains(text) {
   const source = String(text || '').toLowerCase();
   const domains = Object.entries(TWIST_DOMAIN_SIGNALS)
@@ -647,26 +680,161 @@ function composeDynamicTwist({ difficulty = 'normal', scenarioText = '' }) {
   const safeDifficulty = ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
   const domains = inferTwistDomains(scenarioText);
   const primaryPool = [
-    ...(TWIST_PREFIX_LIBRARY.easy || []),
+    ...(safeDifficulty === 'easy' ? TWIST_PREFIX_LIBRARY.easy || [] : []),
     ...(safeDifficulty !== 'easy' ? TWIST_PREFIX_LIBRARY.normal || [] : []),
     ...(safeDifficulty === 'hard' ? TWIST_PREFIX_LIBRARY.hard || [] : [])
   ];
 
   const chosenDomain = randomFrom(domains);
   const domainPool = TWIST_DOMAIN_LIBRARY[chosenDomain] || [];
-  const modifierPool = TWIST_MODIFIER_LIBRARY[safeDifficulty] || [];
+  const modifierPool = [
+    ...(TWIST_MODIFIER_LIBRARY[safeDifficulty] || []),
+    ...(TWIST_DIFFICULTY_CLAUSES[safeDifficulty] || [])
+  ];
 
   const primary = randomFrom(primaryPool);
   const domainLine = domainPool.length ? randomFrom(domainPool) : '';
 
+  const modifier = randomFrom(modifierPool);
+  return applyPromptBrevity([primary, domainLine, modifier].filter(Boolean).join(' | '), 'twist');
+}
+
+function normalizeDifficulty(difficulty = 'normal') {
+  return ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
+}
+
+function isKnownTheme(theme = 'all') {
+  return Object.prototype.hasOwnProperty.call(SCENARIO_TEMPLATES, String(theme || '').toLowerCase());
+}
+
+function isAbsurdTwistLine(line) {
+  const source = String(line || '').toUpperCase();
+  if (!source) return false;
+  return TWIST_ABSURD_MARKERS.some((marker) => source.includes(marker));
+}
+
+function filterTwistsForTheme(pool, theme = 'all') {
+  const safeTheme = String(theme || 'all').toLowerCase();
+  if (safeTheme === 'absurd') return Array.isArray(pool) ? pool.slice() : [];
+  const candidates = (Array.isArray(pool) ? pool : []).filter((line) => !isAbsurdTwistLine(line));
+  return candidates.length ? candidates : (Array.isArray(pool) ? pool.slice() : []);
+}
+
+function buildTwistBasePool(difficulty = 'normal', theme = 'all') {
+  const safeDifficulty = normalizeDifficulty(difficulty);
+  const easyTwists = TWIST_TEMPLATES.easy || [];
+  const normalTwists = TWIST_TEMPLATES.normal || [];
+  const hardTwists = TWIST_TEMPLATES.hard || [];
+
+  let pool = [];
   if (safeDifficulty === 'easy') {
-    return applyPromptBrevity([primary, domainLine].filter(Boolean).join(' | '), 'twist');
+    pool = [...easyTwists, ...normalTwists.slice(0, 4)];
+  } else if (safeDifficulty === 'hard') {
+    pool = [...normalTwists, ...hardTwists];
+  } else {
+    pool = [...easyTwists.slice(0, 4), ...normalTwists, ...hardTwists.slice(0, 3)];
   }
 
-  const modifier = Math.random() < (safeDifficulty === 'hard' ? 0.75 : 0.45)
-    ? randomFrom(modifierPool)
-    : '';
-  return applyPromptBrevity([primary, domainLine, modifier].filter(Boolean).join(' | '), 'twist');
+  return filterTwistsForTheme(pool, theme);
+}
+
+function buildScenarioSourceMix({ count = 3, theme = 'all', packRuntime = null } = {}) {
+  const total = Math.max(1, Number(count) || 1);
+  const safeTheme = String(theme || 'all').toLowerCase();
+  const hasThemeControl = safeTheme !== 'all' && (resolveThemeAliases(safeTheme).length > 0 || isKnownTheme(safeTheme));
+  const hasPackCards = getPackScenarioCards(packRuntime).length > 0;
+
+  const slots = [];
+
+  if (hasPackCards && hasThemeControl) {
+    const variants = [
+      { pack: Math.max(1, Math.floor(total * 0.5)), theme: Math.ceil(total * 0.5), core: 0 },
+      { pack: Math.max(1, Math.ceil(total * 0.67)), theme: Math.max(1, total - Math.ceil(total * 0.67)), core: 0 },
+      { pack: Math.max(1, Math.floor(total * 0.75)), theme: Math.max(1, total - Math.floor(total * 0.75)), core: 0 }
+    ].filter((variant) => variant.pack + variant.theme + variant.core === total);
+    const selected = randomFrom(variants);
+    for (let i = 0; i < selected.pack; i++) slots.push(SCENARIO_SOURCE.PACK);
+    for (let i = 0; i < selected.theme; i++) slots.push(SCENARIO_SOURCE.THEME);
+  } else if (hasPackCards) {
+    for (let i = 0; i < total; i++) slots.push(SCENARIO_SOURCE.PACK);
+  } else if (hasThemeControl) {
+    for (let i = 0; i < total; i++) slots.push(SCENARIO_SOURCE.THEME);
+  } else {
+    for (let i = 0; i < total; i++) slots.push(SCENARIO_SOURCE.CORE);
+  }
+
+  return shufflePool(slots);
+}
+
+function generateTemplateScenarioFromCategory(category) {
+  const safeCategory = Object.prototype.hasOwnProperty.call(SCENARIO_TEMPLATES, category) ? category : 'action';
+  const templates = SCENARIO_TEMPLATES[safeCategory] || SCENARIO_TEMPLATES.action;
+  const template = templates[Math.floor(Math.random() * templates.length)];
+
+  let scenario = template.template;
+  template.vars.forEach((varName) => {
+    const words = WORD_BANKS[varName] || FALLBACK_WORDS;
+    const word = words[Math.floor(Math.random() * words.length)];
+    scenario = scenario.replace(`{${varName}}`, word);
+  });
+
+  return applyPromptBrevity(scenario, 'scenario');
+}
+
+function generateScenarioFromPack(theme = 'all', packRuntime = null) {
+  const packCards = getPackScenarioCards(packRuntime);
+  if (!packCards.length) return null;
+
+  const requestedTheme = String(theme || 'all').toLowerCase();
+  const themedCategories = new Set(resolveThemeAliases(requestedTheme));
+  const strictThemeCards = requestedTheme === 'all'
+    ? packCards
+    : packCards.filter((card) => themedCategories.has(String(card.category || '').toLowerCase()));
+
+  const cardPool = strictThemeCards.length ? strictThemeCards : packCards;
+  const selectedCard = randomFrom(cardPool);
+  if (!selectedCard) return null;
+
+  return {
+    scenario: applyPromptBrevity(selectedCard.text, 'scenario'),
+    category: selectedCard.category || 'pack',
+    source: SCENARIO_SOURCE.PACK
+  };
+}
+
+function generateScenarioFromTheme(theme = 'all', packRuntime = null) {
+  const requestedTheme = String(theme || 'all').toLowerCase();
+  const categories = buildScenarioCategoryPool(requestedTheme, packRuntime);
+  const aliases = new Set(resolveThemeAliases(requestedTheme));
+  const strictThemeCategories = requestedTheme === 'all'
+    ? categories
+    : categories.filter((category) => aliases.has(category) || category === requestedTheme);
+  const categoryPool = strictThemeCategories.length ? strictThemeCategories : categories;
+  const selectedCategory = randomFrom(categoryPool.length ? categoryPool : Object.keys(SCENARIO_TEMPLATES));
+
+  return {
+    scenario: generateTemplateScenarioFromCategory(selectedCategory),
+    category: selectedCategory,
+    source: requestedTheme === 'all' ? SCENARIO_SOURCE.CORE : SCENARIO_SOURCE.THEME
+  };
+}
+
+function resolveScenarioForSource({ source = SCENARIO_SOURCE.CORE, theme = 'all', packRuntime = null } = {}) {
+  if (source === SCENARIO_SOURCE.PACK) {
+    const fromPack = generateScenarioFromPack(theme, packRuntime);
+    if (fromPack) return fromPack;
+    const fromThemeFallback = generateScenarioFromTheme(theme, packRuntime);
+    return { ...fromThemeFallback, source: SCENARIO_SOURCE.THEME };
+  }
+
+  if (source === SCENARIO_SOURCE.THEME) {
+    return generateScenarioFromTheme(theme, packRuntime);
+  }
+
+  return {
+    ...generateScenarioFromTheme('all', null),
+    source: SCENARIO_SOURCE.CORE
+  };
 }
 
 function normalizePackRuntime(packRuntime) {
@@ -747,7 +915,7 @@ function resolveThemeAliases(theme = 'all') {
 
 function getThemeTwistAdds(theme = 'all', difficulty = 'normal') {
   const safeTheme = String(theme || 'all').toLowerCase();
-  const safeDifficulty = ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
+  const safeDifficulty = normalizeDifficulty(difficulty);
   const bucket = THEME_TWIST_ADDS[safeTheme];
   if (!bucket || !Array.isArray(bucket[safeDifficulty])) return [];
   return bucket[safeDifficulty].slice();
@@ -767,39 +935,8 @@ function buildScenarioCategoryPool(theme = 'all', packRuntime = null) {
 }
 
 function generateScenario(theme = 'all', packRuntime = null) {
-  const packCards = getPackScenarioCards(packRuntime);
-  const requestedTheme = String(theme || 'all').toLowerCase();
-  const themedCategories = new Set(resolveThemeAliases(requestedTheme));
-  const themedPackCards = packCards.filter((card) => {
-    if (requestedTheme === 'all') return true;
-    return themedCategories.has(String(card.category || '').toLowerCase());
-  });
-  const packCardPool = themedPackCards.length ? themedPackCards : packCards;
-  const packChance = requestedTheme === 'all'
-    ? 0.78
-    : (themedPackCards.length ? 0.9 : 0.72);
-
-  if (packCardPool.length && Math.random() < packChance) {
-    const selectedCard = packCardPool[Math.floor(Math.random() * packCardPool.length)];
-    return {
-      scenario: applyPromptBrevity(selectedCard.text, 'scenario'),
-      category: selectedCard.category || 'pack'
-    };
-  }
-
-  const categories = buildScenarioCategoryPool(requestedTheme, packRuntime);
-  const category = categories[Math.floor(Math.random() * categories.length)];
-  const templates = SCENARIO_TEMPLATES[category] || SCENARIO_TEMPLATES.action;
-  const template = templates[Math.floor(Math.random() * templates.length)];
-
-  let scenario = template.template;
-  template.vars.forEach(varName => {
-    const words = WORD_BANKS[varName] || FALLBACK_WORDS;
-    const word = words[Math.floor(Math.random() * words.length)];
-    scenario = scenario.replace(`{${varName}}`, word);
-  });
-
-  return { scenario: applyPromptBrevity(scenario, 'scenario'), category };
+  const source = randomFrom(buildScenarioSourceMix({ count: 1, theme, packRuntime })) || SCENARIO_SOURCE.CORE;
+  return resolveScenarioForSource({ source, theme, packRuntime });
 }
 
 function getPackTwistAdds(packRuntime, difficulty) {
@@ -821,23 +958,18 @@ function generateTwists(difficulty = 'normal', count = 4, scenarioText = '', pac
     );
   }
 
-  const safeDifficulty = ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal';
+  const safeDifficulty = normalizeDifficulty(difficulty);
   const safeTheme = String(theme || 'all').toLowerCase();
   const targetCount = Math.max(1, Math.min(12, Number(count) || 4));
-  const easyTwists = TWIST_TEMPLATES.easy;
-  const normalTwists = TWIST_TEMPLATES.normal;
-  const hardTwists = TWIST_TEMPLATES.hard;
+  const basePool = buildTwistBasePool(safeDifficulty, safeTheme);
+  const packAdds = getPackTwistAdds(packRuntime, safeDifficulty);
+  const themeAdds = getThemeTwistAdds(safeTheme, safeDifficulty);
 
-  let pool = [];
-  if (safeDifficulty === 'easy') {
-    pool = [...easyTwists, ...normalTwists.slice(0, 3)];
-  } else if (safeDifficulty === 'hard') {
-    pool = [...normalTwists, ...hardTwists];
-  } else {
-    pool = [...easyTwists.slice(0, 2), ...normalTwists, ...hardTwists.slice(0, 2)];
-  }
-  pool.push(...getPackTwistAdds(packRuntime, safeDifficulty));
-  pool.push(...getThemeTwistAdds(safeTheme, safeDifficulty));
+  const pool = [
+    ...basePool,
+    ...packAdds,
+    ...themeAdds
+  ];
 
   const themeSignal = resolveThemeAliases(safeTheme).join(' ');
   const dynamicScenarioSeed = [String(scenarioText || ''), themeSignal].filter(Boolean).join(' ');
@@ -850,22 +982,53 @@ function generateTwists(difficulty = 'normal', count = 4, scenarioText = '', pac
     }));
   }
 
-  const merged = Array.from(new Set([...pool, ...dynamicPool]));
+  const mustInclude = [];
+  if (packAdds.length) mustInclude.push(randomFrom(packAdds));
+  if (themeAdds.length) mustInclude.push(randomFrom(themeAdds));
+  mustInclude.push(randomFrom(TWIST_DIFFICULTY_CLAUSES[safeDifficulty] || []));
+
+  const merged = Array.from(new Set([...mustInclude.filter(Boolean), ...pool, ...dynamicPool]));
   const concise = Array.from(new Set(
     merged
       .map((twist) => applyPromptBrevity(twist, 'twist'))
       .filter(Boolean)
   ));
-  return shufflePool(concise).slice(0, targetCount);
+  const prioritized = Array.from(new Set([
+    ...mustInclude.filter(Boolean).map((twist) => applyPromptBrevity(twist, 'twist')).filter(Boolean),
+    ...shufflePool(concise)
+  ]));
+  return prioritized.slice(0, targetCount);
 }
 
 function generateScenarios(count = 3, theme = 'all', difficulty = 'normal', packRuntime = null) {
+  const safeCount = Math.max(1, Math.min(8, Number(count) || 3));
+  const sourceSlots = buildScenarioSourceMix({ count: safeCount, theme, packRuntime });
   const scenarios = [];
-  for (let i = 0; i < count; i++) {
-    const generated = generateScenario(theme, packRuntime);
+  const usedScenarios = new Set();
+
+  for (let i = 0; i < safeCount; i++) {
+    const source = sourceSlots[i] || SCENARIO_SOURCE.CORE;
+    let generated = null;
+
+    for (let attempts = 0; attempts < 5; attempts += 1) {
+      generated = resolveScenarioForSource({ source, theme, packRuntime });
+      const dedupeKey = String(generated && generated.scenario || '').toLowerCase();
+      if (!dedupeKey || !usedScenarios.has(dedupeKey)) {
+        if (dedupeKey) usedScenarios.add(dedupeKey);
+        break;
+      }
+    }
+
+    if (!generated) {
+      generated = resolveScenarioForSource({ source: SCENARIO_SOURCE.CORE, theme: 'all', packRuntime: null });
+    }
+
     const scenario = generated.scenario;
-    const twists = generateTwists(difficulty, 6, scenario, packRuntime, theme);
-    scenarios.push({ scenario, twists, category: generated.category });
+    const twistTheme = (generated.category && generated.category !== 'pack')
+      ? generated.category
+      : theme;
+    const twists = generateTwists(difficulty, 6, scenario, packRuntime, twistTheme);
+    scenarios.push({ scenario, twists, category: generated.category, source: generated.source || source });
   }
   return scenarios;
 }
@@ -1311,15 +1474,29 @@ function getPackFinalTwistPool(packRuntime, difficulty = 'normal') {
   return Array.isArray(twists) ? twists.slice() : [];
 }
 
-function generateFinalScenario(difficulty = 'normal', packRuntime = null) {
+function generateFinalScenario(difficulty = 'normal', packRuntime = null, theme = 'all') {
+  const safeDifficulty = normalizeDifficulty(difficulty);
+  const safeTheme = String(theme || 'all').toLowerCase();
   const packScenarioPool = getPackFinalScenarioPool(packRuntime);
-  if (packScenarioPool.length && Math.random() < 0.7) {
+  const usePackChance = safeTheme !== 'all' ? 0.58 : 0.72;
+  if (packScenarioPool.length && Math.random() < usePackChance) {
     return applyPromptBrevity(randomFrom(packScenarioPool), 'finalScenario');
   }
 
-  const patternWeights = difficulty === 'hard'
+  if (safeTheme !== 'all') {
+    const themedSeed = generateScenarioFromTheme(safeTheme, packRuntime);
+    const thematicFinalWrap = {
+      easy: 'WIN THE FINAL BY',
+      normal: 'SECURE THE FINAL BY',
+      hard: 'SURVIVE THE FINAL BY'
+    };
+    const wrapped = `${thematicFinalWrap[safeDifficulty] || thematicFinalWrap.normal} ${String(themedSeed.scenario || '').toUpperCase()}`;
+    return applyPromptBrevity(wrapped, 'finalScenario');
+  }
+
+  const patternWeights = safeDifficulty === 'hard'
     ? FINAL_SCENARIO_PATTERNS
-    : difficulty === 'easy'
+    : safeDifficulty === 'easy'
       ? FINAL_SCENARIO_PATTERNS.slice(0, 6)
       : FINAL_SCENARIO_PATTERNS.slice(0, 7);
 
@@ -1329,10 +1506,10 @@ function generateFinalScenario(difficulty = 'normal', packRuntime = null) {
     values[key] = randomFrom(pool);
   });
 
-  if (difficulty === 'easy') {
+  if (safeDifficulty === 'easy') {
     values.COMPLICATION = randomFrom(FINAL_SCENARIO_COMPONENTS.COMPLICATION.slice(0, 8));
     values.OPPOSITION = randomFrom(FINAL_SCENARIO_COMPONENTS.OPPOSITION.slice(0, 10));
-  } else if (difficulty === 'hard') {
+  } else if (safeDifficulty === 'hard') {
     values.DEADLINE = randomFrom(FINAL_SCENARIO_COMPONENTS.DEADLINE.slice(4));
     values.COMPLICATION = randomFrom(FINAL_SCENARIO_COMPONENTS.COMPLICATION.slice(6));
     values.OPPOSITION = randomFrom(FINAL_SCENARIO_COMPONENTS.OPPOSITION.slice(6));
@@ -1342,29 +1519,31 @@ function generateFinalScenario(difficulty = 'normal', packRuntime = null) {
 }
 
 function generateFinalTwist(difficulty = 'normal', scenarioText = '', packRuntime = null, theme = 'all') {
-  const packTwists = getPackFinalTwistPool(packRuntime, difficulty);
-  const themedTwists = getThemeTwistAdds(theme, difficulty);
+  const safeDifficulty = normalizeDifficulty(difficulty);
+  const safeTheme = String(theme || 'all').toLowerCase();
+  const packTwists = getPackFinalTwistPool(packRuntime, safeDifficulty);
+  const themedTwists = getThemeTwistAdds(safeTheme, safeDifficulty);
   const curatedPool = Array.from(new Set([...packTwists, ...themedTwists]));
-  if (curatedPool.length && Math.random() < 0.65) {
+  if (curatedPool.length && Math.random() < 0.72) {
     return applyPromptBrevity(randomFrom(curatedPool), 'finalTwist');
   }
 
-  const domains = inferTwistDomains(scenarioText);
-  const prefixPool = difficulty === 'easy'
-    ? FINAL_TWIST_COMPONENTS.PREFIX.slice(0, 14)
-    : difficulty === 'hard'
-      ? FINAL_TWIST_COMPONENTS.PREFIX.slice(10)
-      : FINAL_TWIST_COMPONENTS.PREFIX;
+  const dynamic = composeDynamicTwist({
+    difficulty: safeDifficulty,
+    scenarioText: [String(scenarioText || ''), safeTheme].filter(Boolean).join(' ')
+  });
 
-  const prefix = randomFrom(prefixPool);
-  const domainPool = TWIST_DOMAIN_LIBRARY[randomFrom(domains)] || [];
-  const domainConstraint = Math.random() > 0.4 ? randomFrom(domainPool) : '';
+  const fallbackPool = [
+    dynamic,
+    randomFrom(TWIST_DIFFICULTY_CLAUSES[safeDifficulty] || []),
+    randomFrom(FINAL_TWIST_COMPONENTS.PREFIX || [])
+  ].filter(Boolean);
 
-  return applyPromptBrevity([prefix, domainConstraint].filter(Boolean).join(' | '), 'finalTwist');
+  return applyPromptBrevity(randomFrom(fallbackPool) || 'NO RULE BREAKERS', 'finalTwist');
 }
 
 function generateFinalScenarioAndTwist(difficulty = 'normal', packRuntime = null, theme = 'all') {
-  const scenario = generateFinalScenario(difficulty, packRuntime);
+  const scenario = generateFinalScenario(difficulty, packRuntime, theme);
   return {
     scenario,
     twist: generateFinalTwist(difficulty, scenario, packRuntime, theme)

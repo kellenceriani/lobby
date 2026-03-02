@@ -222,6 +222,28 @@ function getUniquePortraitUrls() {
   ]));
 }
 
+function shouldUseEagerPortraitPreload() {
+  try {
+    const ua = navigator.userAgent || '';
+    const isMobile = /android|iphone|ipad|ipod|mobile|windows phone/i.test(ua)
+      || (navigator.maxTouchPoints > 0)
+      || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    if (!isMobile) return true;
+
+    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
+    const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
+    const saveDataEnabled = Boolean(connection && connection.saveData === true);
+    const constrainedNetwork = saveDataEnabled || /(^|[^a-z])(slow-2g|2g)($|[^a-z])/i.test(effectiveType);
+    const deviceMemory = Math.max(0, Number(navigator.deviceMemory) || 0);
+    const hardwareConcurrency = Math.max(0, Number(navigator.hardwareConcurrency) || 0);
+    const constrainedMemory = deviceMemory > 0 && deviceMemory <= 2;
+    const constrainedCpu = hardwareConcurrency > 0 && hardwareConcurrency <= 4;
+    return !(constrainedNetwork || constrainedMemory || constrainedCpu);
+  } catch (error) {
+    return false;
+  }
+}
+
 async function decodeImage(src, timeoutMs = 2600) {
   return new Promise((resolve) => {
     const image = new Image();
@@ -259,7 +281,24 @@ async function decodeImage(src, timeoutMs = 2600) {
 
 async function preloadPortraits() {
   const urls = getUniquePortraitUrls();
-  const results = await Promise.all(urls.map((src) => decodeImage(src)));
+  const eager = shouldUseEagerPortraitPreload();
+  const maxWorkers = eager ? 4 : 2;
+  const workerCount = Math.max(1, Math.min(maxWorkers, urls.length));
+  const results = new Array(urls.length).fill(false);
+  let nextIndex = 0;
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < urls.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      const src = urls[currentIndex];
+      results[currentIndex] = await decodeImage(src);
+      if (!eager) {
+        await new Promise((resolve) => window.setTimeout(resolve, 16));
+      }
+    }
+  }));
+
   const decodedPortraits = results.filter(Boolean).length;
   const failedPortraits = results.length - decodedPortraits;
   plaqueState.portraitsReady = true;
@@ -342,8 +381,14 @@ if (typeof window !== 'undefined') {
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    void prepareJoinEvalPlaques({ source: 'module-autostart', preload: true });
+    void prepareJoinEvalPlaques({
+      source: 'module-autostart',
+      preload: shouldUseEagerPortraitPreload()
+    });
   }, { once: true });
 } else {
-  void prepareJoinEvalPlaques({ source: 'module-autostart', preload: true });
+  void prepareJoinEvalPlaques({
+    source: 'module-autostart',
+    preload: shouldUseEagerPortraitPreload()
+  });
 }

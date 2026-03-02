@@ -198,6 +198,18 @@ function isLikelyMobileDevice() {
   return /android|iphone|ipad|ipod|mobile|windows phone/i.test(ua) || coarsePointer || hasTouch;
 }
 
+function isConstrainedMobileStartupDevice() {
+  const connection = (navigator && (navigator.connection || navigator.mozConnection || navigator.webkitConnection)) || null;
+  const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
+  const saveDataEnabled = Boolean(connection && connection.saveData === true);
+  const constrainedNetwork = saveDataEnabled || /(^|[^a-z])(slow-2g|2g)($|[^a-z])/i.test(effectiveType);
+  const hardwareConcurrency = Math.max(0, Number(navigator && navigator.hardwareConcurrency) || 0);
+  const deviceMemory = Math.max(0, Number(navigator && navigator.deviceMemory) || 0);
+  const constrainedCpu = hardwareConcurrency > 0 && hardwareConcurrency <= 4;
+  const constrainedMemory = deviceMemory > 0 && deviceMemory <= 2;
+  return isLikelyMobileDevice() && (constrainedNetwork || constrainedCpu || constrainedMemory);
+}
+
 function setMobileAppHeightVar() {
   const viewportHeight = window.visualViewport
     ? window.visualViewport.height
@@ -4303,7 +4315,7 @@ function seedAudioSceneFromActiveScreen({ syncUi = false } = {}) {
   if (syncUi) syncAudioControlUI();
 }
 
-async function ensureJoinEvalPlaquesReady({ source = 'startup-bootstrap', bridgeWaitMs = 1200 } = {}) {
+async function ensureJoinEvalPlaquesReady({ source = 'startup-bootstrap', bridgeWaitMs = 1200, preload = true } = {}) {
   const resolvePrepareFn = () => {
     if (typeof window.prepareJoinEvalPlaques === 'function') return window.prepareJoinEvalPlaques;
     if (window.JoinEvalPlaques && typeof window.JoinEvalPlaques.prepare === 'function') return window.JoinEvalPlaques.prepare;
@@ -4341,7 +4353,7 @@ async function ensureJoinEvalPlaquesReady({ source = 'startup-bootstrap', bridge
   try {
     const result = await Promise.resolve(prepareFn({
       source,
-      preload: true
+      preload: preload !== false
     }));
     if (result && typeof result === 'object') return result;
     return { ok: true };
@@ -4384,23 +4396,18 @@ async function runStartupBootstrapPreflight() {
       });
   });
 
-  const connection = (navigator && (navigator.connection || navigator.mozConnection || navigator.webkitConnection)) || null;
-  const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
-  const saveDataEnabled = Boolean(connection && connection.saveData === true);
-  const constrainedNetwork = saveDataEnabled || /(^|[^a-z])(slow-2g|2g)($|[^a-z])/i.test(effectiveType);
-  const hardwareConcurrency = Math.max(0, Number(navigator && navigator.hardwareConcurrency) || 0);
-  const deviceMemory = Math.max(0, Number(navigator && navigator.deviceMemory) || 0);
-  const constrainedCpu = hardwareConcurrency > 0 && hardwareConcurrency <= 4;
-  const constrainedMemory = deviceMemory > 0 && deviceMemory <= 2;
-  const constrainedMobileStartup = isLikelyMobileDevice() && (constrainedNetwork || constrainedCpu || constrainedMemory);
-  const blockVoiceWarmups = !constrainedMobileStartup;
+  const constrainedMobileStartup = isConstrainedMobileStartupDevice();
+  const blockVoiceWarmups = false;
 
   const blockingTaskList = [
     {
       key: 'join-eval-plaques',
       label: 'Join eval visuals',
       run: async () => runWithSoftTimeout(
-        () => ensureJoinEvalPlaquesReady({ source: 'startup-blocking-join-eval' }),
+        () => ensureJoinEvalPlaquesReady({
+          source: 'startup-blocking-join-eval',
+          preload: !constrainedMobileStartup
+        }),
         { timeoutMs: 3200, timeoutCode: 'join-eval-soft-timeout' }
       )
     }
@@ -10121,7 +10128,9 @@ setupAudioControls();
 installChatLayoutController();
 updateReadyButtonUi(Boolean(player.ready));
 scheduleMobileTouchAudioHint();
-void runStartupBootstrapPreflight();
+window.setTimeout(() => {
+  void runStartupBootstrapPreflight();
+}, 40);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && audioState.unlocked) {
     ensureAudioRunning();

@@ -1593,8 +1593,6 @@ function resolveKokoroSpeedForCue(cue = {}, plan = {}) {
   const cueType = String(cue && cue.type || '').toLowerCase();
   const cueIdText = String(cue && cue.id || '').toLowerCase();
   const isRevealAnnouncerCue = cueType === 'round4' && cueIdText.includes('reveal-announcer');
-  const isPreviewCue = isVoicePreviewCue(cue);
-  const previewStyle = String(cue && cue.speechSpec && cue.speechSpec.voiceStyle || '').toLowerCase();
   if (cueType === 'narration' && String(cue && cue.id || '').startsWith('voice-preview-narrator-')) {
     return KOKORO_HOST_PREVIEW_SPEED;
   }
@@ -1656,19 +1654,6 @@ function resolveKokoroSpeedForCue(cue = {}, plan = {}) {
       if (cueIdText.includes('game-ended')) speed -= 0.04;
     }
   }
-  if (cueType === 'entry' && isPreviewCue) {
-    const previewSpeedMap = {
-      villain: 0.74,
-      heroic: 1.1,
-      cartoon: 1.36,
-      robotic: 0.9,
-      spooky: 0.72,
-      chaotic: 1.4
-    };
-    if (previewSpeedMap[previewStyle] != null) {
-      speed = Number(previewSpeedMap[previewStyle]);
-    }
-  }
   return Math.max(0.78, Math.min(isRevealAnnouncerCue ? 1.48 : 1.35, speed));
 }
 
@@ -1676,8 +1661,6 @@ function resolveKokoroPitchForCue(cue = {}, plan = {}) {
   const cueType = String(cue && cue.type || '').toLowerCase();
   const cueIdText = String(cue && cue.id || '').toLowerCase();
   const isRevealAnnouncerCue = cueType === 'round4' && cueIdText.includes('reveal-announcer');
-  const isPreviewCue = isVoicePreviewCue(cue);
-  const previewStyle = String(cue && cue.speechSpec && cue.speechSpec.voiceStyle || '').toLowerCase();
   // Keep narration/round cues on a stable server-prewarmed pitch for cache consistency, except reveal announcer.
   if (cueType !== 'entry' && !isRevealAnnouncerCue) return 1;
   if (isRevealAnnouncerCue) {
@@ -1710,19 +1693,6 @@ function resolveKokoroPitchForCue(cue = {}, plan = {}) {
     [ARCHETYPES.MAGICAL]: 0.05
   };
   pitch += Number(archetypeDeltaMap[archetype] || 0);
-  if (cueType === 'entry' && isPreviewCue) {
-    const previewPitchMap = {
-      villain: 0.72,
-      heroic: 1.12,
-      cartoon: 1.2,
-      robotic: 0.84,
-      spooky: 0.84,
-      chaotic: 1.24
-    };
-    if (previewPitchMap[previewStyle] != null) {
-      pitch = Number(previewPitchMap[previewStyle]);
-    }
-  }
   return Math.max(0.72, Math.min(1.35, pitch));
 }
 
@@ -2766,7 +2736,6 @@ function ensureVoicePreviewUnlocked() {
 async function playVoiceStudioPreview(kind = 'narrator') {
   ensureVoicePreviewUnlocked();
   const normalizedKind = String(kind || '').toLowerCase();
-  const cue = buildVoiceStudioPreviewCue(kind);
   if (audioState.kokoroEnabled === true && (!audioState.kokoroReady || !audioState.kokoroWarmupDone)) {
     const loadResult = await ensureKokoroStartupWarmup({ source: 'preview' });
     if (!loadResult || loadResult.ok !== true) {
@@ -2781,12 +2750,7 @@ async function playVoiceStudioPreview(kind = 'narrator') {
       setVoiceStatus(`Narrator preview cache missed for ${narratorLabel}. Generating live preview...`, 'warning');
     }
   }
-  if (audioState.kokoroEnabled === true && normalizedKind === 'character') {
-    const prefetchResult = await prefetchKokoroCueClipNow(cue, { source: 'preview-click-character' });
-    if (!prefetchResult || prefetchResult.ok !== true) {
-      setVoiceStatus('Character preview cache missed. Generating live preview...', 'warning');
-    }
-  }
+  const cue = buildVoiceStudioPreviewCue(kind);
   const result = enqueueVoiceCue(cue);
   if (result && result.enqueued) {
     setVoiceStatus(

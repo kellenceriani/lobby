@@ -1,23 +1,29 @@
 const IOS_CURATED_VOICE_PROFILES = Object.freeze({
   af_heart: Object.freeze({
+    desiredGender: 'female',
     preferredLangs: Object.freeze(['en-us', 'en']),
-    nameHints: Object.freeze(['samantha', 'ava', 'karen', 'victoria', 'serena', 'susan'])
+    nameHints: Object.freeze(['jenny', 'samantha', 'ava', 'karen', 'victoria', 'serena', 'susan'])
   }),
   af_bella: Object.freeze({
+    desiredGender: 'female',
     preferredLangs: Object.freeze(['en-us', 'en']),
-    nameHints: Object.freeze(['allison', 'zoe', 'moira', 'serena', 'victoria', 'susan'])
+    nameHints: Object.freeze(['aria', 'allison', 'zoe', 'moira', 'serena', 'victoria', 'susan'])
   }),
   am_michael: Object.freeze({
+    desiredGender: 'male',
     preferredLangs: Object.freeze(['en-us', 'en']),
     nameHints: Object.freeze(['aaron', 'nathan', 'tom', 'fred', 'alex', 'daniel'])
   }),
   bm_george: Object.freeze({
+    desiredGender: 'male',
     preferredLangs: Object.freeze(['en-gb', 'en']),
     nameHints: Object.freeze(['daniel', 'arthur', 'gordon', 'oliver', 'thomas', 'rishi'])
   })
 });
 
 const DISALLOWED_VOICE_NAME_RE = /(compact|espeak|festival|robot)/i;
+const FEMALE_VOICE_NAME_RE = /(female|woman|girl|aria|allison|zoe|moira|jenny|samantha|ava|karen|victoria|serena|susan|kathy|salli|joanna)/i;
+const MALE_VOICE_NAME_RE = /(male|man|guy|ryan|george|david|daniel|aaron|nathan|tom|fred|alex|arthur|gordon|oliver|thomas|rishi)/i;
 
 function getSpeechVoiceStableId(voice = null) {
   if (!voice || typeof voice !== 'object') return '';
@@ -42,9 +48,21 @@ function scoreIosVoiceForProfile(voice = null, profile = null) {
   else if (lang.startsWith('en')) score += 10;
   if (voice && voice.default) score += 3;
   if (/(enhanced|natural|neural|premium|quality)/.test(combined)) score += 8;
+  if (/narrator\s*voice/.test(combined)) score += 5;
   if (/(apple|ios|iphone|ipad|macos)/.test(combined)) score += 4;
   if (/siri/.test(combined)) score += 2;
   if (DISALLOWED_VOICE_NAME_RE.test(combined)) score -= 28;
+
+  const desiredGender = String(profile && profile.desiredGender || '').trim().toLowerCase();
+  const looksFemale = FEMALE_VOICE_NAME_RE.test(combined);
+  const looksMale = MALE_VOICE_NAME_RE.test(combined);
+  if (desiredGender === 'female') {
+    if (looksFemale) score += 14;
+    if (looksMale) score -= 18;
+  } else if (desiredGender === 'male') {
+    if (looksMale) score += 12;
+    if (looksFemale) score -= 14;
+  }
 
   const preferredLangs = Array.isArray(profile && profile.preferredLangs) ? profile.preferredLangs : [];
   const nameHints = Array.isArray(profile && profile.nameHints) ? profile.nameHints : [];

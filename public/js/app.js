@@ -1593,10 +1593,17 @@ function resolveKokoroSpeedForCue(cue = {}, plan = {}) {
   const cueType = String(cue && cue.type || '').toLowerCase();
   const cueIdText = String(cue && cue.id || '').toLowerCase();
   const isRevealAnnouncerCue = cueType === 'round4' && cueIdText.includes('reveal-announcer');
+  const cueSpeechSpec = cue && cue.speechSpec && typeof cue.speechSpec === 'object' ? cue.speechSpec : null;
+  const isPreviewCue = isVoicePreviewCue(cue);
+  const previewStyle = String(cueSpeechSpec && cueSpeechSpec.voiceStyle || '').trim().toLowerCase();
   if (cueType === 'narration' && String(cue && cue.id || '').startsWith('voice-preview-narrator-')) {
     return KOKORO_HOST_PREVIEW_SPEED;
   }
-  const baseRate = clampAudioRate(plan && plan.rate, 1);
+  const requestedRate = clampAudioRate(cueSpeechSpec && cueSpeechSpec.rate, NaN);
+  const fallbackPlanRate = clampAudioRate(plan && plan.rate, 1);
+  const baseRate = Number.isFinite(requestedRate)
+    ? (isPreviewCue ? requestedRate : ((requestedRate * 0.55) + (fallbackPlanRate * 0.45)))
+    : fallbackPlanRate;
   let speed = 0.98 + ((baseRate - 1) * 0.82);
   if (cueType === 'entry') {
     speed = 1 + ((baseRate - 1) * 0.95);
@@ -1638,6 +1645,17 @@ function resolveKokoroSpeedForCue(cue = {}, plan = {}) {
       [ARCHETYPES.NARRATOR]: -0.05
     };
     speed += Number(archetypeDeltaMap[archetype] || 0);
+    if (isPreviewCue) {
+      const previewStyleDeltaMap = {
+        villain: -0.08,
+        heroic: 0.13,
+        cartoon: 0.12,
+        robotic: -0.05,
+        spooky: -0.16,
+        chaotic: 0.22
+      };
+      speed += Number(previewStyleDeltaMap[previewStyle] || 0);
+    }
   }
   if (cueType === 'round4') {
     const intensity = Math.max(0, Math.min(1, Number(cue && cue.intensity) || 0.6));
@@ -1661,6 +1679,9 @@ function resolveKokoroPitchForCue(cue = {}, plan = {}) {
   const cueType = String(cue && cue.type || '').toLowerCase();
   const cueIdText = String(cue && cue.id || '').toLowerCase();
   const isRevealAnnouncerCue = cueType === 'round4' && cueIdText.includes('reveal-announcer');
+  const cueSpeechSpec = cue && cue.speechSpec && typeof cue.speechSpec === 'object' ? cue.speechSpec : null;
+  const isPreviewCue = isVoicePreviewCue(cue);
+  const previewStyle = String(cueSpeechSpec && cueSpeechSpec.voiceStyle || '').trim().toLowerCase();
   // Keep narration/round cues on a stable server-prewarmed pitch for cache consistency, except reveal announcer.
   if (cueType !== 'entry' && !isRevealAnnouncerCue) return 1;
   if (isRevealAnnouncerCue) {
@@ -1671,7 +1692,11 @@ function resolveKokoroPitchForCue(cue = {}, plan = {}) {
     else if (intensity >= 0.92) pitch -= 0.03;
     return Math.max(0.78, Math.min(1.18, pitch));
   }
-  const basePitch = clampAudioRate(plan && plan.pitch, 1);
+  const requestedPitch = clampAudioRate(cueSpeechSpec && cueSpeechSpec.pitch, NaN);
+  const fallbackPlanPitch = clampAudioRate(plan && plan.pitch, 1);
+  const basePitch = Number.isFinite(requestedPitch)
+    ? (isPreviewCue ? requestedPitch : ((requestedPitch * 0.55) + (fallbackPlanPitch * 0.45)))
+    : fallbackPlanPitch;
   let pitch = 1 + ((basePitch - 1) * 0.95);
   const archetype = String(plan && plan.archetype || cue && cue.archetype || '').toUpperCase();
   const archetypeDeltaMap = {
@@ -1693,6 +1718,17 @@ function resolveKokoroPitchForCue(cue = {}, plan = {}) {
     [ARCHETYPES.MAGICAL]: 0.05
   };
   pitch += Number(archetypeDeltaMap[archetype] || 0);
+  if (isPreviewCue) {
+    const previewStyleDeltaMap = {
+      villain: -0.08,
+      heroic: 0.12,
+      cartoon: 0.08,
+      robotic: -0.06,
+      spooky: -0.14,
+      chaotic: 0.09
+    };
+    pitch += Number(previewStyleDeltaMap[previewStyle] || 0);
+  }
   return Math.max(0.72, Math.min(1.35, pitch));
 }
 
@@ -2513,8 +2549,8 @@ function buildVoiceStudioPreviewCue(kind = 'narrator') {
       {
         archetype: ARCHETYPES.VILLAIN,
         label: 'Villain',
-        text: 'Doctor Doom: Despair.',
-        speechSpec: { voiceStyle: 'villain', rate: 0.78, pitch: 0.74, gain: 0.95 },
+        text: 'Doctor Doom: Kneel... and witness despair.',
+        speechSpec: { voiceStyle: 'villain', rate: 0.72, pitch: 0.7, gain: 0.93 },
         intensity: 0.92
       },
       {
@@ -2534,22 +2570,22 @@ function buildVoiceStudioPreviewCue(kind = 'narrator') {
       {
         archetype: ARCHETYPES.HEROIC,
         label: 'Heroic',
-        text: 'Batman: We rise. We finish this together.',
-        speechSpec: { voiceStyle: 'heroic', rate: 1.06, pitch: 1.1, gain: 0.97 },
+        text: 'Batman: We rise! We finish this together.',
+        speechSpec: { voiceStyle: 'heroic', rate: 1.12, pitch: 1.18, gain: 1.0 },
         intensity: 0.84
       },
       {
         archetype: ARCHETYPES.SPOOKY,
         label: 'Spooky',
-        text: 'Ghost signal... the hallway whispers back...',
-        speechSpec: { voiceStyle: 'spooky', rate: 0.76, pitch: 0.86, gain: 0.78 },
+        text: 'Shh... ghost signal... the hallway whispers back...',
+        speechSpec: { voiceStyle: 'spooky', rate: 0.68, pitch: 0.78, gain: 0.72 },
         intensity: 0.9
       },
       {
         archetype: ARCHETYPES.CHAOTIC,
         label: 'Chaotic',
-        text: "Chaos mode: go, go, go, we're doing this live!",
-        speechSpec: { voiceStyle: 'chaotic', rate: 1.36, pitch: 1.22, gain: 1.0 },
+        text: "Chaos mode! go, GO, GO! we're doing this live!!",
+        speechSpec: { voiceStyle: 'chaotic', rate: 1.42, pitch: 1.24, gain: 1.0 },
         intensity: 0.94
       }
     ];
@@ -2624,7 +2660,7 @@ function getVoiceStudioPreviewWarmupCues() {
     {
       id: 'voice-preview-warmup-villain',
       type: 'entry',
-      text: 'Doctor Doom: Despair.',
+      text: 'Doctor Doom: Kneel... and witness despair.',
       subtitleText: 'Voice Studio: Character Preview (Villain)',
       archetype: ARCHETYPES.VILLAIN,
       intensity: 0.92,
@@ -2632,7 +2668,7 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:villain',
-      speechSpec: { voiceStyle: 'villain', rate: 0.78, pitch: 0.74, gain: 0.95 }
+      speechSpec: { voiceStyle: 'villain', rate: 0.72, pitch: 0.7, gain: 0.93 }
     },
     {
       id: 'voice-preview-warmup-cartoon',
@@ -2663,7 +2699,7 @@ function getVoiceStudioPreviewWarmupCues() {
     {
       id: 'voice-preview-warmup-heroic',
       type: 'entry',
-      text: 'Batman: We rise. We finish this together.',
+      text: 'Batman: We rise! We finish this together.',
       subtitleText: 'Voice Studio: Character Preview (Heroic)',
       archetype: ARCHETYPES.HEROIC,
       intensity: 0.84,
@@ -2671,12 +2707,12 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:heroic',
-      speechSpec: { voiceStyle: 'heroic', rate: 1.06, pitch: 1.1, gain: 0.97 }
+      speechSpec: { voiceStyle: 'heroic', rate: 1.12, pitch: 1.18, gain: 1.0 }
     },
     {
       id: 'voice-preview-warmup-spooky',
       type: 'entry',
-      text: 'Ghost signal... the hallway whispers back...',
+      text: 'Shh... ghost signal... the hallway whispers back...',
       subtitleText: 'Voice Studio: Character Preview (Spooky)',
       archetype: ARCHETYPES.SPOOKY,
       intensity: 0.9,
@@ -2684,12 +2720,12 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:spooky',
-      speechSpec: { voiceStyle: 'spooky', rate: 0.76, pitch: 0.86, gain: 0.78 }
+      speechSpec: { voiceStyle: 'spooky', rate: 0.68, pitch: 0.78, gain: 0.72 }
     },
     {
       id: 'voice-preview-warmup-chaotic',
       type: 'entry',
-      text: "Chaos mode: go, go, go, we're doing this live!",
+      text: "Chaos mode! go, go, goh! we're doing this live!!",
       subtitleText: 'Voice Studio: Character Preview (Chaotic)',
       archetype: ARCHETYPES.CHAOTIC,
       intensity: 0.94,
@@ -2697,7 +2733,7 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:chaotic',
-      speechSpec: { voiceStyle: 'chaotic', rate: 1.36, pitch: 1.22, gain: 1.0 }
+      speechSpec: { voiceStyle: 'chaotic', rate: 1.42, pitch: 1.24, gain: 1.0 }
     }
   ];
 }

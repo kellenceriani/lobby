@@ -1746,6 +1746,35 @@ function trimKokoroCueTextForLatency(text = '') {
   return `${cut.slice(0, maxLen - 3).trim()}...`;
 }
 
+function normalizeKokoroCueTextForSpeech(text = '', cue = {}, plan = {}) {
+  let normalized = String(text || '');
+  if (!normalized) return '';
+
+  const cueSpeechSpec = cue && cue.speechSpec && typeof cue.speechSpec === 'object' ? cue.speechSpec : null;
+  const style = String(cueSpeechSpec && cueSpeechSpec.voiceStyle || '').trim().toLowerCase();
+  const archetype = String(plan && plan.archetype || cue && cue.archetype || '').toUpperCase();
+
+  normalized = normalized
+    .replace(/\bS\s*H\s*H\b/gi, 'shush')
+    .replace(/\bshh+\b/gi, 'shush');
+
+  if (style === 'spooky' || archetype === ARCHETYPES.SPOOKY) {
+    normalized = normalized
+      .replace(/\bshh+\b/gi, 'shush')
+      .replace(/\bghost\s+signal\b/gi, 'ghost signal')
+      .replace(/\bwhispers\s+back\b/gi, 'whispers back... back...');
+  }
+
+  if (style === 'chaotic' || archetype === ARCHETYPES.CHAOTIC || archetype === ARCHETYPES.MEME) {
+    normalized = normalized
+      .replace(/\bdoing\s+this\s+live\b/gi, 'going LIVE on-air')
+      .replace(/\bgo,\s*go,\s*goh\b/gi, 'go, GO, GO')
+      .replace(/\bgo,\s*go,\s*go\b/gi, 'go, GO, GO');
+  }
+
+  return normalized;
+}
+
 function isVoicePreviewCue(cue = {}) {
   const id = String(cue && cue.id || '');
   return id.startsWith('voice-preview-');
@@ -1783,7 +1812,8 @@ function buildKokoroCuePlaybackSpec(cue = {}, plan = null) {
       }
     }
   }
-  const text = trimKokoroCueTextForLatency(computedPlan && computedPlan.stylizedText ? computedPlan.stylizedText : (safeCue.text || ''));
+  const rawText = computedPlan && computedPlan.stylizedText ? computedPlan.stylizedText : (safeCue.text || '');
+  const text = trimKokoroCueTextForLatency(normalizeKokoroCueTextForSpeech(rawText, safeCue, computedPlan || {}));
   if (!text) return null;
   const voiceId = resolveKokoroVoiceIdForCue(safeCue, computedPlan || {});
   const speed = resolveKokoroSpeedForCue(safeCue, computedPlan || {});
@@ -2043,7 +2073,8 @@ function trySpeakVoiceCueWithKokoro({ cue, plan, volume, start, end } = {}) {
     tryUnlockHtmlMediaStack();
   }
 
-  const text = trimKokoroCueTextForLatency(plan && plan.stylizedText ? plan.stylizedText : (cue && cue.text ? cue.text : ''));
+  const rawText = plan && plan.stylizedText ? plan.stylizedText : (cue && cue.text ? cue.text : '');
+  const text = trimKokoroCueTextForLatency(normalizeKokoroCueTextForSpeech(rawText, cue || {}, plan || {}));
   if (!text) {
     return finishNoop('cancelled');
   }
@@ -2577,14 +2608,14 @@ function buildVoiceStudioPreviewCue(kind = 'narrator') {
       {
         archetype: ARCHETYPES.SPOOKY,
         label: 'Spooky',
-        text: 'Shh... ghost signal... the hallway whispers back...',
+        text: 'Shush... ghost signal... the hallway whispers back... back...',
         speechSpec: { voiceStyle: 'spooky', rate: 0.68, pitch: 0.78, gain: 0.72 },
         intensity: 0.9
       },
       {
         archetype: ARCHETYPES.CHAOTIC,
         label: 'Chaotic',
-        text: "Chaos mode! go, GO, GO! we're doing this live!!",
+        text: "Chaos mode! go, GO, GO! we're going LIVE on-air!!",
         speechSpec: { voiceStyle: 'chaotic', rate: 1.42, pitch: 1.24, gain: 1.0 },
         intensity: 0.94
       }
@@ -2712,7 +2743,7 @@ function getVoiceStudioPreviewWarmupCues() {
     {
       id: 'voice-preview-warmup-spooky',
       type: 'entry',
-      text: 'Shh... ghost signal... the hallway whispers back...',
+      text: 'Shush... ghost signal... the hallway whispers back... back...',
       subtitleText: 'Voice Studio: Character Preview (Spooky)',
       archetype: ARCHETYPES.SPOOKY,
       intensity: 0.9,
@@ -2725,7 +2756,7 @@ function getVoiceStudioPreviewWarmupCues() {
     {
       id: 'voice-preview-warmup-chaotic',
       type: 'entry',
-      text: "Chaos mode! go, go, goh! we're doing this live!!",
+      text: "Chaos mode! go, GO, GO! we're going LIVE on-air!!",
       subtitleText: 'Voice Studio: Character Preview (Chaotic)',
       archetype: ARCHETYPES.CHAOTIC,
       intensity: 0.94,

@@ -71,7 +71,7 @@ const FALLBACK_CATALOG = Object.freeze([
 
 const BROWSER_FALLBACK_HINTS = Object.freeze({
   af_heart: { hints: ['jenny', 'samantha', 'ava', 'female', 'neural', 'natural', 'enhanced'], pitch: 1.02 },
-  af_bella: { hints: ['aria', 'emma', 'zira', 'female', 'neural', 'natural', 'enhanced'], pitch: 1.08 },
+  af_bella: { hints: ['aria', 'allison', 'zoe', 'moira', 'female', 'neural', 'natural', 'enhanced'], pitch: 1.08 },
   am_michael: { hints: ['guy', 'david', 'daniel', 'alex', 'male', 'neural', 'natural', 'enhanced'], pitch: 0.98 },
   bm_george: { hints: ['ryan', 'george', 'male', 'british', 'uk', 'neural', 'natural', 'enhanced'], pitch: 0.9 },
   'arch:heroic': { hints: ['guy', 'male', 'neural'], pitch: 0.98 },
@@ -927,8 +927,8 @@ export class AdaptiveTtsVoiceEngine {
     const spokenText = normalizeText(text);
     if (!spokenText) return { handled: false, reason: 'empty_text' };
 
-    const safeSpeed = clamp(speed, 0.82, 1.35, 1);
-    const safePitch = clamp(pitch, 0.8, 1.2, 1);
+    const safeSpeed = clamp(speed, 0.74, 1.45, 1);
+    const safePitch = clamp(pitch, 0.74, 1.28, 1);
     const safeVolume = clamp(volume, 0, 1, 1);
     let cancelled = false;
     const jobId = `adaptive-ios-${nowMs()}-${hashString(`${voiceId}|${spokenText}`).toString(36).slice(0, 8)}`;

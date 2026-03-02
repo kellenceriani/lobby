@@ -1,11 +1,11 @@
 const IOS_CURATED_VOICE_PROFILES = Object.freeze({
   af_heart: Object.freeze({
     preferredLangs: Object.freeze(['en-us', 'en']),
-    nameHints: Object.freeze(['allison', 'samantha', 'ava', 'karen', 'susan', 'zoe'])
+    nameHints: Object.freeze(['samantha', 'ava', 'karen', 'victoria', 'serena', 'susan'])
   }),
   af_bella: Object.freeze({
     preferredLangs: Object.freeze(['en-us', 'en']),
-    nameHints: Object.freeze(['ava', 'samantha', 'allison', 'karen', 'zoe', 'susan'])
+    nameHints: Object.freeze(['allison', 'zoe', 'moira', 'serena', 'victoria', 'susan'])
   }),
   am_michael: Object.freeze({
     preferredLangs: Object.freeze(['en-us', 'en']),

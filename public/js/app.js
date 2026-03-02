@@ -867,11 +867,11 @@ function normalizeVoiceChoiceId(value = '') {
 const CHARACTER_VOICE_PROFILE_OPTIONS = Object.freeze([
   { id: 'auto_archetype', label: 'Auto Mix (Runtime Default)', description: 'Gameplay uses the curated 4-voice cast with archetype-specific voice + prosody shaping' },
   { id: 'villain', label: 'Preview: Villain / Dark', description: 'Gold voice: Ryan (UK male) with darker pacing and lower pitch feel' },
-  { id: 'heroic', label: 'Preview: Heroic / Cinematic', description: 'Gold voice: Guy (US male) with steady cinematic pacing' },
+  { id: 'heroic', label: 'Preview: Heroic / Cinematic', description: 'Gold voice: Ryan (UK male) with brighter, hopeful cinematic lift' },
   { id: 'cartoon', label: 'Preview: Cartoon / Bright', description: 'Gold voice: Aria (US female) with brighter, faster delivery' },
   { id: 'robotic', label: 'Preview: Robotic / Synthetic', description: 'Gold voice: Guy/Ryan with tighter cadence and flatter shaping' },
-  { id: 'spooky', label: 'Preview: Spooky / Whispery', description: 'Gold voice: Ryan (UK male) slowed for ominous cadence' },
-  { id: 'chaotic', label: 'Preview: Chaotic / Meme', description: 'Gold voice: Aria (US female) fast + animated timing' }
+  { id: 'spooky', label: 'Preview: Spooky / Whispery', description: 'Gold voice: Ryan (UK male) softer, hush-like pacing with trailing ambience feel' },
+  { id: 'chaotic', label: 'Preview: Chaotic / Meme', description: 'Gold voice: Jenny (US female) fast, upbeat, and cheerful' }
 ]);
 
 function normalizeCharacterVoiceProfile(value = '') {
@@ -1541,17 +1541,17 @@ function resolveKokoroVoiceIdForCue(cue = {}, plan = {}) {
   if (isVoicePreviewCue(cue) && previewProfile && previewProfile !== 'auto_archetype') {
     const previewMap = {
       villain: 'bm_george',
-      heroic: 'am_michael',
+      heroic: 'bm_george',
       cartoon: 'af_bella',
       robotic: 'am_michael',
       spooky: 'bm_george',
-      chaotic: 'af_bella'
+      chaotic: 'af_heart'
     };
     if (previewMap[previewProfile]) return previewMap[previewProfile];
   }
   const archetype = String(plan && plan.archetype || cue && cue.archetype || '').toUpperCase();
   // Gold-standard archetype cast mapping (4 universal narration voices):
-  // Ryan = villain/spooky/regal, Guy = heroic/command/robotic, Aria = cartoon/chaotic/cute, Jenny = narrator/cosmic/warm neutral.
+  // Ryan = villain/spooky/regal, Guy = heroic/command/robotic, Aria = cartoon/cute, Jenny = narrator/chaotic/cosmic/warm neutral.
   const map = {
     [ARCHETYPES.VILLAIN]: 'bm_george',
     [ARCHETYPES.MYSTERIOUS]: 'bm_george',
@@ -2514,14 +2514,14 @@ function buildVoiceStudioPreviewCue(kind = 'narrator') {
         archetype: ARCHETYPES.VILLAIN,
         label: 'Villain',
         text: 'Doctor Doom: Despair.',
-        speechSpec: { voiceStyle: 'villain', rate: 0.82, pitch: 0.78, gain: 0.95 },
+        speechSpec: { voiceStyle: 'villain', rate: 0.78, pitch: 0.74, gain: 0.95 },
         intensity: 0.92
       },
       {
         archetype: ARCHETYPES.KID_CARTOON,
         label: 'Cartoon',
         text: "SpongeBob: I'm ready!",
-        speechSpec: { voiceStyle: 'cartoon', rate: 1.26, pitch: 1.24, gain: 0.95 },
+        speechSpec: { voiceStyle: 'cartoon', rate: 1.34, pitch: 1.2, gain: 0.95 },
         intensity: 0.88
       },
       {
@@ -2534,22 +2534,22 @@ function buildVoiceStudioPreviewCue(kind = 'narrator') {
       {
         archetype: ARCHETYPES.HEROIC,
         label: 'Heroic',
-        text: 'Batman: I am vengeance.',
-        speechSpec: { voiceStyle: 'heroic', rate: 0.87, pitch: 0.89, gain: 0.95 },
+        text: 'Batman: We rise. We finish this together.',
+        speechSpec: { voiceStyle: 'heroic', rate: 1.06, pitch: 1.1, gain: 0.97 },
         intensity: 0.84
       },
       {
         archetype: ARCHETYPES.SPOOKY,
         label: 'Spooky',
-        text: 'Ghost signal: the hallway whispers back.',
-        speechSpec: { voiceStyle: 'spooky', rate: 0.84, pitch: 0.8, gain: 0.92 },
+        text: 'Ghost signal... the hallway whispers back...',
+        speechSpec: { voiceStyle: 'spooky', rate: 0.76, pitch: 0.86, gain: 0.78 },
         intensity: 0.9
       },
       {
         archetype: ARCHETYPES.CHAOTIC,
         label: 'Chaotic',
         text: "Chaos mode: go, go, go, we're doing this live!",
-        speechSpec: { voiceStyle: 'chaotic', rate: 1.27, pitch: 1.18, gain: 0.96 },
+        speechSpec: { voiceStyle: 'chaotic', rate: 1.36, pitch: 1.22, gain: 1.0 },
         intensity: 0.94
       }
     ];
@@ -2632,7 +2632,7 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:villain',
-      speechSpec: { voiceStyle: 'villain', rate: 0.82, pitch: 0.78, gain: 0.95 }
+      speechSpec: { voiceStyle: 'villain', rate: 0.78, pitch: 0.74, gain: 0.95 }
     },
     {
       id: 'voice-preview-warmup-cartoon',
@@ -2645,7 +2645,7 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:cartoon',
-      speechSpec: { voiceStyle: 'cartoon', rate: 1.26, pitch: 1.24, gain: 0.95 }
+      speechSpec: { voiceStyle: 'cartoon', rate: 1.34, pitch: 1.2, gain: 0.95 }
     },
     {
       id: 'voice-preview-warmup-robotic',
@@ -2663,7 +2663,7 @@ function getVoiceStudioPreviewWarmupCues() {
     {
       id: 'voice-preview-warmup-heroic',
       type: 'entry',
-      text: 'Batman: I am vengeance.',
+      text: 'Batman: We rise. We finish this together.',
       subtitleText: 'Voice Studio: Character Preview (Heroic)',
       archetype: ARCHETYPES.HEROIC,
       intensity: 0.84,
@@ -2671,12 +2671,12 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:heroic',
-      speechSpec: { voiceStyle: 'heroic', rate: 0.87, pitch: 0.89, gain: 0.95 }
+      speechSpec: { voiceStyle: 'heroic', rate: 1.06, pitch: 1.1, gain: 0.97 }
     },
     {
       id: 'voice-preview-warmup-spooky',
       type: 'entry',
-      text: 'Ghost signal: the hallway whispers back.',
+      text: 'Ghost signal... the hallway whispers back...',
       subtitleText: 'Voice Studio: Character Preview (Spooky)',
       archetype: ARCHETYPES.SPOOKY,
       intensity: 0.9,
@@ -2684,7 +2684,7 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:spooky',
-      speechSpec: { voiceStyle: 'spooky', rate: 0.84, pitch: 0.8, gain: 0.92 }
+      speechSpec: { voiceStyle: 'spooky', rate: 0.76, pitch: 0.86, gain: 0.78 }
     },
     {
       id: 'voice-preview-warmup-chaotic',
@@ -2697,7 +2697,7 @@ function getVoiceStudioPreviewWarmupCues() {
       preempt: false,
       allowLiveGenerate: true,
       dedupeKey: 'voice-preview-warmup:chaotic',
-      speechSpec: { voiceStyle: 'chaotic', rate: 1.27, pitch: 1.18, gain: 0.96 }
+      speechSpec: { voiceStyle: 'chaotic', rate: 1.36, pitch: 1.22, gain: 1.0 }
     }
   ];
 }

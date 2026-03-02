@@ -10156,12 +10156,52 @@ window.addEventListener('beforeunload', () => {
   socket.disconnect();
 });
 
-installAudioUnlockHandlers();
-setupAudioControls();
-installChatLayoutController();
-updateReadyButtonUi(Boolean(player.ready));
+function exposeWindowUiActions() {
+  window.joinRoom = joinRoom;
+  window.leaveRoom = leaveRoom;
+  window.showHelp = showHelp;
+  window.closeHelp = closeHelp;
+  window.switchLobbyTab = switchLobbyTab;
+  window.toggleAccordion = toggleAccordion;
+  window.toggleScenario = toggleScenario;
+  window.toggleResultsDetails = toggleResultsDetails;
+  window.toggleReady = toggleReady;
+  window.updateSetting = updateSetting;
+  window.updateSettingsBatch = updateSettingsBatch;
+  window.updateContentPackDescription = updateContentPackDescription;
+  window.sendMessage = sendMessage;
+  window.sendReaction = sendReaction;
+  window.sendStartGame = sendStartGame;
+  window.submitDraft = submitDraft;
+  window.selectDraftSlot = selectDraftSlot;
+  window.clearDraftInputField = clearDraftInputField;
+  window.lockDraft = lockDraft;
+  window.lockVote = lockVote;
+  window.readyForNextRound = readyForNextRound;
+  window.sendPlayAgain = sendPlayAgain;
+  window.openFinalResultsArchive = openFinalResultsArchive;
+  window.returnToRound4Finale = returnToRound4Finale;
+  window.goToLobby = goToLobby;
+}
+
+function runInitStep(stepName = '', fn = null) {
+  if (typeof fn !== 'function') return;
+  try {
+    fn();
+  } catch (error) {
+    console.error(`[startup:init] ${stepName} failed:`, error);
+  }
+}
+
+exposeWindowUiActions();
+runInitStep('installAudioUnlockHandlers', installAudioUnlockHandlers);
+runInitStep('setupAudioControls', setupAudioControls);
+runInitStep('installChatLayoutController', installChatLayoutController);
+runInitStep('updateReadyButtonUi', () => updateReadyButtonUi(Boolean(player.ready)));
 window.setTimeout(() => {
-  void runStartupBootstrapPreflight();
+  runInitStep('runStartupBootstrapPreflight', () => {
+    void runStartupBootstrapPreflight();
+  });
 }, 40);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && audioState.unlocked) {
@@ -10173,31 +10213,7 @@ document.addEventListener('visibilitychange', () => {
 
 
 // Expose UI actions used by inline handlers
-window.joinRoom = joinRoom;
-window.leaveRoom = leaveRoom;
-window.showHelp = showHelp;
-window.closeHelp = closeHelp;
-window.switchLobbyTab = switchLobbyTab;
-window.toggleAccordion = toggleAccordion;
-window.toggleScenario = toggleScenario;
-window.toggleResultsDetails = toggleResultsDetails;
-window.toggleReady = toggleReady;
-window.updateSetting = updateSetting;
-window.updateSettingsBatch = updateSettingsBatch;
-window.updateContentPackDescription = updateContentPackDescription;
-window.sendMessage = sendMessage;
-window.sendReaction = sendReaction;
-window.sendStartGame = sendStartGame;
-window.submitDraft = submitDraft;
-window.selectDraftSlot = selectDraftSlot;
-window.clearDraftInputField = clearDraftInputField;
-window.lockDraft = lockDraft;
-window.lockVote = lockVote;
-window.readyForNextRound = readyForNextRound;
-window.sendPlayAgain = sendPlayAgain;
-window.openFinalResultsArchive = openFinalResultsArchive;
-window.returnToRound4Finale = returnToRound4Finale;
-window.goToLobby = goToLobby;
+exposeWindowUiActions();
 
 if (shouldAutoOpenRound4Loading()) {
   window.setTimeout(() => {

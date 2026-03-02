@@ -64,12 +64,12 @@ function markStartupSuccess() {
   try {
     const { overlay, spinner, label } = getLoadingOverlayNodes();
     if (overlay) {
-      overlay.classList.remove('active');
-      overlay.setAttribute('aria-hidden', 'true');
+      overlay.classList.add('active');
+      overlay.setAttribute('aria-hidden', 'false');
     }
     if (spinner) spinner.style.display = '';
     if (label) {
-      label.textContent = '⏳ Loading...';
+      label.textContent = '⏳ Warming game systems...';
     }
   } catch (error) {
   }

@@ -23,16 +23,16 @@
   <link rel="stylesheet" href="css/results.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/joinEvalFallingPlaques.css?v=20260223-livefix1">
 </head>
-<body>
+<body class="startup-preflight-active">
 
   <!-- IMPORTANT: keep this element for app.js sync even if UI no longer shows "Twists" as a quick box -->
   <input id="plotTwists" type="checkbox" class="sr-only" aria-hidden="true" tabindex="-1" />
 
   <!-- ==================== LOADING OVERLAY ==================== -->
-  <div id="loadingOverlay">
+  <div id="loadingOverlay" class="active" aria-hidden="false">
     <div style="text-align: center;">
       <div class="spinner"></div>
-      <div class="spinner-text">⏳ Loading...</div>
+      <div class="spinner-text">⏳ Bootstrapping LobbyWARS...</div>
     </div>
   </div>
 

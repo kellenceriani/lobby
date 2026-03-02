@@ -2743,7 +2743,7 @@ function getVoiceStudioPreviewWarmupCues() {
     {
       id: 'voice-preview-warmup-spooky',
       type: 'entry',
-      text: 'Shush... ghost signal... the hallway whispers back... back...',
+      text: 'Shush... ghost signal... the hallway whispers back...',
       subtitleText: 'Voice Studio: Character Preview (Spooky)',
       archetype: ARCHETYPES.SPOOKY,
       intensity: 0.9,
@@ -4266,10 +4266,18 @@ const startupBootstrapState = {
   tasks: []
 };
 
+function dismissInitialStartupOverlay() {
+  const overlay = document.getElementById('loadingOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden', 'true');
+}
+
 function forceReleaseStartupInteractivity(reason = '') {
   const panel = document.getElementById('startupBootstrapPanel');
   if (panel) panel.hidden = true;
   setStartupBootstrapLock(false);
+  dismissInitialStartupOverlay();
   if (startupBootstrapState.forceReleaseTimerId) {
     window.clearTimeout(startupBootstrapState.forceReleaseTimerId);
     startupBootstrapState.forceReleaseTimerId = null;
@@ -4454,10 +4462,54 @@ async function ensureJoinEvalPlaquesReady({ source = 'startup-bootstrap', bridge
   }
 }
 
+async function warmNarrationArchetypeRouting({ source = 'startup-archetype-routing' } = {}) {
+  const archetypes = Object.values(ARCHETYPES || {}).map((value) => String(value || '').trim()).filter(Boolean);
+  if (!archetypes.length) return { ok: true, warmed: 0, uniqueVoices: 0 };
+  const uniqueVoiceIds = new Set();
+  let warmed = 0;
+
+  for (let i = 0; i < archetypes.length; i += 1) {
+    const archetype = archetypes[i];
+    const spec = buildKokoroCuePlaybackSpec({
+      id: `startup-archetype-${archetype.toLowerCase()}`,
+      type: 'entry',
+      text: `${archetype} voice route primed.`,
+      subtitleText: `Startup archetype warmup (${archetype})`,
+      archetype,
+      intensity: 0.7,
+      priority: 30,
+      dedupeKey: `startup-archetype:${archetype.toLowerCase()}`,
+      allowLiveGenerate: false,
+      speechSpec: {
+        voiceStyle: 'cinematic',
+        rate: 1,
+        pitch: 1,
+        gain: 0.9
+      }
+    });
+    if (spec && spec.voiceId) {
+      warmed += 1;
+      uniqueVoiceIds.add(String(spec.voiceId));
+    }
+    if (i < archetypes.length - 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+  }
+
+  return {
+    ok: warmed > 0,
+    warmed,
+    total: archetypes.length,
+    uniqueVoices: uniqueVoiceIds.size,
+    source
+  };
+}
+
 async function runStartupBootstrapPreflight() {
   if (startupBootstrapState.started) return;
   startupBootstrapState.started = true;
   setStartupBootstrapLock(true);
+  dismissInitialStartupOverlay();
   if (startupBootstrapState.forceReleaseTimerId) {
     window.clearTimeout(startupBootstrapState.forceReleaseTimerId);
   }
@@ -4492,7 +4544,7 @@ async function runStartupBootstrapPreflight() {
   });
 
   const constrainedMobileStartup = isConstrainedMobileStartupDevice();
-  const blockVoiceWarmups = false;
+  const blockVoiceWarmups = true;
 
   const blockingTaskList = [
     {
@@ -4555,12 +4607,12 @@ async function runStartupBootstrapPreflight() {
               castResult: castResult.status === 'fulfilled' ? castResult.value : { ok: false, error: String(castResult.reason && castResult.reason.message || castResult.reason || 'cast-failed') },
               previewResult: previewResult.status === 'fulfilled' ? previewResult.value : { ok: false, error: String(previewResult.reason && previewResult.reason.message || previewResult.reason || 'preview-failed') }
             };
-          }, { timeoutMs: 4500, timeoutCode: 'voice-cast-soft-timeout' });
+          }, { timeoutMs: constrainedMobileStartup ? 7000 : 5600, timeoutCode: 'voice-cast-soft-timeout' });
         }
       },
       {
         key: 'kokoro-preview-clips',
-        label: 'Lobby voice previews',
+        label: 'Narration archetype previews',
         run: async () => {
           if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
           return runWithSoftTimeout(async () => {
@@ -4575,8 +4627,16 @@ async function runStartupBootstrapPreflight() {
               }
             }
             return { ok: warmed > 0, warmed, total: cues.length };
-          }, { timeoutMs: 2800, timeoutCode: 'voice-preview-cues-soft-timeout' });
+          }, { timeoutMs: constrainedMobileStartup ? 6000 : 4200, timeoutCode: 'voice-preview-cues-soft-timeout' });
         }
+      },
+      {
+        key: 'archetype-routing',
+        label: 'Archetype voice routing',
+        run: async () => runWithSoftTimeout(
+          () => warmNarrationArchetypeRouting({ source: 'startup-blocking-archetypes' }),
+          { timeoutMs: 1800, timeoutCode: 'archetype-routing-soft-timeout' }
+        )
       }
     );
   }
@@ -4711,6 +4771,14 @@ async function runStartupBootstrapPreflight() {
         const label = taskResult && taskResult.softTimeout
           ? 'continuing in background'
           : `${warmed}/${total} preview clips cached`;
+        detail = `${label} (${elapsedMs}ms)`;
+      } else if (task.key === 'archetype-routing') {
+        const warmed = Math.max(0, Number(taskResult && taskResult.warmed) || 0);
+        const total = Math.max(1, Number(taskResult && taskResult.total) || 1);
+        const uniqueVoices = Math.max(0, Number(taskResult && taskResult.uniqueVoices) || 0);
+        const label = taskResult && taskResult.softTimeout
+          ? 'continuing in background'
+          : `${warmed}/${total} archetypes mapped (${uniqueVoices} voices)`;
         detail = `${label} (${elapsedMs}ms)`;
       } else if (task.key === 'music-tracks') {
         detail = `verified local audio files (${elapsedMs}ms)`;
@@ -10292,11 +10360,9 @@ runInitStep('installAudioUnlockHandlers', installAudioUnlockHandlers);
 runInitStep('setupAudioControls', setupAudioControls);
 runInitStep('installChatLayoutController', installChatLayoutController);
 runInitStep('updateReadyButtonUi', () => updateReadyButtonUi(Boolean(player.ready)));
-window.setTimeout(() => {
-  runInitStep('runStartupBootstrapPreflight', () => {
-    void runStartupBootstrapPreflight();
-  });
-}, 40);
+runInitStep('runStartupBootstrapPreflight', () => {
+  void runStartupBootstrapPreflight();
+});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && audioState.unlocked) {
     ensureAudioRunning();

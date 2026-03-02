@@ -4182,6 +4182,7 @@ const startupBootstrapState = {
   started: false,
   completed: false,
   deferredStarted: false,
+  forceReleaseTimerId: null,
   total: 0,
   done: 0,
   currentLabel: '',
@@ -4189,6 +4190,16 @@ const startupBootstrapState = {
   taskIndex: new Map(),
   tasks: []
 };
+
+function forceReleaseStartupInteractivity(reason = '') {
+  const panel = document.getElementById('startupBootstrapPanel');
+  if (panel) panel.hidden = true;
+  setStartupBootstrapLock(false);
+  if (startupBootstrapState.forceReleaseTimerId) {
+    window.clearTimeout(startupBootstrapState.forceReleaseTimerId);
+    startupBootstrapState.forceReleaseTimerId = null;
+  }
+}
 
 function resetStartupBootstrapTasks(taskDefs = []) {
   startupBootstrapState.tasks = [];
@@ -4297,12 +4308,11 @@ function updateStartupBootstrapUi(done = 0, total = 0, label = '', detail = '') 
 function hideStartupBootstrapUiSoon() {
   const panel = document.getElementById('startupBootstrapPanel');
   if (!panel) {
-    setStartupBootstrapLock(false);
+    forceReleaseStartupInteractivity('panel-missing');
     return;
   }
   window.setTimeout(() => {
-    panel.hidden = true;
-    setStartupBootstrapLock(false);
+    forceReleaseStartupInteractivity('normal-complete');
     scheduleMobileTouchAudioHint({ delayMs: 650 });
   }, 900);
 }
@@ -4373,6 +4383,12 @@ async function runStartupBootstrapPreflight() {
   if (startupBootstrapState.started) return;
   startupBootstrapState.started = true;
   setStartupBootstrapLock(true);
+  if (startupBootstrapState.forceReleaseTimerId) {
+    window.clearTimeout(startupBootstrapState.forceReleaseTimerId);
+  }
+  startupBootstrapState.forceReleaseTimerId = window.setTimeout(() => {
+    forceReleaseStartupInteractivity('watchdog-timeout');
+  }, 12000);
 
   const runWithSoftTimeout = (promiseFactory, {
     timeoutMs = 2500,

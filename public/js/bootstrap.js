@@ -58,6 +58,18 @@ function markStartupSuccess() {
   startupSettled = true;
   startupFailed = false;
   unbindStartupErrorHandlers();
+  try {
+    const { overlay, spinner, label } = getLoadingOverlayNodes();
+    if (overlay) {
+      overlay.classList.remove('active');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+    if (spinner) spinner.style.display = '';
+    if (label) {
+      label.textContent = '⏳ Loading...';
+    }
+  } catch (error) {
+  }
 }
 
 function summarizeError(error) {
@@ -127,14 +139,6 @@ async function ensureSocketClientAvailable() {
   return true;
 }
 
-const handleStartupScriptError = (event) => {
-  if (startupSettled) return;
-  const target = event && event.target;
-  if (target && target.tagName === 'SCRIPT') {
-    showStartupFailure('Unable to load game scripts.', 'Network or CDN issue while fetching startup files.');
-  }
-};
-
 const handleStartupUnhandledRejection = (event) => {
   if (startupSettled) return;
   const reason = summarizeError(event && event.reason);
@@ -144,12 +148,10 @@ const handleStartupUnhandledRejection = (event) => {
 };
 
 function bindStartupErrorHandlers() {
-  window.addEventListener('error', handleStartupScriptError, true);
   window.addEventListener('unhandledrejection', handleStartupUnhandledRejection);
 }
 
 function unbindStartupErrorHandlers() {
-  window.removeEventListener('error', handleStartupScriptError, true);
   window.removeEventListener('unhandledrejection', handleStartupUnhandledRejection);
 }
 

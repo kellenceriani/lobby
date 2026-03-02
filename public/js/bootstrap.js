@@ -1,10 +1,10 @@
 const MODULE_LOAD_ORDER = [
   'js/joinEvalFallingPlaques.js?v=20260228-preflight1',
   'js/settings.js?v=20260302-interactions2',
-  'js/app.js?v=20260302-interactions2'
+  'js/app.js?v=20260302-preflight-voice1'
 ];
 
-const EXPECTED_APP_BUILD = '20260302-interactions2';
+const EXPECTED_APP_BUILD = '20260302-preflight-voice1';
 const EXPECTED_SETTINGS_BUILD = '20260302-interactions2';
 
 let startupSettled = false;

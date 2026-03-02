@@ -7,7 +7,7 @@ import {
   resetAllState
 } from './state.js';
 
-const LOBBY_APP_BUILD = '20260302-interactions2';
+const LOBBY_APP_BUILD = '20260302-preflight-voice1';
 try {
   window.__lobbyBuild = window.__lobbyBuild || {};
   window.__lobbyBuild.app = LOBBY_APP_BUILD;
@@ -4441,6 +4441,21 @@ async function runStartupBootstrapPreflight() {
     }
   ];
 
+  blockingTaskList.push({
+    key: 'kokoro-kickoff',
+    label: 'Adaptive voice kickoff',
+    run: async () => {
+      if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
+      return runWithSoftTimeout(
+        async () => {
+          await ensureVoiceManagerInitialized().catch(() => null);
+          return ensureKokoroStartupWarmup({ source: 'startup-kickoff-core' });
+        },
+        { timeoutMs: 1100, timeoutCode: 'voice-kickoff-soft-timeout' }
+      );
+    }
+  });
+
   if (blockVoiceWarmups) {
     blockingTaskList.push(
       {
@@ -4611,6 +4626,12 @@ async function runStartupBootstrapPreflight() {
           ? 'continuing in background'
           : (audioState.kokoroReady ? 'router ready' : 'voice pending');
         detail = `${status} (${mode}, ${elapsedMs}ms)`;
+      } else if (task.key === 'kokoro-kickoff') {
+        const mode = audioState.kokoroDevice || 'adaptive';
+        const status = taskResult && taskResult.softTimeout
+          ? 'kickoff started (continuing in background)'
+          : (audioState.kokoroReady ? 'router ready' : 'kickoff queued');
+        detail = `${status} (${mode}, ${elapsedMs}ms)`;
       } else if (task.key === 'kokoro-cast') {
         const prepared = Math.max(0, Number(audioState.kokoroWarmupWarmedCount) || 0);
         const label = taskResult && taskResult.softTimeout
@@ -4673,17 +4694,9 @@ async function runStartupBootstrapPreflight() {
         }
       })();
     };
-    if (typeof window.requestIdleCallback === 'function') {
-      window.setTimeout(() => {
-        try {
-          window.requestIdleCallback(() => launchDeferred(), { timeout: 3000 });
-        } catch (error) {
-          launchDeferred();
-        }
-      }, 650);
-    } else {
-      window.setTimeout(() => launchDeferred(), 850);
-    }
+    window.setTimeout(() => {
+      launchDeferred();
+    }, 650);
   }
 }
 

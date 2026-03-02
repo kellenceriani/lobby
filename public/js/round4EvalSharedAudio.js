@@ -269,12 +269,16 @@ function waitForRevealLoadingNarrationToFinish({
       bridgeState = null;
     }
 
+    const bridgeMuted = Boolean(bridgeState && bridgeState.muted === true);
+    const bridgeVoiceDisabled = Boolean(bridgeState && bridgeState.voiceEnabled === false);
+    const bridgeVoiceLocked = Boolean(bridgeState && bridgeState.voiceUnlocked === false);
+    const bridgeVoiceUnsupported = Boolean(bridgeState && bridgeState.voiceSupported === false);
     const voiceUnavailable = Boolean(
       !voiceState
-      || bridgeState?.muted === true
-      || bridgeState?.voiceEnabled === false
-      || bridgeState?.voiceUnlocked === false
-      || bridgeState?.voiceSupported === false
+      || bridgeMuted
+      || bridgeVoiceDisabled
+      || bridgeVoiceLocked
+      || bridgeVoiceUnsupported
     );
 
     return {

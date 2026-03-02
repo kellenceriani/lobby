@@ -1,5 +1,3 @@
-<!-- IMPORTANT: keep this element for app.js sync even if UI no longer shows "Twists" as a quick box -->
-<input id="plotTwists" type="checkbox" class="sr-only" aria-hidden="true" tabindex="-1" />
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,6 +7,9 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="LobbyWARS">
+  <link rel="icon" type="image/png" sizes="32x32" href="img/icons/lobbywarslogo.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="img/icons/icon-192.png">
+  <link rel="shortcut icon" href="img/icons/lobbywarslogo.png">
   <link rel="apple-touch-icon" sizes="180x180" href="img/icons/apple-touch-icon-180.png">
   <meta name="theme-color" content="#ff4081">
   <meta name="description" content="LobbyWARS - Real-time multiplayer party game for 3-6 players">
@@ -22,6 +23,9 @@
   <link rel="stylesheet" href="css/joinEvalFallingPlaques.css?v=20260223-livefix1">
 </head>
 <body>
+
+  <!-- IMPORTANT: keep this element for app.js sync even if UI no longer shows "Twists" as a quick box -->
+  <input id="plotTwists" type="checkbox" class="sr-only" aria-hidden="true" tabindex="-1" />
 
   <!-- ==================== LOADING OVERLAY ==================== -->
   <div id="loadingOverlay">
@@ -1335,6 +1339,19 @@
   <script src="js/round4EvalSharedAudio.js?v=20260226-cleanup1"></script>
   <script src="js/round4EvalRevealCinematics.js?v=20260226-cleanup1"></script>
   <script src="js/round4Eval.js?v=20260301-round4-netfix1"></script>
+  <script nomodule>
+    (function () {
+      var overlay = document.getElementById('loadingOverlay');
+      if (!overlay) return;
+      overlay.classList.add('active');
+      var spinner = overlay.querySelector('.spinner');
+      if (spinner) spinner.style.display = 'none';
+      var label = overlay.querySelector('.spinner-text');
+      if (label) {
+        label.textContent = 'This phone browser is too old for this build. Update browser or install a modern browser to play LobbyWARS.';
+      }
+    })();
+  </script>
   <script type="module" src="js/joinEvalFallingPlaques.js?v=20260228-preflight1"></script>  
   <script type="module" src="js/settings.js?v=20260301-theme-summary1"></script>
   <script type="module" src="js/app.js?v=20260301-chat-ios3"></script>

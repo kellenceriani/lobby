@@ -1841,7 +1841,9 @@ function getRound4PageSectionEntries() {
       icon: '&#x1F0CF;',
       node: cardsNode,
       available: Boolean(cardsNode),
-      collapsible: Boolean(cardsNode) && !screen?.classList.contains('is-loading-phase') && Boolean(round4State.sequenceComplete || finaleNode)
+      collapsible: Boolean(cardsNode)
+        && !(screen && screen.classList && screen.classList.contains('is-loading-phase'))
+        && Boolean(round4State.sequenceComplete || finaleNode)
     },
     {
       id: 'results',
@@ -1892,7 +1894,10 @@ function refreshRound4PageUi() {
   if (!nav) return;
 
   const headerNode = screen.querySelector('.eval-header-sticky');
-  const headerOffset = Math.max(54, Math.round(headerNode?.getBoundingClientRect?.().height || 0));
+  const headerRectHeight = (headerNode && typeof headerNode.getBoundingClientRect === 'function')
+    ? (Number(headerNode.getBoundingClientRect().height) || 0)
+    : 0;
+  const headerOffset = Math.max(54, Math.round(headerRectHeight));
   shell.style.setProperty('--eval-page-header-offset', `${headerOffset}px`);
 
   const compactNavMode = window.innerWidth <= 900;
@@ -2433,7 +2438,7 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
           <img src="${escapeHtml(topPickMeta.imageUrl)}" alt="${escapeHtml(topPickMeta.topPick)} portrait" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
         </div>
         <div class="eval-finale-podium-emotion">
-          <img src="${escapeHtml(emotionMeta.src)}" alt="${escapeHtml(emotionMeta.label)} reaction" loading="lazy" decoding="async" onerror="this.hidden=true;this.closest('.eval-finale-podium-emotion')?.classList.add('fallback');">
+          <img src="${escapeHtml(emotionMeta.src)}" alt="${escapeHtml(emotionMeta.label)} reaction" loading="lazy" decoding="async" onerror="this.hidden=true;var host=this.closest ? this.closest('.eval-finale-podium-emotion') : null;if(host){host.classList.add('fallback');}">
           <span>${escapeHtml(emotionMeta.label)}</span>
         </div>
         <div class="eval-finale-podium-main">
@@ -2949,8 +2954,14 @@ function enhanceActiveOVRBreakdownContextLayout(evalData) {
   modal.classList.toggle('ovr-context-mode', isContextEngineBreakdown);
   modal.setAttribute('data-ovr-ui-version', isContextEngineBreakdown ? 'ce-compact-v4' : 'legacy');
 
-  const scenarioSection = document.getElementById('modalScenarioRelevance')?.closest('.ovr-breakdown-section') || null;
-  const twistSection = document.getElementById('modalTwistRelevance')?.closest('.ovr-breakdown-section') || null;
+  const scenarioNode = document.getElementById('modalScenarioRelevance');
+  const twistNode = document.getElementById('modalTwistRelevance');
+  const scenarioSection = (scenarioNode && typeof scenarioNode.closest === 'function')
+    ? (scenarioNode.closest('.ovr-breakdown-section') || null)
+    : null;
+  const twistSection = (twistNode && typeof twistNode.closest === 'function')
+    ? (twistNode.closest('.ovr-breakdown-section') || null)
+    : null;
   if (!isContextEngineBreakdown) {
     if (scenarioSection) { scenarioSection.hidden = false; scenarioSection.style.display = ''; }
     if (twistSection) { twistSection.hidden = false; twistSection.style.display = ''; }
@@ -3332,7 +3343,7 @@ function openOVRBreakdown(evalData) {
             </div>
           </div>
           <div class="ovr-visual-mood" aria-label="OVR mood read">
-            <img src="${escapeHtml(ovrMoodMeta.src)}" alt="${escapeHtml(ovrMoodMeta.label)} emotion" loading="lazy" decoding="async" onerror="this.hidden=true;this.closest('.ovr-visual-mood')?.classList.add('fallback');">
+            <img src="${escapeHtml(ovrMoodMeta.src)}" alt="${escapeHtml(ovrMoodMeta.label)} emotion" loading="lazy" decoding="async" onerror="this.hidden=true;var host=this.closest ? this.closest('.ovr-visual-mood') : null;if(host){host.classList.add('fallback');}">
             <div class="ovr-visual-mood-copy">
               <small>OVR Mood</small>
               <strong>${escapeHtml(ovrMoodMeta.label)}</strong>

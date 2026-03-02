@@ -19,6 +19,7 @@ This folder contains active, maintained project documentation.
 ## Product Planning
 
 - `FUTURE_IMPLEMENTATIONS_ROADMAP.md` - active roadmap only.
+- `CATEGORIES_MODE_VISION.md` - core design vision and rollout plan for Categories Mode.
 
 ## Notes
 

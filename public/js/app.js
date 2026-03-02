@@ -4384,6 +4384,17 @@ async function runStartupBootstrapPreflight() {
       });
   });
 
+  const connection = (navigator && (navigator.connection || navigator.mozConnection || navigator.webkitConnection)) || null;
+  const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
+  const saveDataEnabled = Boolean(connection && connection.saveData === true);
+  const constrainedNetwork = saveDataEnabled || /(^|[^a-z])(slow-2g|2g)($|[^a-z])/i.test(effectiveType);
+  const hardwareConcurrency = Math.max(0, Number(navigator && navigator.hardwareConcurrency) || 0);
+  const deviceMemory = Math.max(0, Number(navigator && navigator.deviceMemory) || 0);
+  const constrainedCpu = hardwareConcurrency > 0 && hardwareConcurrency <= 4;
+  const constrainedMemory = deviceMemory > 0 && deviceMemory <= 2;
+  const constrainedMobileStartup = isLikelyMobileDevice() && (constrainedNetwork || constrainedCpu || constrainedMemory);
+  const blockVoiceWarmups = !constrainedMobileStartup;
+
   const blockingTaskList = [
     {
       key: 'join-eval-plaques',
@@ -4392,69 +4403,78 @@ async function runStartupBootstrapPreflight() {
         () => ensureJoinEvalPlaquesReady({ source: 'startup-blocking-join-eval' }),
         { timeoutMs: 3200, timeoutCode: 'join-eval-soft-timeout' }
       )
-    },
-    {
-      key: 'kokoro-core',
-      label: 'Adaptive voice router',
-      run: async () => {
-        if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
-        return runWithSoftTimeout(
-          async () => {
-            await ensureVoiceManagerInitialized().catch(() => null);
-            return ensureKokoroStartupWarmup({ source: 'startup-blocking-core' });
-          },
-          { timeoutMs: 3200, timeoutCode: 'voice-core-soft-timeout' }
-        );
-      }
-    },
-    {
-      key: 'kokoro-cast',
-      label: 'Voice cast prep (4 voices)',
-      run: async () => {
-        if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
-        return runWithSoftTimeout(async () => {
-          await ensureKokoroStartupWarmup({ source: 'startup-blocking-cast-core' });
-          const [castResult, previewResult] = await Promise.allSettled([
-            ensureKokoroFullCastWarmup({ source: 'startup-blocking-cast' }),
-            ensureKokoroHostPreviewClipWarmup({ source: 'startup-blocking-preview', deferIfBusy: false })
-          ]);
-          return {
-            ok: true,
-            castResult: castResult.status === 'fulfilled' ? castResult.value : { ok: false, error: String(castResult.reason && castResult.reason.message || castResult.reason || 'cast-failed') },
-            previewResult: previewResult.status === 'fulfilled' ? previewResult.value : { ok: false, error: String(previewResult.reason && previewResult.reason.message || previewResult.reason || 'preview-failed') }
-          };
-        }, { timeoutMs: 4500, timeoutCode: 'voice-cast-soft-timeout' });
-      }
-    },
-    {
-      key: 'kokoro-preview-clips',
-      label: 'Lobby voice previews',
-      run: async () => {
-        if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
-        return runWithSoftTimeout(async () => {
-          await ensureKokoroStartupWarmup({ source: 'startup-preview-cues-core' });
-          const cues = getVoiceStudioPreviewWarmupCues();
-          let warmed = 0;
-          for (let i = 0; i < cues.length; i += 1) {
-            const result = await prefetchKokoroCueClipNow(cues[i], { source: 'startup-lobby-preview-cues' });
-            if (result && result.ok) warmed += 1;
-            if (i < cues.length - 1) {
-              await new Promise((resolve) => window.setTimeout(resolve, 16));
-            }
-          }
-          return { ok: warmed > 0, warmed, total: cues.length };
-        }, { timeoutMs: 2800, timeoutCode: 'voice-preview-cues-soft-timeout' });
-      }
-    },
-    {
-      key: 'music-tracks',
-      label: 'Join + lobby music paths',
-      run: async () => Promise.all([
-        probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('DeepUrbanHouse - Join.mp3')}`),
-        probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('HipHop - Lobby.mp3')}`)
-      ])
     }
   ];
+
+  if (blockVoiceWarmups) {
+    blockingTaskList.push(
+      {
+        key: 'kokoro-core',
+        label: 'Adaptive voice router',
+        run: async () => {
+          if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
+          return runWithSoftTimeout(
+            async () => {
+              await ensureVoiceManagerInitialized().catch(() => null);
+              return ensureKokoroStartupWarmup({ source: 'startup-blocking-core' });
+            },
+            { timeoutMs: 3200, timeoutCode: 'voice-core-soft-timeout' }
+          );
+        }
+      },
+      {
+        key: 'kokoro-cast',
+        label: 'Voice cast prep (4 voices)',
+        run: async () => {
+          if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
+          return runWithSoftTimeout(async () => {
+            await ensureKokoroStartupWarmup({ source: 'startup-blocking-cast-core' });
+            const [castResult, previewResult] = await Promise.allSettled([
+              ensureKokoroFullCastWarmup({ source: 'startup-blocking-cast' }),
+              ensureKokoroHostPreviewClipWarmup({ source: 'startup-blocking-preview', deferIfBusy: false })
+            ]);
+            return {
+              ok: true,
+              castResult: castResult.status === 'fulfilled' ? castResult.value : { ok: false, error: String(castResult.reason && castResult.reason.message || castResult.reason || 'cast-failed') },
+              previewResult: previewResult.status === 'fulfilled' ? previewResult.value : { ok: false, error: String(previewResult.reason && previewResult.reason.message || previewResult.reason || 'preview-failed') }
+            };
+          }, { timeoutMs: 4500, timeoutCode: 'voice-cast-soft-timeout' });
+        }
+      },
+      {
+        key: 'kokoro-preview-clips',
+        label: 'Lobby voice previews',
+        run: async () => {
+          if (audioState.voiceEnabled === false) return { ok: true, skipped: 'voice-disabled' };
+          return runWithSoftTimeout(async () => {
+            await ensureKokoroStartupWarmup({ source: 'startup-preview-cues-core' });
+            const cues = getVoiceStudioPreviewWarmupCues();
+            let warmed = 0;
+            for (let i = 0; i < cues.length; i += 1) {
+              const result = await prefetchKokoroCueClipNow(cues[i], { source: 'startup-lobby-preview-cues' });
+              if (result && result.ok) warmed += 1;
+              if (i < cues.length - 1) {
+                await new Promise((resolve) => window.setTimeout(resolve, 16));
+              }
+            }
+            return { ok: warmed > 0, warmed, total: cues.length };
+          }, { timeoutMs: 2800, timeoutCode: 'voice-preview-cues-soft-timeout' });
+        }
+      }
+    );
+  }
+
+  blockingTaskList.push({
+    key: 'music-tracks',
+    label: 'Join + lobby music paths',
+    run: async () => runWithSoftTimeout(
+      () => Promise.all([
+        probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('DeepUrbanHouse - Join.mp3')}`),
+        probeManagedMediaUrl(`/audio/${encodeAudioPathSegment('HipHop - Lobby.mp3')}`)
+      ]),
+      { timeoutMs: 1800, timeoutCode: 'music-paths-soft-timeout' }
+    )
+  });
 
   const deferredTaskList = [
     {
@@ -4520,7 +4540,14 @@ async function runStartupBootstrapPreflight() {
 
   startupBootstrapState.total = blockingTaskList.length;
   startupBootstrapState.done = 0;
-  updateStartupBootstrapUi(0, blockingTaskList.length, 'Preparing join screen...', 'Loading eval visuals, music, and adaptive voice cast before the join screen opens. Non-critical caches continue in the background.');
+  updateStartupBootstrapUi(
+    0,
+    blockingTaskList.length,
+    'Preparing join screen...',
+    blockVoiceWarmups
+      ? 'Loading eval visuals, music, and adaptive voice cast before the join screen opens. Non-critical caches continue in the background.'
+      : 'Loading essentials for faster mobile join. Voice and cache warmups continue in the background.'
+  );
 
   for (let i = 0; i < blockingTaskList.length; i += 1) {
     const task = blockingTaskList[i];
@@ -4574,7 +4601,9 @@ async function runStartupBootstrapPreflight() {
       }
       startupBootstrapState.done += 1;
       updateStartupBootstrapUi(startupBootstrapState.done, blockingTaskList.length, startupBootstrapState.done >= blockingTaskList.length
-        ? 'Join screen ready. Voice cast prepared and instant preview path armed.'
+        ? (blockVoiceWarmups
+          ? 'Join screen ready. Voice cast prepared and instant preview path armed.'
+          : 'Join screen ready. Voice warmups continue in background for smoother mobile startup.')
         : `Warming ${task.label}...`, '');
     }
   }

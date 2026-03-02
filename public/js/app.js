@@ -4272,12 +4272,15 @@ function updateStartupBootstrapUi(done = 0, total = 0, label = '', detail = '') 
   const safeTotal = Math.max(1, Number(total) || 1);
   const safeDone = Math.max(0, Math.min(safeTotal, Number(done) || 0));
   const pct = Math.round((safeDone / safeTotal) * 100);
+  const finalizedAndHidden = startupBootstrapState.completed === true && panel.hidden === true;
   startupBootstrapState.currentLabel = String(label || startupBootstrapState.currentLabel || '');
   const kokoroLoadingDetail = audioState.kokoroLoading ? String(audioState.kokoroLoadProgressText || '').trim() : '';
   startupBootstrapState.detail = String(detail || kokoroLoadingDetail || '');
 
-  panel.hidden = false;
-  setStartupBootstrapLock(true);
+  if (!finalizedAndHidden) {
+    panel.hidden = false;
+    setStartupBootstrapLock(true);
+  }
   panel.classList.toggle('is-done', safeDone >= safeTotal);
   if (status) status.textContent = label || (safeDone >= safeTotal ? 'Startup ready. Join anytime.' : 'Warming local game services...');
   if (detailEl) {
@@ -4300,6 +4303,7 @@ function hideStartupBootstrapUiSoon() {
   window.setTimeout(() => {
     panel.hidden = true;
     setStartupBootstrapLock(false);
+    scheduleMobileTouchAudioHint({ delayMs: 650 });
   }, 900);
 }
 
@@ -5110,6 +5114,15 @@ function maybeCleanupAudioUnlockHandlers() {
 }
 
 function unlockAudioFromGesture(event = null) {
+  const startupPanel = document.getElementById('startupBootstrapPanel');
+  const startupBlockingJoin =
+    document.body.classList.contains('startup-preflight-active')
+    && startupPanel
+    && startupPanel.hidden !== true;
+  if (startupBlockingJoin) {
+    return;
+  }
+
   const needsVoiceUnlock = audioState.voiceUnlocked !== true;
   const needsWebAudioUnlock = audioState.unlocked !== true;
   const needsHtmlMediaUnlock = audioState.htmlMediaUnlocked !== true;
@@ -5230,6 +5243,10 @@ function scheduleMobileTouchAudioHint({ delayMs = 1500 } = {}) {
   audioState.mobileTouchHintTimer = window.setTimeout(() => {
     audioState.mobileTouchHintTimer = null;
     if (audioState.mobileTouchHintShown || audioState.unlocked || audioState.muted) return;
+    if (document.body.classList.contains('startup-preflight-active')) {
+      scheduleMobileTouchAudioHint({ delayMs: 750 });
+      return;
+    }
     const currentScreen = document.querySelector('.screen.active');
     const activeId = String(currentScreen && currentScreen.id || '').toLowerCase();
     if (activeId && activeId !== 'join' && activeId !== 'lobby') return;
@@ -10127,7 +10144,6 @@ installAudioUnlockHandlers();
 setupAudioControls();
 installChatLayoutController();
 updateReadyButtonUi(Boolean(player.ready));
-scheduleMobileTouchAudioHint();
 window.setTimeout(() => {
   void runStartupBootstrapPreflight();
 }, 40);

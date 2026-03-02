@@ -2,6 +2,13 @@
 // This file is intentionally UI-focused and integrates with existing app.js bindings.
 // It does NOT own authoritative room state; it simply reflects + helps navigate settings.
 
+const LOBBY_SETTINGS_BUILD = '20260302-interactions2';
+try {
+  window.__lobbyBuild = window.__lobbyBuild || {};
+  window.__lobbyBuild.settings = LOBBY_SETTINGS_BUILD;
+} catch (error) {
+}
+
 // Public API (used by app.js when room data arrives)
 window.SettingsOS = {
   refreshNowPlaying

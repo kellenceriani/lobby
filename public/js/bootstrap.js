@@ -1,8 +1,11 @@
 const MODULE_LOAD_ORDER = [
   'js/joinEvalFallingPlaques.js?v=20260228-preflight1',
-  'js/settings.js?v=20260301-theme-summary1',
-  'js/app.js?v=20260301-chat-ios3'
+  'js/settings.js?v=20260302-interactions2',
+  'js/app.js?v=20260302-interactions2'
 ];
+
+const EXPECTED_APP_BUILD = '20260302-interactions2';
+const EXPECTED_SETTINGS_BUILD = '20260302-interactions2';
 
 let startupSettled = false;
 let startupFailed = false;
@@ -139,6 +142,22 @@ async function ensureSocketClientAvailable() {
   return true;
 }
 
+function verifyBuildConsistency() {
+  try {
+    const build = window.__lobbyBuild && typeof window.__lobbyBuild === 'object'
+      ? window.__lobbyBuild
+      : {};
+    const appBuild = String(build.app || '').trim();
+    const settingsBuild = String(build.settings || '').trim();
+    if (appBuild !== EXPECTED_APP_BUILD || settingsBuild !== EXPECTED_SETTINGS_BUILD) {
+      throw new Error(`stale-module-build app=${appBuild || 'missing'} settings=${settingsBuild || 'missing'} expected=${EXPECTED_APP_BUILD}`);
+    }
+    return true;
+  } catch (error) {
+    throw error;
+  }
+}
+
 const handleStartupUnhandledRejection = (event) => {
   if (startupSettled) return;
   const reason = summarizeError(event && event.reason);
@@ -163,6 +182,7 @@ bindStartupErrorHandlers();
     for (let i = 0; i < MODULE_LOAD_ORDER.length; i += 1) {
       await importModuleWithRetry(MODULE_LOAD_ORDER[i], { retries: 1 });
     }
+    verifyBuildConsistency();
     markStartupSuccess();
   } catch (error) {
     showStartupFailure('LobbyWARS could not start.', summarizeError(error));

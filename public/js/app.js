@@ -6,6 +6,14 @@ import {
   addTimer,
   resetAllState
 } from './state.js';
+
+const LOBBY_APP_BUILD = '20260302-interactions2';
+try {
+  window.__lobbyBuild = window.__lobbyBuild || {};
+  window.__lobbyBuild.app = LOBBY_APP_BUILD;
+} catch (error) {
+}
+
 import {
   showScreen,
   showHelp,

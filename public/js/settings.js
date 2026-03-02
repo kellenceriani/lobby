@@ -7,7 +7,7 @@ window.SettingsOS = {
   refreshNowPlaying
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+function initializeSettingsOsBindings() {
   bindCollections();
   bindModeCards();
   bindCarouselArrows();
@@ -57,7 +57,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (id === 'customScenario') refreshNowPlaying();
     });
   }
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeSettingsOsBindings, { once: true });
+} else {
+  initializeSettingsOsBindings();
+}
 
 function $(id) {
   return document.getElementById(id);

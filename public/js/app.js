@@ -8149,7 +8149,7 @@ function setMyDraftSlotsFromPayload(playerDraftSlotsMap = {}) {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initializeInteractiveDomBindings() {
   const charInput = document.getElementById('charInput');
   if (charInput) {
     charInput.addEventListener('keypress', handleDraftInput);
@@ -8181,7 +8181,13 @@ document.addEventListener('DOMContentLoaded', () => {
       triggerTransientClass(composer, 'composer-react', 240);
     });
   });
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeInteractiveDomBindings, { once: true });
+} else {
+  initializeInteractiveDomBindings();
+}
 
 function handleDraftChange(e) {
   const char = e.target.value.trim();

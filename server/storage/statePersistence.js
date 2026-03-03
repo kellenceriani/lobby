@@ -55,6 +55,7 @@ function serializeRooms(rooms) {
       roomCode: room.roomCode,
       isGameActive: !!room.isGameActive,
       host: room.host || null,
+      categoryHistory: Array.isArray(room.categoryHistory) ? room.categoryHistory.slice(-16) : [],
       settings: room.settings || {},
       messages: Array.isArray(room.messages) ? room.messages.slice(-10) : [],
       gameState: sanitizeForSnapshot(room.gameState)
@@ -72,12 +73,17 @@ function hydrateRooms(serialized) {
       gameState: null,
       isGameActive: false,
       host: room.host || null,
+      categoryHistory: Array.isArray(room.categoryHistory) ? room.categoryHistory.slice(-16) : [],
       settings: room.settings || {
         difficulty: 'normal',
         scenarioTheme: 'all',
         plotTwists: true,
         maxPlayers: 6,
         customScenario: '',
+        categoriesMode: 'smart_random',
+        categoryId: null,
+        categoryVoteOptions: [],
+        categoryVersion: 'v1',
         contentPackId: 'default'
       },
       messages: Array.isArray(room.messages) ? room.messages.slice(-10) : [],

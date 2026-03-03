@@ -596,6 +596,24 @@
       <p id="contentPackDescription" class="field-help" aria-live="polite"></p>
     </div>
 
+    <div class="field">
+      <label for="categoriesMode"><strong>🏷️ Categories Mode</strong></label>
+      <select id="categoriesMode" onchange="updateSetting('categoriesMode', this.value)" aria-label="Categories mode">
+        <option value="off">Off</option>
+        <option value="host_select">Host Select</option>
+        <option value="smart_random" selected>Smart Random</option>
+        <option value="group_vote">Group Vote</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="categoryId"><strong>🎯 Category</strong></label>
+      <select id="categoryId" onchange="updateSetting('categoryId', this.value || null)" aria-label="Category selection">
+        <option value="">Auto (based on mode)</option>
+      </select>
+      <p id="categoryDescription" class="field-help" aria-live="polite"></p>
+    </div>
+
     <!-- Custom Scenario -->
     <div class="field field-wide">
       <label for="customScenario"><strong>✏️ Custom Scenario</strong></label>
@@ -657,6 +675,31 @@
       </div>
 
       <section class="systems-block" aria-label="Audio and credits">
+
+      <section class="audio-control-deck" id="categoryVotePanel" aria-labelledby="categoryVoteTitle">
+        <div class="audio-control-deck-head">
+          <div class="audio-control-deck-titlewrap">
+            <h4 id="categoryVoteTitle">Category Vote</h4>
+            <p id="categoryVoteStatus" class="audio-unlock-status" role="status" aria-live="polite">No active category vote.</p>
+          </div>
+        </div>
+        <div class="audio-control-deck-body" style="display:block;">
+          <div class="audio-control-deck-grid" role="group" aria-label="Category vote controls">
+            <div class="audio-control-row">
+              <div class="audio-control-copy">
+                <span class="audio-control-label">Vote Choice</span>
+                <small>Pick one option when Group Vote is active.</small>
+              </div>
+              <select id="categoryVoteChoice" class="audio-kokoro-voice-select" aria-label="Category vote choice">
+                <option value="">No active options</option>
+              </select>
+              <button class="btn btn-secondary audio-compact-btn" type="button" id="castCategoryVoteBtn">Cast Vote</button>
+            </div>
+          </div>
+          <p id="categoryVoteMeta" class="field-help" aria-live="polite"></p>
+          <p id="categoryTelemetrySummary" class="field-help" aria-live="polite"></p>
+        </div>
+      </section>
 
       <section class="audio-control-deck" aria-labelledby="audioDeckTitle">
                 <div class="audio-control-deck-head">
@@ -981,6 +1024,7 @@
     <!-- Collapsible Scenario Box -->
     <div id="scenarioBox" class="scenario-box-collapsible">
       <h2 id="scenarioText" class="scenario-text-compact">BUILD A TEAM TO...</h2>
+      <p id="scenarioLockedCategory" class="word-api-indicator" aria-live="polite"></p>
       <p id="wordApiIndicator" class="word-api-indicator" aria-live="polite"></p>
     </div>
 
@@ -1040,6 +1084,25 @@
     </div>
   </div>
 
+  <!-- ==================== CATEGORY VOTE (PRE-GAME) ==================== -->
+  <div id="categoryVoteScreen" class="screen">
+    <div class="central-content">
+      <h2>🗳️ CATEGORY VOTE 🗳️</h2>
+      <p id="categoryVoteScreenStatus">Waiting for category vote...</p>
+      <div id="categoryVoteScreenOptions" class="mode-card-grid" style="margin-top:12px;"></div>
+      <p id="categoryVoteScreenMeta" style="margin-top:12px; opacity:0.9;">The host can start a category vote when mode is Group Vote.</p>
+    </div>
+  </div>
+
+  <!-- ==================== CATEGORY REVEAL ==================== -->
+  <div id="categoryScreen" class="screen">
+    <div class="central-content">
+      <h2>🏷️ CATEGORY LOCKED! 🏷️</h2>
+      <div class="twist-box" id="categoryRevealText"></div>
+      <p>Build your draft around this category...</p>
+    </div>
+  </div>
+
   <!-- ==================== PLOT TWIST REVEAL ==================== -->
   <div id="twistScreen" class="screen">
     <div class="central-content">
@@ -1071,6 +1134,10 @@
       <div class="context-item context-item-critical">
         <strong>🌀 Twist:</strong>
         <span id="votingTwist" class="context-value-strong"></span>
+      </div>
+      <div class="context-item">
+        <strong>🏷️ Category:</strong>
+        <span id="votingLockedCategory" class="context-value-strong"></span>
       </div>
     </div>
 
@@ -1107,6 +1174,7 @@
       <div id="roundScoringMeta" class="round-scoring-meta" aria-live="polite">
         <strong>Scoring:</strong> Community votes + contextual intel fit
       </div>
+      <div id="roundCategoryMeta" class="round-scoring-meta" aria-live="polite"></div>
 
       <div id="resultsIntelSummary" class="results-intel-summary" style="display: none;"></div>
       <div id="resultsDetails" class="results-details-collapsible" style="display: block;">
@@ -1145,6 +1213,7 @@
           <div id="evalScenarioBox" class="eval-header-context is-condensed" aria-label="Round 4 scenario context">
             <p class="eval-header-scenario"><strong>Scenario:</strong> <span id="evalScenarioText"></span></p>
             <p class="eval-header-twist"><strong>Twist:</strong> <span id="evalTwistText"></span></p>
+            <p class="eval-header-twist"><strong>Category:</strong> <span id="evalCategoryText"></span></p>
             <!-- <p class="eval-header-causality" id="evalContextCausality" aria-live="polite"></p> -->
           </div>
         </div>
@@ -1174,6 +1243,10 @@
             <article class="eval-priority-card eval-priority-twist">
               <p class="eval-priority-label">Twist Modifier</p>
               <p id="evalLoadTwistHero" class="eval-priority-value">-</p>
+            </article>
+            <article class="eval-priority-card eval-priority-twist">
+              <p class="eval-priority-label">Locked Category</p>
+              <p id="evalLoadCategoryHero" class="eval-priority-value">-</p>
             </article>
           </section>
 
@@ -1243,6 +1316,7 @@
   <div id="finalScreen" class="screen">
     <div class="final-container-modern">
       <h1 class="final-title">🎉 FINAL RESULTS 🎉</h1>
+      <div id="finalLockedCategory" class="pack-meta-line" hidden aria-live="polite"></div>
       <div id="finalPackMeta" class="pack-meta-line" hidden aria-live="polite"></div>
       <div id="finalWinnerCharacters" class="winner-char-gallery" aria-live="polite"></div>
       <ol id="finalLeaderboard" class="leaderboard-modern"></ol>
@@ -1294,6 +1368,12 @@
             <summary class="ovr-section-title">Twist Fit</summary>
             <p id="modalTwistRelevance" class="ovr-section-text"></p>
             <div id="modalTwistKeywords" class="ovr-keywords"></div>
+          </details>
+        </section>
+        <section class="ovr-breakdown-section">
+          <details class="ovr-dropdown" open>
+            <summary class="ovr-section-title">Category Fit</summary>
+            <p id="modalCategoryRelevance" class="ovr-section-text"></p>
           </details>
         </section>
         <!-- Score Breakdown (collapsed by default) -->

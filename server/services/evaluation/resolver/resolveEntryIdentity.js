@@ -1,6 +1,7 @@
 const { fetchCharacterInfo } = require('../../../evaluator');
 const { normalizeName, canonicalizeName, resolveLikelyTypo } = require('../../../evaluator/core/textUtils');
 const { MIN_INFO_CONFIDENCE, CHARACTER_NAME_ALIASES } = require('../../../evaluator/core/constants');
+const { validateInput } = require('../../../evaluator/core/validation');
 const {
   fetchFromWikipediaEnhanced,
   fetchFromWikipediaSearchEnhanced,
@@ -724,6 +725,16 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     rejectTitles: ['Bugs Bunny (disambiguation)'],
     allowTitles: ['Bugs Bunny']
   },
+  sherlokholmes: {
+    queries: ['Sherlock Holmes'],
+    rejectTitles: ['John Holmes (actor)', 'Holmes (disambiguation)'],
+    allowTitles: ['Sherlock Holmes']
+  },
+  goku: {
+    queries: ['Goku', 'Son Goku', 'Dragon Ball'],
+    rejectTitles: ['Gokurakugai', 'Goku (disambiguation)'],
+    allowTitles: ['Goku', 'Son Goku']
+  },
   steve: {
     queries: ['Steve Jobs', 'Steve (Minecraft)', 'Steve'],
     rejectTitles: ['Steve (disambiguation)'],
@@ -1395,6 +1406,134 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function normalizeComparableName(raw = '') {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[.'’`]/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeComparableName(raw = '') {
+  const normalized = normalizeComparableName(raw);
+  return normalized ? normalized.split(' ').filter(Boolean) : [];
+}
+
+function aliasMapLinksInputAndResolved(inputName = '', resolvedTitle = '') {
+  const inputNorm = normalizeComparableName(inputName);
+  const resolvedNorm = normalizeComparableName(resolvedTitle);
+  if (!inputNorm || !resolvedNorm) return false;
+  const inputCompact = inputNorm.replace(/[^a-z0-9]/g, '');
+  const resolvedCompact = resolvedNorm.replace(/[^a-z0-9]/g, '');
+
+  const clusters = [];
+  [inputNorm, inputCompact, resolvedNorm, resolvedCompact].forEach((key) => {
+    const aliases = CHARACTER_NAME_ALIASES[key];
+    if (Array.isArray(aliases) && aliases.length) {
+      clusters.push([key, ...aliases]);
+    }
+  });
+
+  return clusters.some((cluster) => {
+    const normalizedCluster = new Set(
+      cluster
+        .map((value) => normalizeComparableName(value))
+        .filter(Boolean)
+    );
+    return normalizedCluster.has(inputNorm) && normalizedCluster.has(resolvedNorm);
+  });
+}
+
+function tokenEditDistance(a = '', b = '') {
+  const left = String(a || '');
+  const right = String(b || '');
+  if (!left) return right.length;
+  if (!right) return left.length;
+
+  const dp = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
+  for (let i = 0; i <= left.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= right.length; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i <= left.length; i += 1) {
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[left.length][right.length];
+}
+
+function tokensLikelyTypoEquivalent(inputTokens = [], resolvedTokens = []) {
+  if (!Array.isArray(inputTokens) || !Array.isArray(resolvedTokens)) return false;
+  if (!inputTokens.length || inputTokens.length !== resolvedTokens.length) return false;
+
+  const allPairsClose = inputTokens.every((token, index) => {
+    const left = String(token || '');
+    const right = String(resolvedTokens[index] || '');
+    if (!left || !right) return false;
+    if (left === right) return true;
+    const distance = tokenEditDistance(left, right);
+    const maxLen = Math.max(left.length, right.length);
+    if (maxLen <= 4) return distance <= 1;
+    return distance <= 2;
+  });
+
+  return allPairsClose;
+}
+
+function isBenignTitleDifference(inputName = '', resolvedTitle = '') {
+  const input = String(inputName || '').trim();
+  const resolved = String(resolvedTitle || '').trim();
+  if (!input || !resolved) return false;
+
+  const inputCompact = canonicalizeName(input);
+  const resolvedCompact = canonicalizeName(resolved);
+  if (inputCompact && resolvedCompact && inputCompact === resolvedCompact) {
+    return true;
+  }
+
+  const inputNoParens = canonicalizeName(input.replace(/\s*\([^)]*\)\s*/g, ' ').trim());
+  const resolvedNoParens = canonicalizeName(resolved.replace(/\s*\([^)]*\)\s*/g, ' ').trim());
+  if (
+    (inputNoParens && inputNoParens === resolvedCompact)
+    || (resolvedNoParens && resolvedNoParens === inputCompact)
+    || (inputNoParens && resolvedNoParens && inputNoParens === resolvedNoParens)
+  ) {
+    return true;
+  }
+
+  const inputTokens = tokenizeComparableName(input);
+  const resolvedTokens = tokenizeComparableName(resolved);
+  if (inputTokens.length && resolvedTokens.length && inputTokens.length === resolvedTokens.length) {
+    const inputSet = new Set(inputTokens);
+    const resolvedSet = new Set(resolvedTokens);
+    const sameMembers = inputTokens.every((token) => resolvedSet.has(token))
+      && resolvedTokens.every((token) => inputSet.has(token));
+    if (sameMembers) return true;
+
+    const resolvedAligned = resolvedTokens.slice();
+    const inputAligned = inputTokens.slice();
+    if (tokensLikelyTypoEquivalent(inputAligned, resolvedAligned)) return true;
+
+    const resolvedSorted = resolvedTokens.slice().sort();
+    const inputSorted = inputTokens.slice().sort();
+    if (tokensLikelyTypoEquivalent(inputSorted, resolvedSorted)) return true;
+  }
+
+  return aliasMapLinksInputAndResolved(input, resolved);
+}
+
 function buildSyntheticPortraitDataUri(label) {
   const text = String(label || '?').trim() || '?';
   const compact = canonicalizeName(text) || 'entry';
@@ -1525,6 +1664,69 @@ function buildGenericNameAmbiguityFallbackInfo(character, existingInfo = null) {
   };
 }
 
+function buildInvalidInputFallbackInfo(character, reason = 'invalid') {
+  const text = String(character || '').trim() || 'Unknown';
+  return {
+    source: 'invalid-input-fallback',
+    title: text,
+    description: `Resolver skipped high-specificity lookup for invalid input (${String(reason || 'invalid')}).`,
+    categories: ['invalid-entry', 'fallback-profile'],
+    aliases: [text],
+    confidence: 0.22,
+    confidenceBand: 'low',
+    imageUrl: null,
+    imageSynthetic: false,
+    invalidInputFallback: true,
+    lookupMeta: {
+      validationReason: String(reason || 'invalid')
+    }
+  };
+}
+
+function hasAliasHintForCompact(compact = '') {
+  const key = canonicalizeName(compact);
+  const leetKey = canonicalizeName(String(compact || '')
+    .replace(/[0]/g, 'o')
+    .replace(/[1]/g, 'i')
+    .replace(/[3]/g, 'e')
+    .replace(/[4]/g, 'a')
+    .replace(/[5]/g, 's')
+    .replace(/[7]/g, 't'));
+  if (!key && !leetKey) return false;
+  return Boolean(
+    IMAGE_BACKFILL_ALIAS_HINTS[key]
+    || RESOLUTION_ALIAS_OVERRIDES[key]
+    || IMAGE_BACKFILL_ALIAS_HINTS[leetKey]
+    || RESOLUTION_ALIAS_OVERRIDES[leetKey]
+  );
+}
+
+function buildLowSignalAmbiguityFallbackInfo(character, existingInfo = null) {
+  const text = String(character || '').trim() || 'Unknown';
+  const existingConfidence = Number(existingInfo && existingInfo.confidence);
+  const fallbackConfidence = Number.isFinite(existingConfidence)
+    ? Math.max(0.3, Math.min(0.42, existingConfidence))
+    : 0.38;
+  return {
+    source: 'low-signal-ambiguity-fallback',
+    title: text,
+    description: `Low-signal entry "${text}" resolved conservatively. Resolver avoided over-specific matching due to weak lexical evidence and is treating this as ambiguous until more identifying detail is provided.`,
+    categories: ['ambiguous-entry', 'low-signal-input'],
+    aliases: [text],
+    confidence: fallbackConfidence,
+    confidenceBand: 'low',
+    imageUrl: existingInfo && existingInfo.imageUrl
+      ? existingInfo.imageUrl
+      : (CONTEXT_SYNTHETIC_IMAGE_FALLBACK ? buildSyntheticPortraitDataUri(text) : null),
+    imageSynthetic: true,
+    lowSignalAmbiguityFallback: true,
+    lookupMeta: {
+      ...(existingInfo && existingInfo.lookupMeta && typeof existingInfo.lookupMeta === 'object' ? existingInfo.lookupMeta : {}),
+      ambiguityFallback: 'low_signal_input'
+    }
+  };
+}
+
 async function fetchCharacterInfoWithRoundBudget(character, fetchOptions = {}) {
   const isFastRound = String(fetchOptions.mode || '').toLowerCase() === 'round'
     && fetchOptions.fastRoundMode !== false;
@@ -1600,6 +1802,41 @@ function applyGenericNameAmbiguityFallback(character, info, fetchOptions = {}) {
   );
   if (!likelyAmbiguous && mode !== 'round') return info;
   return buildGenericNameAmbiguityFallbackInfo(character, info);
+}
+
+function shouldApplyLowSignalAmbiguityFallback(character, info) {
+  if (!info || typeof info !== 'object') return false;
+  if (info.genericAmbiguityFallback || info.lowSignalAmbiguityFallback) return false;
+  const profile = buildResolverInputProfile(character);
+  const source = String(info.source || '').toLowerCase();
+  const confidence = Number(info.confidence);
+  const titleCompact = canonicalizeName(info.title || info.name || '');
+  const inputCompact = profile.compact;
+  const hasAliasHint = hasAliasHintForCompact(inputCompact) || hasAliasHintForCompact(titleCompact);
+  const lowTokenCount = (profile.tokens || []).length <= 1;
+  const compactLen = String(inputCompact || '').length;
+  const shortSimpleToken = compactLen > 0 && (compactLen <= 4 || (/^[a-z]+$/.test(inputCompact) && compactLen <= 6));
+  const weakSource = source.includes('search') || source === 'local-index';
+  const titleDiffers = titleCompact && inputCompact && titleCompact !== inputCompact;
+  const noisyToken = profile.hasDigit || profile.hasSymbolNoise;
+  const weakLexicalSignal = profile.vowelPoor || noisyToken;
+  const confidenceIsHigh = Number.isFinite(confidence) && confidence >= 0.72;
+  if (!lowTokenCount || !shortSimpleToken) return false;
+  if (!weakSource || !titleDiffers) return false;
+  if (hasAliasHint) return false;
+  if (profile.likelyTechObject || profile.likelyFood || profile.likelyPlaceLandmark || profile.likelyQuote) return false;
+  if (confidenceIsHigh && !weakLexicalSignal) return false;
+  return true;
+}
+
+function applyLowSignalAmbiguityFallback(character, info, fetchOptions = {}) {
+  const mode = String((fetchOptions && fetchOptions.mode) || '').toLowerCase();
+  if (mode === 'round' || mode === 'final' || mode === 'context') {
+    if (shouldApplyLowSignalAmbiguityFallback(character, info)) {
+      return buildLowSignalAmbiguityFallbackInfo(character, info);
+    }
+  }
+  return info;
 }
 
 function buildImageBackfillQueries({ character, info, fetchOptions = {} }) {
@@ -1980,6 +2217,10 @@ function buildResolverInputProfile(character) {
   const likelyTechObject = objectTokenCount >= 1 || looksLikeAcronym || allCapsLike;
   const likelyMoniker = startsWithThe || /^mr\.?\s/i.test(input) || /^dr\.?\s/i.test(input) || /^col\.?\s/i.test(input);
   const likelyFranchiseObject = objectTokenCount >= 1 && tokens.length >= 2 && !likelyFood && !likelyPlaceLandmark;
+  const hasDigit = /\d/.test(input);
+  const hasSymbolNoise = /[_~@#$%^*+=|<>]/.test(input);
+  const alphaOnlyCompact = /^[a-z]+$/.test(compact);
+  const vowelPoor = alphaOnlyCompact && compact.length >= 4 && !/[aeiouy]/.test(compact);
 
   return {
     input,
@@ -1993,6 +2234,13 @@ function buildResolverInputProfile(character) {
     likelyTechObject,
     likelyMoniker,
     likelyFranchiseObject,
+    looksLikeAcronym,
+    allCapsLike,
+    hasQuoteMarks,
+    hasDigit,
+    hasSymbolNoise,
+    alphaOnlyCompact,
+    vowelPoor,
     objectTokenCount,
     foodTokenCount,
     placeTokenCount,
@@ -2132,6 +2380,13 @@ function estimateDangerousTitleDiffRisk(character, info) {
   const titleCompact = canonicalizeName(title);
   if (!inputCompact || !titleCompact || inputCompact === titleCompact) return 0;
   const inputCompactNoParens = canonicalizeName(String(character || '').replace(/\s*\([^)]*\)\s*/g, ' ').trim());
+  const leetNormalizedInput = canonicalizeName(String(character || '')
+    .replace(/[0]/g, 'o')
+    .replace(/[1]/g, 'i')
+    .replace(/[3]/g, 'e')
+    .replace(/[4]/g, 'a')
+    .replace(/[5]/g, 's')
+    .replace(/[7]/g, 't'));
 
   const source = String(info.source || '').toLowerCase();
   if (!source.includes('wiki')) return 0;
@@ -2152,6 +2407,7 @@ function estimateDangerousTitleDiffRisk(character, info) {
   const aliasTargetCompacts = new Set(aliasTargets.map((value) => canonicalizeName(value)).filter(Boolean));
   const infoAliasCompacts = new Set(infoAliases.map((value) => canonicalizeName(value)).filter(Boolean));
   if (titleCompactNoParens && (titleCompactNoParens === inputCompact || (inputCompactNoParens && titleCompactNoParens === inputCompactNoParens))) return 0;
+  if (leetNormalizedInput && (leetNormalizedInput === titleCompact || leetNormalizedInput === titleCompactNoParens)) return 0;
   if (inputCompactNoParens && (titleCompact === inputCompactNoParens || titleCompactNoParens === inputCompactNoParens)) return 0;
   if (typoCompact && (typoCompact === titleCompact || typoCompact === titleCompactNoParens || infoAliasCompacts.has(typoCompact))) return 0;
   if (aliasTargetCompacts.has(titleCompact) || (titleCompactNoParens && aliasTargetCompacts.has(titleCompactNoParens))) return 0;
@@ -2218,8 +2474,26 @@ function estimateDangerousTitleDiffRisk(character, info) {
       return 0;
     }
   }
+  const typoOverlap = tokenOverlapScoreLoose(resolveLikelyTypo(character) || '', title);
+  if (Number.isFinite(typoOverlap) && typoOverlap >= 0.67) return 2;
+  if (inputPersonTokens.length >= 2 && titlePersonTokens.length === 1) {
+    const single = titlePersonTokens[0];
+    if (inputPersonTokens.some((token) => token === single || personTokenDistance(token, single) <= 2)) {
+      return 2;
+    }
+  }
 
   const profile = buildResolverInputProfile(character);
+  const hasAliasHint = hasAliasHintForCompact(profile.compact);
+  const singleTokenInput = (profile.tokens || []).length <= 1;
+  const noisySingleTokenInput = singleTokenInput && (
+    profile.hasDigit
+    || profile.hasSymbolNoise
+    || profile.vowelPoor
+    || String(profile.compact || '').length >= 20
+  );
+  if (noisySingleTokenInput && !hasAliasHint) return 2;
+  if (profile.hasDigit && profile.hasSymbolNoise && !hasAliasHint) return 3;
   const inputTokens = (Array.isArray(profile.tokens) ? profile.tokens : []).filter((t) => String(t || '').length >= 3);
   if (!inputTokens.length) return 0;
 
@@ -2238,6 +2512,10 @@ function estimateDangerousTitleDiffRisk(character, info) {
   if (source.includes('wikipedia-search')) risk += 2;
   if (personLike && inputTokens.length >= 2 && matchCount <= 1) risk += 2;
   if (Number(info.confidence) >= 0.7 && inputTokens.length >= 2 && matchCount <= 1) risk += 1; // overconfident mismatch suspicion
+
+  if (source.includes('wikipedia-search') && singleTokenInput && !hasAliasHint) {
+    risk = Math.min(risk, 5);
+  }
 
   return risk;
 }
@@ -2711,8 +2989,17 @@ function buildDynamicAliasOverride(character, fetchOptions = {}) {
 
 async function tryAliasResolutionOverride(character, info, fetchOptions = {}) {
   const compact = canonicalizeName(character);
+  const leetCompact = canonicalizeName(String(character || '')
+    .replace(/[0]/g, 'o')
+    .replace(/[1]/g, 'i')
+    .replace(/[3]/g, 'e')
+    .replace(/[4]/g, 'a')
+    .replace(/[5]/g, 's')
+    .replace(/[7]/g, 't'));
   const dynamicOverride = buildDynamicAliasOverride(character, fetchOptions);
-  const override = dynamicOverride || (compact ? RESOLUTION_ALIAS_OVERRIDES[compact] : null);
+  const override = dynamicOverride
+    || (compact ? RESOLUTION_ALIAS_OVERRIDES[compact] : null)
+    || (leetCompact ? RESOLUTION_ALIAS_OVERRIDES[leetCompact] : null);
   if (!override || !Array.isArray(override.queries) || !override.queries.length) return info;
 
   const currentTitle = String(info && info.title || '').trim().toLowerCase();
@@ -3620,6 +3907,8 @@ function buildRiskFlags({ info, confidence, trustedInfo, character }) {
   if (!info.imageUrl) flags.push('no_image');
   if (info.imageSynthetic) flags.push('synthetic_image');
   if (info.genericAmbiguityFallback) flags.push('generic_name_ambiguity');
+  if (info.lowSignalAmbiguityFallback) flags.push('low_signal_ambiguity');
+  if (info.invalidInputFallback) flags.push('invalid_input');
   if (info.timeoutFallback) flags.push('fast_round_timeout_fallback');
   if (info.dangerousTitleDiffRescued) flags.push('dangerous_title_diff_rescued');
   if (info.source && String(info.source).toLowerCase().includes('fandom')) flags.push('secondary_source');
@@ -3627,7 +3916,19 @@ function buildRiskFlags({ info, confidence, trustedInfo, character }) {
 
   const title = String(info.title || '').trim();
   if (title && canonicalizeName(title) !== canonicalizeName(character || '')) {
-    flags.push('title_differs_from_input');
+    const leetNormalizedCharacter = String(character || '')
+      .replace(/[0]/g, 'o')
+      .replace(/[1]/g, 'i')
+      .replace(/[3]/g, 'e')
+      .replace(/[4]/g, 'a')
+      .replace(/[5]/g, 's')
+      .replace(/[7]/g, 't');
+    const benignTitleDiff = isBenignTitleDifference(character, title)
+      || (leetNormalizedCharacter !== String(character || '')
+        && isBenignTitleDifference(leetNormalizedCharacter, title));
+    if (!benignTitleDiff) {
+      flags.push('title_differs_from_input');
+    }
     const titleCompactNoParens = canonicalizeName(String(title).replace(/\s*\([^)]*\)\s*/g, ' ').trim());
     const lookupMetaResolution = lookupMeta && lookupMeta.resolution && typeof lookupMeta.resolution === 'object'
       ? lookupMeta.resolution
@@ -3644,7 +3945,7 @@ function buildRiskFlags({ info, confidence, trustedInfo, character }) {
     const dangerRisk = Number.isFinite(Number(info.dangerousTitleDiffRiskAfter))
       ? Number(info.dangerousTitleDiffRiskAfter)
       : estimateDangerousTitleDiffRisk(character, info);
-    if (!skipDangerousFlagForSeed && !info.dangerousTitleDiffRescued && dangerRisk >= 6) {
+    if (!benignTitleDiff && !skipDangerousFlagForSeed && !info.dangerousTitleDiffRescued && dangerRisk >= 6) {
       flags.push('dangerous_title_diff_suspected');
     }
   }
@@ -3712,6 +4013,27 @@ async function resolveEntryIdentity(input) {
   const compactInput = canonicalizeName(character);
   const roundAliasTimeoutMs = Math.max(250, Number(fetchOptions.roundAliasOverrideTimeoutMs) || ROUND_ALIAS_OVERRIDE_TIMEOUT_MS);
   const roundResolveTimeoutMs = Math.max(250, Number(fetchOptions.roundResolveTimeoutMs) || ROUND_RESOLVE_TIMEOUT_MS);
+  const validation = validateInput(character);
+  if (!validation || validation.valid !== true) {
+    const info = buildInvalidInputFallbackInfo(character, validation && validation.reason ? validation.reason : 'invalid');
+    const confidence = Number(info.confidence) || 0;
+    return {
+      ok: true,
+      input: character,
+      normalizedName: normalizeName((info && (info.title || info.name)) || character),
+      compactName: canonicalizeName((info && (info.title || info.name)) || character),
+      info,
+      trustedInfo: null,
+      scoringInfo: info,
+      infoConfidence: confidence,
+      resolutionStatus: 'low_confidence',
+      fetchDurationMs: Math.max(0, Date.now() - startedAt),
+      source: info.source,
+      riskFlags: buildRiskFlags({ info, confidence, trustedInfo: null, character }),
+      confidenceBand: info.confidenceBand || 'low',
+      lookupMeta: info.lookupMeta || null
+    };
+  }
   if (!fetchOptions.forceRefresh && options && options.resolutionSeed && typeof options.resolutionSeed === 'object') {
     let seeded = buildResolutionFromSeed({
       character,
@@ -3781,7 +4103,8 @@ async function resolveEntryIdentity(input) {
     ? aliasCorrectedInfo
     : await tryUpgradeLowFidelityIdentity(character, aliasCorrectedInfo, fetchOptions);
   const ambiguitySafeInfo = applyGenericNameAmbiguityFallback(character, upgradedIdentityInfo, fetchOptions);
-  const patchedInfo = applyKnownResolutionPatches(character, ambiguitySafeInfo);
+  const lowSignalSafeInfo = applyLowSignalAmbiguityFallback(character, ambiguitySafeInfo, fetchOptions);
+  const patchedInfo = applyKnownResolutionPatches(character, lowSignalSafeInfo);
   const dangerousDiffRescuedInfo = fetchOptions.skipIdentityUpgrade
     ? patchedInfo
     : await tryRescueDangerousTitleDiffIdentity(character, patchedInfo, fetchOptions);

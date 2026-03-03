@@ -37,6 +37,10 @@ const {
   buildFinalRoundResultsVoiceCues
 } = require('../services/voiceCueFactory');
 const { prewarmAdaptiveNarratorVoiceCues } = require('../services/adaptiveTtsService');
+const {
+  normalizeCategorySettings,
+  buildVoteOptions
+} = require('../services/categoryRegistryService');
 
 const allowRequest = createRateLimiter();
 const CHAT_MAX_MESSAGES = 10;
@@ -53,12 +57,18 @@ const ROUND4_FINAL_LOCK_TIMEOUT_MS = Math.max(8000, Math.min(180000, Number(proc
 const ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS = Math.max(0, Math.min(120000, Number(process.env.ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS) || 7000));
 const draftWarmupDedupe = new Map();
 const DRAFT_WARMUP_DEDUPE_WINDOW_MS = Math.max(3000, Number(process.env.DRAFT_WARMUP_DEDUPE_MS) || 45000);
+const CATEGORY_VOTE_TIMEOUT_MS = Math.max(6000, Math.min(90000, Number(process.env.CATEGORY_VOTE_TIMEOUT_MS) || 22000));
+const CATEGORY_VOTE_OPTION_COUNT = Math.max(3, Math.min(5, Number(process.env.CATEGORY_VOTE_OPTION_COUNT) || 4));
 const ROOM_SETTINGS_DEFAULTS = Object.freeze({
   difficulty: 'normal',
   scenarioTheme: 'all',
   plotTwists: true,
   maxPlayers: 6,
   customScenario: '',
+  categoriesMode: 'smart_random',
+  categoryId: null,
+  categoryVoteOptions: [],
+  categoryVersion: 'v1',
   contentPackId: 'default'
 });
 
@@ -67,9 +77,11 @@ function buildDefaultRoomSettings(baseSettings = null) {
   const safeMaxPlayers = Number.isFinite(maxPlayersSource)
     ? Math.min(6, Math.max(3, Math.floor(maxPlayersSource)))
     : ROOM_SETTINGS_DEFAULTS.maxPlayers;
+  const categorySettings = normalizeCategorySettings(baseSettings || {});
   return {
     ...ROOM_SETTINGS_DEFAULTS,
     maxPlayers: safeMaxPlayers,
+    ...categorySettings,
     contentPackId: 'default'
   };
 }
@@ -532,6 +544,287 @@ function getRoomData(roomCode) {
   return rooms[roomCode] || null;
 }
 
+function hashString(input = '') {
+  let hash = 2166136261;
+  const text = String(input || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function ensureCategoryTelemetry(roomData) {
+  if (!roomData || typeof roomData !== 'object') return null;
+  if (!roomData.categoryTelemetry || typeof roomData.categoryTelemetry !== 'object') {
+    roomData.categoryTelemetry = {
+      voteSessionsStarted: 0,
+      votesCast: 0,
+      votesChanged: 0,
+      startBlockedByVote: 0,
+      startResumedAfterVote: 0,
+      voteFinalizeReasons: {},
+      lastLockedCategoryId: null,
+      lastLockedAtMs: 0,
+      round4CategoryImpact: {
+        matches: 0,
+        sampleCount: 0,
+        avgCategoryFit: 0,
+        avgNetImpact: 0
+      }
+    };
+  }
+  return roomData.categoryTelemetry;
+}
+
+function getCategoryTelemetryPublicState(roomData) {
+  const telemetry = ensureCategoryTelemetry(roomData);
+  if (!telemetry) return null;
+  const reasons = telemetry.voteFinalizeReasons && typeof telemetry.voteFinalizeReasons === 'object'
+    ? telemetry.voteFinalizeReasons
+    : {};
+  return {
+    voteSessionsStarted: Number(telemetry.voteSessionsStarted) || 0,
+    votesCast: Number(telemetry.votesCast) || 0,
+    votesChanged: Number(telemetry.votesChanged) || 0,
+    startBlockedByVote: Number(telemetry.startBlockedByVote) || 0,
+    startResumedAfterVote: Number(telemetry.startResumedAfterVote) || 0,
+    voteFinalizeReasons: {
+      timeout: Number(reasons.timeout) || 0,
+      all_voted: Number(reasons.all_voted) || 0,
+      disconnect_rebalance: Number(reasons.disconnect_rebalance) || 0,
+      manual: Number(reasons.manual) || 0
+    },
+    lastLockedCategoryId: telemetry.lastLockedCategoryId ? String(telemetry.lastLockedCategoryId) : null,
+    lastLockedAtMs: Number(telemetry.lastLockedAtMs) || 0,
+    round4CategoryImpact: {
+      matches: Number(telemetry.round4CategoryImpact && telemetry.round4CategoryImpact.matches) || 0,
+      sampleCount: Number(telemetry.round4CategoryImpact && telemetry.round4CategoryImpact.sampleCount) || 0,
+      avgCategoryFit: Number(telemetry.round4CategoryImpact && telemetry.round4CategoryImpact.avgCategoryFit) || 0,
+      avgNetImpact: Number(telemetry.round4CategoryImpact && telemetry.round4CategoryImpact.avgNetImpact) || 0
+    }
+  };
+}
+
+function getCategoryVotePublicState(roomData) {
+  const voteState = roomData && roomData.categoryVoteState && typeof roomData.categoryVoteState === 'object'
+    ? roomData.categoryVoteState
+    : null;
+  if (!voteState || voteState.active !== true) return null;
+
+  const votesByPlayer = voteState.votesByPlayer && typeof voteState.votesByPlayer === 'object'
+    ? voteState.votesByPlayer
+    : {};
+  const voteCounts = {};
+  Object.values(votesByPlayer).forEach((categoryId) => {
+    const key = String(categoryId || '').trim();
+    if (!key) return;
+    voteCounts[key] = (voteCounts[key] || 0) + 1;
+  });
+
+  return {
+    active: true,
+    startedAtMs: Number(voteState.startedAtMs) || 0,
+    endsAtMs: Number(voteState.endsAtMs) || 0,
+    startedBy: voteState.startedBy ? String(voteState.startedBy) : '',
+    totalPlayers: Array.isArray(roomData && roomData.players) ? roomData.players.length : 0,
+    voteCount: Object.keys(votesByPlayer).length,
+    options: Array.isArray(voteState.options)
+      ? voteState.options.map((option) => ({
+        id: String(option && option.id || ''),
+        displayName: String(option && option.displayName || ''),
+        family: String(option && option.family || 'unknown'),
+        riskLevel: String(option && option.riskLevel || 'med'),
+        votes: Number(voteCounts[String(option && option.id || '')]) || 0
+      }))
+      : []
+  };
+}
+
+function clearCategoryVoteState(roomData) {
+  const voteState = roomData && roomData.categoryVoteState && typeof roomData.categoryVoteState === 'object'
+    ? roomData.categoryVoteState
+    : null;
+  if (voteState && voteState.timeoutHandle) {
+    clearTimeout(voteState.timeoutHandle);
+  }
+  if (roomData) {
+    roomData.categoryVoteState = null;
+  }
+}
+
+function pickCategoryVoteWinner(roomCode, roomData, voteState) {
+  const options = Array.isArray(voteState && voteState.options)
+    ? voteState.options.filter((option) => option && option.id)
+    : [];
+  if (!options.length) return null;
+
+  const votesByPlayer = voteState && voteState.votesByPlayer && typeof voteState.votesByPlayer === 'object'
+    ? voteState.votesByPlayer
+    : {};
+  const connectedPlayers = new Set(
+    (Array.isArray(roomData && roomData.players) ? roomData.players : [])
+      .map((player) => String(player && player.name || '').trim())
+      .filter(Boolean)
+  );
+
+  const counts = {};
+  Object.entries(votesByPlayer).forEach(([playerName, categoryId]) => {
+    if (!connectedPlayers.has(String(playerName || '').trim())) return;
+    const key = String(categoryId || '').trim();
+    if (!key) return;
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  let topCount = -1;
+  let topIds = [];
+  options.forEach((option) => {
+    const count = Number(counts[option.id]) || 0;
+    if (count > topCount) {
+      topCount = count;
+      topIds = [option.id];
+      return;
+    }
+    if (count === topCount) {
+      topIds.push(option.id);
+    }
+  });
+
+  if (!topIds.length) return options[0];
+  if (topIds.length === 1) {
+    return options.find((option) => option.id === topIds[0]) || options[0];
+  }
+
+  const seed = `${roomCode}|${Number(voteState && voteState.startedAtMs) || 0}`;
+  topIds.sort((left, right) => {
+    const leftHash = hashString(`${seed}|${left}`);
+    const rightHash = hashString(`${seed}|${right}`);
+    if (leftHash !== rightHash) return leftHash - rightHash;
+    return String(left).localeCompare(String(right));
+  });
+  const winnerId = topIds[0];
+  return options.find((option) => option.id === winnerId) || options[0];
+}
+
+function finalizeCategoryVote(io, roomCode, roomData, reason = 'timeout') {
+  const voteState = roomData && roomData.categoryVoteState && typeof roomData.categoryVoteState === 'object'
+    ? roomData.categoryVoteState
+    : null;
+  if (!voteState || voteState.active !== true) return null;
+
+  const winner = pickCategoryVoteWinner(roomCode, roomData, voteState);
+  const optionIds = Array.isArray(voteState.options)
+    ? voteState.options.map((option) => String(option && option.id || '')).filter(Boolean)
+    : [];
+  const winnerId = winner && winner.id ? String(winner.id) : (optionIds[0] || null);
+  const orderedOptions = winnerId
+    ? [winnerId, ...optionIds.filter((id) => id !== winnerId)]
+    : optionIds;
+
+  const previousSettings = { ...(roomData && roomData.settings ? roomData.settings : {}) };
+  roomData.settings = {
+    ...roomData.settings,
+    categoryId: winnerId,
+    categoryVoteOptions: orderedOptions,
+    categoryVersion: String(roomData && roomData.settings && roomData.settings.categoryVersion || 'v1')
+  };
+  roomData.settings = {
+    ...roomData.settings,
+    ...normalizeCategorySettings(roomData.settings)
+  };
+
+  const changedKeys = getChangedSettingKeys(previousSettings, roomData.settings);
+  if (changedKeys.length) {
+    emitSettingsSync(io, roomCode, roomData, {
+      changedKeys,
+      changedBy: voteState.startedBy || 'system',
+      system: voteState.startedBy ? false : true,
+      summary: `Category vote locked: ${winner && winner.displayName ? winner.displayName : 'Unknown'}`
+    });
+  }
+
+  const pendingGameStart = voteState.pendingGameStart === true;
+  const telemetry = ensureCategoryTelemetry(roomData);
+  if (telemetry) {
+    telemetry.voteFinalizeReasons = telemetry.voteFinalizeReasons && typeof telemetry.voteFinalizeReasons === 'object'
+      ? telemetry.voteFinalizeReasons
+      : {};
+    const reasonKey = String(reason || 'manual').trim().toLowerCase() || 'manual';
+    telemetry.voteFinalizeReasons[reasonKey] = (Number(telemetry.voteFinalizeReasons[reasonKey]) || 0) + 1;
+    telemetry.lastLockedCategoryId = winnerId || null;
+    telemetry.lastLockedAtMs = Date.now();
+  }
+  const publicState = getCategoryVotePublicState(roomData);
+  clearCategoryVoteState(roomData);
+  io.to(roomCode).emit('categoryVoteLocked', {
+    reason: String(reason || 'timeout'),
+    winner: winner ? {
+      id: String(winner.id || ''),
+      displayName: String(winner.displayName || winner.id || ''),
+      family: String(winner.family || 'unknown'),
+      riskLevel: String(winner.riskLevel || 'med')
+    } : null,
+    vote: publicState
+  });
+
+  return {
+    winnerId,
+    pendingGameStart
+  };
+}
+
+function startCategoryVote(io, roomCode, roomData, startedBy = '') {
+  clearCategoryVoteState(roomData);
+  const telemetry = ensureCategoryTelemetry(roomData);
+  if (telemetry) {
+    telemetry.voteSessionsStarted = (Number(telemetry.voteSessionsStarted) || 0) + 1;
+  }
+  const history = Array.isArray(roomData && roomData.categoryHistory)
+    ? roomData.categoryHistory
+    : [];
+  const options = buildVoteOptions({
+    count: CATEGORY_VOTE_OPTION_COUNT,
+    recentCategoryIds: history
+  });
+  if (!options.length) return null;
+
+  const startedAtMs = Date.now();
+  const voteState = {
+    active: true,
+    startedAtMs,
+    endsAtMs: startedAtMs + CATEGORY_VOTE_TIMEOUT_MS,
+    startedBy: String(startedBy || ''),
+    options: options.map((entry) => ({
+      id: String(entry.id || ''),
+      displayName: String(entry.displayName || entry.id || ''),
+      family: String(entry.family || 'unknown'),
+      riskLevel: String(entry.riskLevel || 'med')
+    })),
+    votesByPlayer: {},
+    timeoutHandle: null,
+    pendingGameStart: false
+  };
+  voteState.timeoutHandle = setTimeout(() => {
+    const current = getRoomData(roomCode);
+    if (!current) return;
+    const finalized = finalizeCategoryVote(io, roomCode, current, 'timeout');
+    if (finalized && finalized.pendingGameStart) {
+      const telemetry = ensureCategoryTelemetry(current);
+      if (telemetry) {
+        telemetry.startResumedAfterVote = (Number(telemetry.startResumedAfterVote) || 0) + 1;
+      }
+      startGame(io, roomCode);
+    }
+    markRoomsDirty();
+  }, CATEGORY_VOTE_TIMEOUT_MS + 20);
+
+  roomData.categoryVoteState = voteState;
+  const payload = getCategoryVotePublicState(roomData);
+  io.to(roomCode).emit('categoryVoteStart', payload);
+  io.to(roomCode).emit('categoryVoteUpdate', payload);
+  return payload;
+}
+
 function emitRoomData(io, roomCode, roomData) {
   if (!roomData.voiceConfig || typeof roomData.voiceConfig !== 'object') {
     roomData.voiceConfig = {
@@ -546,6 +839,10 @@ function emitRoomData(io, roomCode, roomData) {
   roomData.voiceConfig.narratorVoiceId = narratorVoiceId;
   const safePackId = coercePackId(roomData && roomData.settings && roomData.settings.contentPackId);
   if (roomData && roomData.settings) {
+    roomData.settings = {
+      ...roomData.settings,
+      ...normalizeCategorySettings(roomData.settings)
+    };
     roomData.settings.contentPackId = safePackId;
   }
   io.to(roomCode).emit('roomData', {
@@ -553,6 +850,8 @@ function emitRoomData(io, roomCode, roomData) {
     isGameActive: roomData.isGameActive,
     host: roomData.host,
     settings: roomData.settings,
+    categoryTelemetry: getCategoryTelemetryPublicState(roomData),
+    categoryVote: getCategoryVotePublicState(roomData),
     messages: roomData.messages,
     voiceConfig: {
       narratorVoiceId,
@@ -671,6 +970,8 @@ async function emitFinalRoundResults(io, room, game) {
     voteCount: {},
     leaderboard: game.round4Results.leaderboardData,
     pointBreakdown: game.round4Results.pointBreakdown,
+    lockedCategory: game.lockedCategory || null,
+    categoryImpactSummary: game.round4Results && game.round4Results.payload ? (game.round4Results.payload.categoryImpactSummary || null) : null,
     packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     voiceCues: buildFinalRoundResultsVoiceCues({
       isTie: game.round4Results.isTie === true
@@ -801,9 +1102,17 @@ function registerSocketHandlers(io) {
         cleaned.contentPackId = coercePackId(cleaned.contentPackId);
       }
       roomData.settings = { ...roomData.settings, ...cleaned };
+      roomData.settings = {
+        ...roomData.settings,
+        ...normalizeCategorySettings(roomData.settings)
+      };
       roomData.settings.contentPackId = coercePackId(roomData.settings.contentPackId);
       const changedKeys = getChangedSettingKeys(previousSettings, roomData.settings);
       if (!changedKeys.length) return;
+
+      if (changedKeys.some((key) => ['categoriesMode', 'categoryId', 'categoryVoteOptions'].includes(String(key)))) {
+        clearCategoryVoteState(roomData);
+      }
 
       emitSettingsSync(io, room, roomData, {
         changedKeys,
@@ -950,8 +1259,101 @@ function registerSocketHandlers(io) {
         return;
       }
 
+      const normalizedCategorySettings = normalizeCategorySettings(roomData.settings || {});
+      roomData.settings = {
+        ...roomData.settings,
+        ...normalizedCategorySettings
+      };
+      if (normalizedCategorySettings.categoriesMode === 'group_vote') {
+        const telemetry = ensureCategoryTelemetry(roomData);
+        const voteState = roomData.categoryVoteState;
+        if (voteState && voteState.active === true) {
+          if (telemetry) {
+            telemetry.startBlockedByVote = (Number(telemetry.startBlockedByVote) || 0) + 1;
+          }
+          voteState.pendingGameStart = true;
+          socket.emit('gameError', 'Category vote in progress. Start will continue once vote locks.');
+          markRoomsDirty();
+          return;
+        }
+
+        const votePayload = startCategoryVote(io, room, roomData, name);
+        if (!votePayload) {
+          socket.emit('gameError', 'Could not start category vote; try updating settings and retry.');
+          return;
+        }
+        if (roomData.categoryVoteState) {
+          roomData.categoryVoteState.pendingGameStart = true;
+          if (telemetry) {
+            telemetry.startBlockedByVote = (Number(telemetry.startBlockedByVote) || 0) + 1;
+          }
+        }
+        markRoomsDirty();
+        return;
+      }
+
       startGame(io, room);
       markRoomsDirty();
+    });
+
+    socket.on('castCategoryVote', (payload) => {
+      const joined = getJoinedRoom(socket);
+      if (!joined) return;
+
+      const { room, name, roomData } = joined;
+      const voteState = roomData && roomData.categoryVoteState && typeof roomData.categoryVoteState === 'object'
+        ? roomData.categoryVoteState
+        : null;
+      if (!voteState || voteState.active !== true) {
+        socket.emit('gameError', 'No active category vote.');
+        return;
+      }
+
+      const categoryId = String(payload && payload.categoryId || '').trim().toLowerCase();
+      const validIds = new Set(
+        (Array.isArray(voteState.options) ? voteState.options : [])
+          .map((option) => String(option && option.id || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      if (!categoryId || !validIds.has(categoryId)) {
+        socket.emit('gameError', 'Invalid category vote selection.');
+        return;
+      }
+
+      voteState.votesByPlayer = voteState.votesByPlayer && typeof voteState.votesByPlayer === 'object'
+        ? voteState.votesByPlayer
+        : {};
+      const previousVote = String(voteState.votesByPlayer[name] || '').trim().toLowerCase();
+      voteState.votesByPlayer[name] = categoryId;
+      const telemetry = ensureCategoryTelemetry(roomData);
+      if (telemetry) {
+        if (!previousVote) {
+          telemetry.votesCast = (Number(telemetry.votesCast) || 0) + 1;
+        } else if (previousVote !== categoryId) {
+          telemetry.votesChanged = (Number(telemetry.votesChanged) || 0) + 1;
+        }
+      }
+
+      const publicState = getCategoryVotePublicState(roomData);
+      io.to(room).emit('categoryVoteUpdate', publicState);
+
+      const totalPlayers = Array.isArray(roomData.players) ? roomData.players.length : 0;
+      const voteCount = Object.keys(voteState.votesByPlayer).length;
+      if (totalPlayers > 0 && voteCount >= totalPlayers) {
+        const finalized = finalizeCategoryVote(io, room, roomData, 'all_voted');
+        if (finalized && finalized.pendingGameStart) {
+          if (telemetry) {
+            telemetry.startResumedAfterVote = (Number(telemetry.startResumedAfterVote) || 0) + 1;
+          }
+          startGame(io, room);
+        }
+      }
+
+      markRoomsDirty();
+    });
+
+    socket.on('categoryVoteCast', (payload) => {
+      socket.emit('gameError', 'categoryVoteCast is deprecated; use castCategoryVote.');
     });
 
     socket.on('draftCharacter', (rawCharacter) => {
@@ -1436,8 +1838,12 @@ function registerSocketHandlers(io) {
 
         const payload = {
           evaluationId,
+          scenario: game.currentScenario,
+          twist: game.currentTwist,
+          lockedCategory: game.lockedCategory || null,
           allTeamEvaluations: scored.teamEvaluations,
           finalLeaderboard: evalLeaderboard,
+          categoryImpactSummary: scored.categoryImpactSummary || null,
           revealTimeline,
           isTie,
           tiedPlayers: tiedTeams,
@@ -1446,6 +1852,25 @@ function registerSocketHandlers(io) {
             isTie
           })
         };
+
+        const categorySummary = scored && scored.categoryImpactSummary && typeof scored.categoryImpactSummary === 'object'
+          ? scored.categoryImpactSummary
+          : null;
+        if (categorySummary && categorySummary.active === true) {
+          const telemetry = ensureCategoryTelemetry(roomData);
+          if (telemetry) {
+            const impact = telemetry.round4CategoryImpact && typeof telemetry.round4CategoryImpact === 'object'
+              ? telemetry.round4CategoryImpact
+              : { matches: 0, sampleCount: 0, avgCategoryFit: 0, avgNetImpact: 0 };
+            const nextMatches = (Number(impact.matches) || 0) + 1;
+            const incomingSamples = Math.max(0, Number(categorySummary.sampleCount) || 0);
+            impact.sampleCount = (Number(impact.sampleCount) || 0) + incomingSamples;
+            impact.avgCategoryFit = Number((((Number(impact.avgCategoryFit) || 0) * (nextMatches - 1) + (Number(categorySummary.avgCategoryFit) || 0)) / nextMatches).toFixed(2));
+            impact.avgNetImpact = Number((((Number(impact.avgNetImpact) || 0) * (nextMatches - 1) + (Number(categorySummary.avgNetImpact) || 0)) / nextMatches).toFixed(2));
+            impact.matches = nextMatches;
+            telemetry.round4CategoryImpact = impact;
+          }
+        }
 
         game.round4Results = {
           evaluationId,
@@ -1517,6 +1942,7 @@ function registerSocketHandlers(io) {
         p.ready = false;
       });
       roomData.messages = [];
+      clearCategoryVoteState(roomData);
       const resetKeys = resetRoomSettingsToDefaults(roomData);
 
       emitRoomData(io, room, roomData);
@@ -1539,7 +1965,33 @@ function registerSocketHandlers(io) {
       const roomData = getRoomData(room);
       if (!roomData) return;
 
+      if (roomData.categoryVoteState && roomData.categoryVoteState.active === true) {
+        if (roomData.categoryVoteState.votesByPlayer && typeof roomData.categoryVoteState.votesByPlayer === 'object') {
+          delete roomData.categoryVoteState.votesByPlayer[name];
+        }
+      }
+
       roomData.players = roomData.players.filter(p => p.name !== name);
+
+      if (roomData.categoryVoteState && roomData.categoryVoteState.active === true) {
+        if (!roomData.players.length) {
+          clearCategoryVoteState(roomData);
+        } else {
+          io.to(room).emit('categoryVoteUpdate', getCategoryVotePublicState(roomData));
+          const livePlayers = roomData.players.length;
+          const voteCount = Object.keys(roomData.categoryVoteState.votesByPlayer || {}).length;
+          if (voteCount >= livePlayers) {
+            const finalized = finalizeCategoryVote(io, room, roomData, 'disconnect_rebalance');
+            if (finalized && finalized.pendingGameStart) {
+              const telemetry = ensureCategoryTelemetry(roomData);
+              if (telemetry) {
+                telemetry.startResumedAfterVote = (Number(telemetry.startResumedAfterVote) || 0) + 1;
+              }
+              startGame(io, room);
+            }
+          }
+        }
+      }
 
       if (roomData.gameState && Array.isArray(roomData.gameState.players)) {
         roomData.gameState.players = roomData.gameState.players.filter(p => p.name !== name);
@@ -1558,6 +2010,7 @@ function registerSocketHandlers(io) {
       }
 
       if (roomData.players.length === 0) {
+        clearCategoryVoteState(roomData);
         delete rooms[room];
       } else {
         emitRoomData(io, room, roomData);

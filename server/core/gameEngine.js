@@ -51,6 +51,7 @@ const { loadRoomsSnapshot, queueRoomsSnapshot } = require('../storage/statePersi
 const {
   buildRoundStartVoiceCues,
   buildScenarioVoiceCues,
+  buildCategoryRevealVoiceCues,
   buildTwistVoiceCues,
   buildRound4StartVoiceCues,
   buildGameEndedVoiceCues
@@ -62,6 +63,10 @@ const {
   recordPackMatchStart,
   recordPackMatchCompletion
 } = require('../content/packRegistry');
+const {
+  normalizeCategorySettings,
+  lockCategoryForMatch
+} = require('../services/categoryRegistryService');
 
 const GAME_NARRATOR_VOICE_IDS = new Set(['af_heart', 'af_bella', 'am_michael', 'bm_george']);
 
@@ -1554,6 +1559,11 @@ const rooms = {};
 const voteTimeouts = {};
 
 Object.assign(rooms, loadRoomsSnapshot());
+Object.values(rooms).forEach((room) => {
+  if (!room || typeof room !== 'object') return;
+  room.settings = buildDefaultRoomSettings(room.settings || {});
+  room.categoryHistory = Array.isArray(room.categoryHistory) ? room.categoryHistory.slice(-16) : [];
+});
 
 function markRoomsDirty() {
   queueRoomsSnapshot(rooms);
@@ -1840,12 +1850,14 @@ function prepareFinalRoundState(game, roomCode) {
 }
 
 function buildDefaultRoomSettings(source = {}) {
+  const categorySettings = normalizeCategorySettings(source || {});
   return {
     difficulty: 'normal',
     scenarioTheme: 'all',
     plotTwists: true,
     maxPlayers: Math.min(6, Math.max(3, Number(source && source.maxPlayers) || 6)),
     customScenario: '',
+    ...categorySettings,
     contentPackId: 'default'
   };
 }
@@ -1878,6 +1890,7 @@ function createRoom(roomCode) {
       updatedAt: 0
     },
     settings: buildDefaultRoomSettings(),
+    categoryHistory: [],
     messages: [],
     reactions: {}
   };
@@ -1885,16 +1898,31 @@ function createRoom(roomCode) {
   return room;
 }
 
-function createGameInstance(roomCode, players, settings) {
+function createGameInstance(roomCode, players, settings, recentCategoryIds = []) {
   const pack = resolveContentPack(settings && settings.contentPackId);
   const packMeta = getPublicPackMeta(pack.id);
-  const theme = settings.scenarioTheme || 'all';
-  const difficulty = settings.difficulty || 'normal';
+  const normalizedCategorySettings = normalizeCategorySettings(settings || {});
+  const categoryLock = lockCategoryForMatch(
+    {
+      ...settings,
+      ...normalizedCategorySettings
+    },
+    {
+      recentCategoryIds: Array.isArray(recentCategoryIds) ? recentCategoryIds : []
+    }
+  );
+  const effectiveSettings = {
+    ...(settings || {}),
+    ...normalizedCategorySettings,
+    ...(categoryLock && categoryLock.normalizedSettings ? categoryLock.normalizedSettings : {})
+  };
+  const theme = effectiveSettings.scenarioTheme || 'all';
+  const difficulty = effectiveSettings.difficulty || 'normal';
   const scenarios = generateScenarios(3, theme, difficulty, pack);
 
-  if (settings.customScenario && settings.customScenario.trim()) {
+  if (effectiveSettings.customScenario && effectiveSettings.customScenario.trim()) {
     const customIndex = Math.floor(Math.random() * scenarios.length);
-    const customScenario = applyPromptBrevity(settings.customScenario.trim(), 'scenario');
+    const customScenario = applyPromptBrevity(effectiveSettings.customScenario.trim(), 'scenario');
     scenarios[customIndex] = {
       scenario: customScenario,
       twists: generateTwists(difficulty, 6, customScenario, pack, theme),
@@ -1934,9 +1962,11 @@ function createGameInstance(roomCode, players, settings) {
     currentTwist: '',
     results: [],
     settings: {
-      ...settings,
+      ...effectiveSettings,
       contentPackId: pack.id
     },
+    lockedCategory: categoryLock && categoryLock.lockedCategory ? { ...categoryLock.lockedCategory } : null,
+    categorySelectionSource: categoryLock && categoryLock.selectionSource ? categoryLock.selectionSource : 'off',
     packMeta,
     roundStartTime: null,
     allCharactersDrafted: [],
@@ -2088,17 +2118,31 @@ function startGame(io, roomCode) {
   if (readyCount < 3 || readyCount !== room.players.length) return;
 
   room.isGameActive = true;
-  room.gameState = createGameInstance(roomCode, room.players, room.settings);
+  room.gameState = createGameInstance(
+    roomCode,
+    room.players,
+    room.settings,
+    Array.isArray(room.categoryHistory) ? room.categoryHistory : []
+  );
   room.settings = {
     ...room.settings,
+    ...normalizeCategorySettings(room.settings || {}),
     contentPackId: room.gameState && room.gameState.packMeta ? room.gameState.packMeta.id : 'default'
   };
+  if (room.gameState && room.gameState.lockedCategory && room.gameState.lockedCategory.id) {
+    const nextHistory = [
+      ...(Array.isArray(room.categoryHistory) ? room.categoryHistory : []),
+      String(room.gameState.lockedCategory.id)
+    ];
+    room.categoryHistory = nextHistory.slice(-12);
+  }
   recordPackMatchStart(room.settings.contentPackId);
 
   io.to(roomCode).emit('gameStarting', {
     totalRounds: 3,
     players: room.gameState.players.map(p => p.name),
     settings: room.settings,
+    lockedCategory: room.gameState.lockedCategory || null,
     packMeta: room.gameState.packMeta || getPublicPackMeta(room.settings.contentPackId)
   });
 
@@ -2117,6 +2161,20 @@ async function startRound(io, roomCode) {
   game.activePhase = 'PRE_ROUND';
   game.phaseStartTime = Date.now();
 
+  const categoryLabel = getLockedCategoryDisplayName(game.lockedCategory);
+  if (categoryLabel) {
+    await revealCategory(io, roomCode, { continueToRoundStart: true });
+    return;
+  }
+
+  await emitRoundStartAndScheduleScenario(io, roomCode);
+}
+
+async function emitRoundStartAndScheduleScenario(io, roomCode) {
+  const room = rooms[roomCode];
+  const game = room && room.gameState;
+  if (!game) return;
+
   const roundStartPayload = {
     roundNumber: game.currentRound + 1,
     totalRounds: game.totalRounds,
@@ -2128,6 +2186,48 @@ async function startRound(io, roomCode) {
   await emitWithVoiceCuePrewarm(io, roomCode, 'roundStart', roundStartPayload, { timeoutMs: 1400 });
 
   markRoomsDirty();
+  setTimeout(() => revealScenario(io, roomCode), 3000);
+}
+
+function getLockedCategoryDisplayName(lockedCategory = null) {
+  if (!lockedCategory || typeof lockedCategory !== 'object') return '';
+  const candidate = lockedCategory.displayName || lockedCategory.label || lockedCategory.name || lockedCategory.slug || '';
+  return String(candidate || '').replace(/\s+/g, ' ').trim();
+}
+
+async function revealCategory(io, roomCode, { continueToRoundStart = false } = {}) {
+  const room = rooms[roomCode];
+  if (!room || !room.gameState) return;
+  const game = room.gameState;
+  const categoryLabel = getLockedCategoryDisplayName(game.lockedCategory);
+  if (!categoryLabel) {
+    if (continueToRoundStart) {
+      await emitRoundStartAndScheduleScenario(io, roomCode);
+      return;
+    }
+    revealScenario(io, roomCode);
+    return;
+  }
+
+  game.activePhase = 'CATEGORY_REVEAL';
+  game.phaseStartTime = Date.now();
+
+  const payload = {
+    roundNumber: game.currentRound + 1,
+    lockedCategory: game.lockedCategory || null,
+    categoryLabel,
+    voiceCues: buildCategoryRevealVoiceCues({
+      roundNumber: game.currentRound + 1,
+      category: categoryLabel
+    })
+  };
+  await emitWithVoiceCuePrewarm(io, roomCode, 'categoryRevealed', payload, { timeoutMs: 1600 });
+
+  markRoomsDirty();
+  if (continueToRoundStart) {
+    setTimeout(() => emitRoundStartAndScheduleScenario(io, roomCode), 3000);
+    return;
+  }
   setTimeout(() => revealScenario(io, roomCode), 3000);
 }
 
@@ -2167,6 +2267,7 @@ async function revealScenario(io, roomCode) {
     wordApiSourceKey: wordSourceMeta.key,
     wordApiSourceIndex: wordSourceMeta.index,
     wordApiSourceTotal: wordSourceMeta.total,
+    lockedCategory: game.lockedCategory || null,
     voiceCues: buildScenarioVoiceCues({
       roundNumber: game.currentRound + 1,
       scenario: scenario.scenario
@@ -2236,6 +2337,7 @@ async function revealPlotTwist(io, roomCode) {
   const twistPayload = {
     twist: game.currentTwist,
     scenario: game.currentScenario,
+    lockedCategory: game.lockedCategory || null,
     packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     currentTeams: game.players.map(p => ({
       name: p.name,
@@ -2284,6 +2386,7 @@ function startVoting(io, roomCode) {
     votingTimeRemaining: voteSeconds,
     scenario: game.currentScenario,
     twist: game.currentTwist,
+    lockedCategory: game.lockedCategory || null,
     packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     totalPlayers: game.players.length,
     roundNumber: game.currentRound + 1
@@ -2373,6 +2476,7 @@ async function startFinalRound(io, roomCode) {
     const round4StartPayload = {
       scenario: game.currentScenario,
       twist: game.currentTwist,
+      lockedCategory: game.lockedCategory || null,
       finalTeams,
       packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
       voiceCues: buildRound4StartVoiceCues({
@@ -2526,6 +2630,7 @@ async function tallyResults(io, roomCode) {
     leaderboard: leaderboardData,
     pointBreakdown,
     round: game.currentRound + 1,
+    lockedCategory: game.lockedCategory || null,
     packMeta: game.packMeta || getPublicPackMeta(game && game.settings && game.settings.contentPackId),
     roundIntelSummary: roundIntel
       ? Object.entries(roundIntel.playerEvaluations || {}).reduce((acc, [name, data]) => {
@@ -2871,6 +2976,7 @@ async function endGame(io, roomCode) {
     finalLeaderboard,
     totalRounds: game.totalRounds,
     winner,
+    lockedCategory: game.lockedCategory || null,
     packMeta,
     winnerCharacters,
     winnerTeamCharacters,

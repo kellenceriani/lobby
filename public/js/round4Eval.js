@@ -36,6 +36,8 @@ const round4State = {
   loadingReadyToStart: false,
   loadingScenario: '',
   loadingTwist: '',
+  loadingCategory: '',
+  lockedCategory: null,
   pendingLoadingReadyVoiceCue: null,
   pendingLoadingReadyVoiceCueEvalId: null,
   loadingReadyVoiceSpokenEvalId: null,
@@ -73,6 +75,24 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function normalizeLockedCategory(payload = null) {
+  if (!payload || typeof payload !== 'object') return null;
+  const id = String(payload.id || '').trim().toLowerCase();
+  if (!id) return null;
+  return {
+    id,
+    displayName: String(payload.displayName || id),
+    family: String(payload.family || 'unknown'),
+    riskLevel: String(payload.riskLevel || 'med')
+  };
+}
+
+function getLockedCategoryLabel() {
+  const entry = normalizeLockedCategory(round4State.lockedCategory);
+  if (!entry) return 'Auto / not locked';
+  return `${entry.displayName} • ${entry.family} • risk ${entry.riskLevel}`;
 }
 
 function buildMissingCharacterImage(label = 'No Image') {
@@ -478,23 +498,29 @@ function triggerLoadingPriorityReveal(card) {
   window.setTimeout(() => card.classList.remove('is-updated'), 650);
 }
 
-function setLoadingBotContext(scenario, twist, speech) {
+function setLoadingBotContext(scenario, twist, speech, category = null) {
   const scenarioHeroEl = document.getElementById('evalLoadScenarioHero');
   const twistHeroEl = document.getElementById('evalLoadTwistHero');
+  const categoryHeroEl = document.getElementById('evalLoadCategoryHero');
   const preloadHint = document.getElementById('evalPreloadHint');
   const scenarioCard = scenarioHeroEl ? scenarioHeroEl.closest('.eval-priority-card') : null;
   const twistCard = twistHeroEl ? twistHeroEl.closest('.eval-priority-card') : null;
+  const categoryCard = categoryHeroEl ? categoryHeroEl.closest('.eval-priority-card') : null;
 
   if (scenario) round4State.loadingScenario = String(scenario);
   if (twist) round4State.loadingTwist = String(twist);
+  if (category != null && String(category || '').trim()) round4State.loadingCategory = String(category);
 
   const currentScenario = round4State.loadingScenario || 'Unknown scenario';
   const currentTwist = round4State.loadingTwist || 'Unknown twist';
+  const currentCategory = round4State.loadingCategory || getLockedCategoryLabel();
 
   if (scenarioHeroEl) scenarioHeroEl.textContent = currentScenario;
   if (twistHeroEl) twistHeroEl.textContent = currentTwist;
+  if (categoryHeroEl) categoryHeroEl.textContent = currentCategory;
   if (scenario) triggerLoadingPriorityReveal(scenarioCard);
   if (twist) triggerLoadingPriorityReveal(twistCard);
+  if (category != null) triggerLoadingPriorityReveal(categoryCard);
   if (preloadHint && speech) preloadHint.textContent = speech;
 }
 
@@ -822,6 +848,7 @@ function resetCinematicState() {
 function initRound4Evaluation(data) {
   const scenario = data && data.scenario ? data.scenario : 'Unknown scenario';
   const twist = data && data.twist ? data.twist : 'Unknown twist';
+  const lockedCategory = normalizeLockedCategory(data && data.lockedCategory ? data.lockedCategory : null);
   const finalTeams = data && data.finalTeams ? data.finalTeams : {};
 
   const evalScreen = document.getElementById('round4EvalScreen');
@@ -846,11 +873,14 @@ function initRound4Evaluation(data) {
 
   const scenarioText = document.getElementById('evalScenarioText');
   const twistText = document.getElementById('evalTwistText');
+  const categoryText = document.getElementById('evalCategoryText');
   const causalityText = document.getElementById('evalContextCausality');
+  round4State.lockedCategory = lockedCategory;
   if (scenarioText) scenarioText.textContent = scenario;
   if (twistText) twistText.textContent = twist;
+  if (categoryText) categoryText.textContent = getLockedCategoryLabel();
   if (causalityText) causalityText.textContent = 'Scenario sets the lane. Twist bends the lane. OVR shows who still dominates.';
-  setLoadingBotContext(scenario, twist, '');
+  setLoadingBotContext(scenario, twist, '', getLockedCategoryLabel());
 
   const loading = document.getElementById('evalLoading');
   const loadingTitle = document.getElementById('evalLoadingTitle');
@@ -3277,6 +3307,14 @@ function openOVRBreakdown(evalData) {
     const twistEl = document.getElementById('modalTwistRelevance');
     if (twistEl) twistEl.textContent = evalData.breakdown && evalData.breakdown.twistRelevance ? evalData.breakdown.twistRelevance : 'No twist analysis available.';
 
+    const categoryEl = document.getElementById('modalCategoryRelevance');
+    if (categoryEl) {
+      const categoryLine = evalData && evalData.breakdown && evalData.breakdown.categoryRelevance
+        ? String(evalData.breakdown.categoryRelevance)
+        : `Locked category context: ${getLockedCategoryLabel()}.`;
+      categoryEl.textContent = categoryLine;
+    }
+
     const twistKeywordsEl = document.getElementById('modalTwistKeywords');
     if (twistKeywordsEl) {
       const twistKeywords = evalData.breakdown && evalData.breakdown.keywordMatches ? evalData.breakdown.keywordMatches.twist || [] : [];
@@ -3440,6 +3478,7 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       }
 
       round4State.evaluationId = data.evaluationId || null;
+      round4State.lockedCategory = normalizeLockedCategory(data && data.lockedCategory ? data.lockedCategory : null) || round4State.lockedCategory;
       clearRound4EvaluationWatchdog();
       round4State.allTeamEvaluations = data.allTeamEvaluations || data.teamEvaluations || {};
       round4State.finalLeaderboard = Array.isArray(data.finalLeaderboard) ? data.finalLeaderboard : [];
@@ -3470,7 +3509,9 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
       setLoadingReadyState(false);
       setRevealCeremonyProgress(38, 'Scoring final teams');
       updateLoadingDockProgress(0, 100, 'Scoring final teams');
-      setLoadingBotContext(data && data.scenario, data && data.twist, '');
+      const categoryText = document.getElementById('evalCategoryText');
+      if (categoryText) categoryText.textContent = getLockedCategoryLabel();
+      setLoadingBotContext(data && data.scenario, data && data.twist, '', getLockedCategoryLabel());
 
       if (round4State.cinematicRenderTimer) {
         window.clearTimeout(round4State.cinematicRenderTimer);

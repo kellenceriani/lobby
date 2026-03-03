@@ -190,6 +190,23 @@ function buildScenarioVoiceCues({ roundNumber, scenario } = {}) {
   ]);
 }
 
+function buildCategoryRevealVoiceCues({ roundNumber, category } = {}) {
+  const round = Number(roundNumber) || 0;
+  const safeCategory = cleanScenarioOrTwist(category, 120);
+  if (!safeCategory) return [];
+  return compactList([
+    makeCue({
+      id: `round-${round}-category`,
+      type: 'narration',
+      text: `Category locked: ${safeCategory}.`,
+      subtitleText: `Category: ${safeCategory}`,
+      priority: 68,
+      intensity: 0.6,
+      dedupeKey: `phase:category:${round}:${safeCategory.toLowerCase()}`
+    })
+  ]);
+}
+
 function buildTwistVoiceCues({ roundNumber, twist } = {}) {
   const round = Number(roundNumber) || 0;
   const safeTwist = cleanScenarioOrTwist(twist, 170);
@@ -283,6 +300,7 @@ module.exports = {
   makeCue,
   buildRoundStartVoiceCues,
   buildScenarioVoiceCues,
+  buildCategoryRevealVoiceCues,
   buildTwistVoiceCues,
   buildRound4StartVoiceCues,
   buildRound4EvaluatedVoiceCues,

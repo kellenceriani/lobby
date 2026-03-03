@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 const { initWordCache } = require('./server/core/gameEngine');
 const registerSocketHandlers = require('./server/socket/socketHandlers');
 const { getPackCatalog, getPackMetricsSnapshot } = require('./server/content/packRegistry');
+const { getCategoryRegistrySnapshot } = require('./server/services/categoryRegistryService');
 const { resolveAudioCalloutBatch } = require('./server/services/audioCalloutResolverService');
 const {
   NARRATOR_VOICES,
@@ -91,6 +92,10 @@ app.get('/api/packs', (_req, res) => {
 
 app.get('/api/packs/metrics', (_req, res) => {
   res.json(getPackMetricsSnapshot());
+});
+
+app.get('/api/categories', (_req, res) => {
+  res.json(getCategoryRegistrySnapshot());
 });
 
 async function handleAudioCalloutResolveBatch(req, res) {

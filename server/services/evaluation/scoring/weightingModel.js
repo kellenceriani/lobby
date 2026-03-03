@@ -32,6 +32,7 @@ function buildWeightProfile({ evaluationMode = 'round', currentTwist, originalTw
         currentScenario: 0.4,
         currentTwist: 0.3,
         baseAbility: 0.2,
+        category: 0,
         restraints: 0.1
       }
       : {
@@ -40,34 +41,33 @@ function buildWeightProfile({ evaluationMode = 'round', currentTwist, originalTw
         currentScenario: 0.7,
         currentTwist: 0,
         baseAbility: 0.2,
+        category: 0,
         restraints: 0.1
       };
   }
 
   return hasCurrentTwist
     ? {
-      // Final mode (twist): context across original+final scenario/twist = 65% total.
-      // If the drafted round had no twist, reallocate that carryover twist share to original scenario carryover.
-      carryoverScenario: hasOriginalTwist ? 0.18 : 0.325,
-      carryoverTwist: hasOriginalTwist ? 0.145 : 0,
-      currentScenario: 0.18,
-      currentTwist: 0.145,
-      baseAbility: 0.25,
+      carryoverScenario: hasOriginalTwist ? 0.11 : 0.20,
+      carryoverTwist: hasOriginalTwist ? 0.09 : 0,
+      currentScenario: 0.11,
+      currentTwist: 0.09,
+      baseAbility: 0.20,
+      category: 0.30,
       restraints: 0.10
     }
     : {
-      // Final mode (no final twist): scenario context remains 65% total, split evenly
-      // between original drafted scenario carryover and current/final scenario fit.
-      carryoverScenario: 0.325,
+      carryoverScenario: 0.20,
       carryoverTwist: 0,
-      currentScenario: 0.325,
+      currentScenario: 0.20,
       currentTwist: 0,
-      baseAbility: 0.25,
+      baseAbility: 0.20,
+      category: 0.30,
       restraints: 0.10
     };
 }
 
-function computeWeightedOverall(scores = {}, profile = {}) {
+function computeWeightedOverall(scores = {}, profile = {}, controls = {}) {
   const normalized = {
     currentScenarioFit: toInt(scores.currentScenarioFit, 50),
     currentTwistFit: toInt(scores.currentTwistFit, 50),
@@ -76,7 +76,8 @@ function computeWeightedOverall(scores = {}, profile = {}) {
     creativity: toInt(scores.creativity, 50),
     chemistry: toInt(scores.chemistry, 50),
     originalScenarioFit: toInt(scores.originalScenarioFit, 50),
-    originalTwistFit: toInt(scores.originalTwistFit, 50)
+    originalTwistFit: toInt(scores.originalTwistFit, 50),
+    categoryFit: toInt(scores.categoryFit, 50)
   };
 
   const restraintSource = Number(
@@ -89,6 +90,7 @@ function computeWeightedOverall(scores = {}, profile = {}) {
     currentScenario: normalized.currentScenarioFit * (Number(profile.currentScenario) || 0),
     currentTwist: normalized.currentTwistFit * (Number(profile.currentTwist) || 0),
     baseAbility: normalized.baseAbility * (Number(profile.baseAbility) || 0),
+    category: normalized.categoryFit * (Number(profile.category) || 0),
     restraints: restraintSource * (Number(profile.restraints) || 0)
   };
 
@@ -104,6 +106,7 @@ function computeWeightedOverall(scores = {}, profile = {}) {
   const currentTwistWeight = Number(profile.currentTwist) || 0;
   const totalScenarioWeight = carryoverScenarioWeight + currentScenarioWeight;
   const totalTwistWeight = carryoverTwistWeight + currentTwistWeight;
+  const categoryWeight = Number(profile.category) || 0;
   const hasCarryoverWeights = carryoverScenarioWeight > 0 || carryoverTwistWeight > 0;
   const blendedScenarioFit = totalScenarioWeight > 0
     ? (
@@ -130,19 +133,48 @@ function computeWeightedOverall(scores = {}, profile = {}) {
   const twistWeightScale = totalTwistWeight > 0 && baselineTwistWeight > 0
     ? Math.min(1.75, totalTwistWeight / baselineTwistWeight)
     : 0;
+  const categoryWeightScale = categoryWeight > 0
+    ? Math.min(1.6, categoryWeight / 0.3)
+    : 0;
   const baseCurve = Math.pow(Math.max(0, overallPct) / 100, 0.78) * 99;
   const fitDelta =
     ((blendedScenarioFit - 50) * 0.16 * scenarioWeightScale) +
     ((blendedTwistFit - 50) * 0.12 * twistWeightScale) +
+    ((normalized.categoryFit - 50) * 0.20 * categoryWeightScale) +
     ((normalized.baseAbility - 55) * 0.1) +
     ((restraintSource - 50) * 0.03);
   let synergyBonus = 0;
   if (normalized.baseAbility >= 65 && normalized.currentScenarioFit >= 65) synergyBonus += 3;
   if ((Number(profile.currentTwist) || 0) > 0 && normalized.baseAbility >= 60 && normalized.currentTwistFit >= 60) synergyBonus += 2;
   if (normalized.currentScenarioFit >= 78 && normalized.currentTwistFit >= 68) synergyBonus += 3;
+  if (categoryWeight > 0 && normalized.categoryFit >= 82 && normalized.currentScenarioFit >= 68) synergyBonus += 3;
+  if (categoryWeight > 0 && normalized.categoryFit <= 42) synergyBonus -= 5;
   if (normalized.currentScenarioFit < 45 && normalized.currentTwistFit < 45) synergyBonus -= 4;
   if (normalized.baseAbility < 45 && overallPct < 50) synergyBonus -= 3;
-  const ovr99 = clamp(Math.round(baseCurve + fitDelta + synergyBonus), 0, 99);
+  let ovr99 = clamp(Math.round(baseCurve + fitDelta + synergyBonus), 0, 99);
+
+  const confidenceName = toPercent(controls.confidenceName, 1);
+  const confidenceOverall = toPercent(controls.confidenceOverall, 1);
+  const riskFlags = new Set((Array.isArray(controls.riskFlags) ? controls.riskFlags : []).map((v) => String(v || '').toLowerCase()));
+  const categoryActive = controls.categoryActive === true && categoryWeight > 0;
+  let dynamicCap = 99;
+  if (categoryActive) {
+    if (normalized.categoryFit < 35) dynamicCap = 74;
+    else if (normalized.categoryFit < 50) dynamicCap = 84;
+    else if (normalized.categoryFit < 65) dynamicCap = 91;
+    else dynamicCap = 97;
+  }
+  if (confidenceName < 0.84) dynamicCap = Math.min(dynamicCap, 95);
+  if (confidenceName < 0.72) dynamicCap = Math.min(dynamicCap, 91);
+  if (confidenceOverall < 0.65) dynamicCap = Math.min(dynamicCap, 90);
+  if (riskFlags.has('invalid_input')) dynamicCap = Math.min(dynamicCap, 68);
+  if (riskFlags.has('generic_name_ambiguity')) dynamicCap = Math.min(dynamicCap, 80);
+  if (riskFlags.has('low_signal_ambiguity')) dynamicCap = Math.min(dynamicCap, 78);
+  if (riskFlags.has('high_candidate_ambiguity')) dynamicCap = Math.min(dynamicCap, 88);
+  if (riskFlags.has('dangerous_title_diff_suspected')) dynamicCap = Math.min(dynamicCap, 82);
+  if (riskFlags.has('fast_round_timeout_fallback')) dynamicCap = Math.min(dynamicCap, 84);
+  if (riskFlags.has('synthetic_image') && confidenceName < 0.78) dynamicCap = Math.min(dynamicCap, 86);
+  ovr99 = Math.min(ovr99, dynamicCap);
 
   return {
     scores: normalized,
@@ -157,10 +189,13 @@ function computeWeightedOverall(scores = {}, profile = {}) {
       synergyBonus,
       scenarioWeightScale: Number(scenarioWeightScale.toFixed(2)),
       twistWeightScale: Number(twistWeightScale.toFixed(2)),
+      categoryWeightScale: Number(categoryWeightScale.toFixed(2)),
       totalScenarioWeight: Number(totalScenarioWeight.toFixed(3)),
       totalTwistWeight: Number(totalTwistWeight.toFixed(3)),
+      categoryWeight: Number(categoryWeight.toFixed(3)),
       blendedScenarioFit: Number(blendedScenarioFit.toFixed(2)),
-      blendedTwistFit: Number(blendedTwistFit.toFixed(2))
+      blendedTwistFit: Number(blendedTwistFit.toFixed(2)),
+      dynamicCap: Number(dynamicCap)
     }
   };
 }

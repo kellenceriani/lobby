@@ -55,7 +55,7 @@ function initializeSettingsOsBindings() {
   refreshNowPlaying();
 
   // Keep Now Playing in sync with user edits
-  for (const id of ['difficulty', 'scenarioTheme', 'contentPack', 'plotTwists', 'customScenario']) {
+  for (const id of ['difficulty', 'scenarioTheme', 'contentPack', 'plotTwists', 'customScenario', 'categoriesMode', 'categoryId']) {
     const el = document.getElementById(id);
     if (!el) continue;
     el.addEventListener('change', refreshNowPlaying);
@@ -442,7 +442,9 @@ function resetCoreRules() {
     scenarioTheme: 'all',
     contentPackId: 'default',
     plotTwists: true,
-    customScenario: ''
+    customScenario: '',
+    categoriesMode: 'smart_random',
+    categoryId: null
   };
 
   // Update UI fields (if present)
@@ -451,6 +453,8 @@ function resetCoreRules() {
   if ($('contentPack')) $('contentPack').value = defaults.contentPackId;
   if ($('plotTwists')) $('plotTwists').checked = defaults.plotTwists;
   if ($('customScenario')) $('customScenario').value = defaults.customScenario;
+  if ($('categoriesMode')) $('categoriesMode').value = defaults.categoriesMode;
+  if ($('categoryId')) $('categoryId').value = '';
 
   // Push settings to host/server in one socket update when possible.
   if (typeof window.updateSettingsBatch === 'function') {
@@ -461,6 +465,8 @@ function resetCoreRules() {
     window.updateSetting('contentPackId', defaults.contentPackId);
     window.updateSetting('plotTwists', defaults.plotTwists);
     window.updateSetting('customScenario', defaults.customScenario);
+    window.updateSetting('categoriesMode', defaults.categoriesMode);
+    window.updateSetting('categoryId', defaults.categoryId);
   }
 
   if (typeof window.updateContentPackDescription === 'function') {

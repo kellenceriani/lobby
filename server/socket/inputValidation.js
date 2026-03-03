@@ -35,6 +35,7 @@ function sanitizeDraftCharacter(raw) {
 function sanitizeSettings(input) {
   const settings = input && typeof input === 'object' ? input : {};
   const cleaned = {};
+  const categoryModes = new Set(['off', 'host_select', 'smart_random', 'group_vote']);
 
   if (settings.difficulty && ['easy', 'normal', 'hard'].includes(settings.difficulty)) {
     cleaned.difficulty = settings.difficulty;
@@ -54,6 +55,32 @@ function sanitizeSettings(input) {
 
   if (typeof settings.customScenario === 'string') {
     cleaned.customScenario = settings.customScenario.trim().slice(0, 120);
+  }
+
+  if (typeof settings.categoriesMode === 'string') {
+    const mode = settings.categoriesMode.trim().toLowerCase();
+    if (categoryModes.has(mode)) {
+      cleaned.categoriesMode = mode;
+    }
+  }
+
+  if (typeof settings.categoryId === 'string') {
+    const categoryId = settings.categoryId.trim().toLowerCase();
+    if (!categoryId || /^[a-z0-9-]{2,80}$/.test(categoryId)) {
+      cleaned.categoryId = categoryId || null;
+    }
+  }
+
+  if (Array.isArray(settings.categoryVoteOptions)) {
+    cleaned.categoryVoteOptions = Array.from(new Set(
+      settings.categoryVoteOptions
+        .map((entry) => String(entry || '').trim().toLowerCase())
+        .filter((entry) => /^[a-z0-9-]{2,80}$/.test(entry))
+    )).slice(0, 5);
+  }
+
+  if (typeof settings.categoryVersion === 'string') {
+    cleaned.categoryVersion = settings.categoryVersion.trim().slice(0, 24) || 'v1';
   }
 
   if (typeof settings.contentPackId === 'string') {

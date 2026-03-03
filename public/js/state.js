@@ -22,7 +22,17 @@ const createDefaultGameState = () => ({
 });
 
 export const player = { name: '', room: '', ready: false };
-export const roomState = { host: null, settings: {}, players: [], messages: [], packCatalog: null, selectedPackMeta: null };
+export const roomState = {
+  host: null,
+  settings: {},
+  players: [],
+  messages: [],
+  packCatalog: null,
+  selectedPackMeta: null,
+  categoryRegistry: null,
+  categoryVote: null,
+  categoryTelemetry: null
+};
 export const gameState = createDefaultGameState();
 
 export const activeTimers = [];
@@ -54,6 +64,9 @@ export function resetRoomState() {
   roomState.messages = [];
   roomState.packCatalog = null;
   roomState.selectedPackMeta = null;
+  roomState.categoryRegistry = null;
+  roomState.categoryVote = null;
+  roomState.categoryTelemetry = null;
 }
 
 export function resetGameState() {

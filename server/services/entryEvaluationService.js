@@ -75,6 +75,9 @@ function getEvaluationEngineMode() {
 }
 
 function buildContextCacheKey(character, scenario, twist, options = {}) {
+  const categoryContext = options && options.categoryContext && typeof options.categoryContext === 'object'
+    ? options.categoryContext
+    : null;
   return JSON.stringify({
     c: String(character || '').trim().toLowerCase(),
     s: String(scenario || '').trim().toLowerCase(),
@@ -87,7 +90,9 @@ function buildContextCacheKey(character, scenario, twist, options = {}) {
       : [],
     teamPool: Array.isArray(options && options.teamPool)
       ? options.teamPool.map((v) => String(v || '').trim().toLowerCase())
-      : []
+      : [],
+    categoryId: String(categoryContext && categoryContext.id || '').trim().toLowerCase(),
+    categoryVersion: String(categoryContext && categoryContext.version || '').trim().toLowerCase()
   });
 }
 

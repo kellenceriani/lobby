@@ -89,6 +89,8 @@ const networkOutageUiState = {
   lastReason: ''
 };
 
+let categoryVoteCountdownTimer = null;
+
 function updateNetworkOutageIndicators(reason = '', { showToastNotice = false } = {}) {
   const detail = String(reason || '').trim() || 'server_unreachable';
   const message = `Connection lost (${detail}). Waiting for server...`;
@@ -3927,7 +3929,9 @@ function mapScreenToMusicScene(screenId) {
   const id = String(screenId || '');
   if (id === 'join' || id === 'tutorial') return 'join';
   if (id === 'lobby') return 'lobby';
+  if (id === 'categoryVoteScreen') return 'entry';
   if (id === 'preRound') return 'entry';
+  if (id === 'categoryScreen') return 'entry';
   if (id === 'scenarioScreen') return 'entry';
   if (id === 'twistScreen') return 'entry';
   if (id === 'votingScreen') return 'voting';
@@ -4689,6 +4693,14 @@ async function runStartupBootstrapPreflight() {
       key: 'pack-catalog',
       label: 'Pack catalog',
       run: async () => fetch('/api/packs', { cache: 'force-cache' }).then((r) => r && r.ok ? r.json() : null)
+    },
+    {
+      key: 'categories-catalog',
+      label: 'Categories catalog',
+      run: async () => {
+        await loadCategoryRegistryCatalog();
+        return { ok: true };
+      }
     },
     {
       key: 'pack-metrics',
@@ -7259,6 +7271,296 @@ function normalizePackMeta(meta) {
   };
 }
 
+function normalizeCategoryRegistryPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const categories = Array.isArray(payload.categories)
+    ? payload.categories
+      .map((entry) => ({
+        id: String(entry && entry.id || '').trim().toLowerCase(),
+        displayName: String(entry && entry.displayName || '').trim(),
+        family: String(entry && entry.family || 'unknown').trim(),
+        riskLevel: String(entry && entry.riskLevel || 'med').trim().toLowerCase(),
+        version: String(entry && entry.version || payload.version || 'v1').trim()
+      }))
+      .filter((entry) => entry.id && entry.displayName)
+    : [];
+  return {
+    version: String(payload.version || 'v1').trim() || 'v1',
+    updatedAt: String(payload.updatedAt || '').trim(),
+    categories
+  };
+}
+
+function getCategoryRegistryRows() {
+  const registry = roomState && roomState.categoryRegistry && typeof roomState.categoryRegistry === 'object'
+    ? roomState.categoryRegistry
+    : null;
+  return registry && Array.isArray(registry.categories) ? registry.categories : [];
+}
+
+function getCategoryEntryById(categoryId) {
+  const id = String(categoryId || '').trim().toLowerCase();
+  if (!id) return null;
+  return getCategoryRegistryRows().find((entry) => entry && entry.id === id) || null;
+}
+
+function normalizeLockedCategoryPayload(payload = null) {
+  if (!payload || typeof payload !== 'object') return null;
+  const id = String(payload.id || '').trim().toLowerCase();
+  if (!id) return null;
+  const fallback = getCategoryEntryById(id);
+  return {
+    id,
+    displayName: String(payload.displayName || (fallback && fallback.displayName) || id),
+    family: String(payload.family || (fallback && fallback.family) || 'unknown'),
+    riskLevel: String(payload.riskLevel || (fallback && fallback.riskLevel) || 'med')
+  };
+}
+
+function resolveLockedCategoryForUi() {
+  const fromGame = normalizeLockedCategoryPayload(gameState && gameState.lockedCategory);
+  if (fromGame) return fromGame;
+  const fromRoomSettingId = String(roomState && roomState.settings && roomState.settings.categoryId || '').trim().toLowerCase();
+  const fromRoomSettingEntry = fromRoomSettingId ? getCategoryEntryById(fromRoomSettingId) : null;
+  if (fromRoomSettingEntry) {
+    return {
+      id: fromRoomSettingEntry.id,
+      displayName: fromRoomSettingEntry.displayName,
+      family: fromRoomSettingEntry.family,
+      riskLevel: fromRoomSettingEntry.riskLevel
+    };
+  }
+  return null;
+}
+
+function buildLockedCategoryLabel(lockedCategory = null) {
+  const entry = normalizeLockedCategoryPayload(lockedCategory) || resolveLockedCategoryForUi();
+  if (!entry) return 'Auto / not locked';
+  return `${entry.displayName} • ${entry.family} • risk ${entry.riskLevel}`;
+}
+
+function renderLockedCategoryContext() {
+  const label = buildLockedCategoryLabel();
+  const scenarioEl = document.getElementById('scenarioLockedCategory');
+  const votingEl = document.getElementById('votingLockedCategory');
+  const roundEl = document.getElementById('roundCategoryMeta');
+  const finalEl = document.getElementById('finalLockedCategory');
+  if (scenarioEl) scenarioEl.textContent = `Category: ${label}`;
+  if (votingEl) votingEl.textContent = label;
+  if (roundEl) roundEl.innerHTML = `<strong>Category:</strong> ${escapeHtml(label)}`;
+  if (finalEl) {
+    finalEl.innerHTML = `<span class="pack-meta-caption">Category:</span> ${escapeHtml(label)}`;
+    finalEl.hidden = false;
+  }
+}
+
+function setLockedCategoryContext(lockedCategory = null) {
+  const normalized = normalizeLockedCategoryPayload(lockedCategory);
+  if (normalized) {
+    gameState.lockedCategory = normalized;
+  }
+  renderLockedCategoryContext();
+}
+
+function clearCategoryVoteCountdownTimer() {
+  if (!categoryVoteCountdownTimer) return;
+  clearInterval(categoryVoteCountdownTimer);
+  categoryVoteCountdownTimer = null;
+}
+
+function updateCategoryDescription(categoryId) {
+  const descriptionEl = document.getElementById('categoryDescription');
+  if (!descriptionEl) return;
+  const mode = String(roomState && roomState.settings && roomState.settings.categoriesMode || 'smart_random').trim().toLowerCase();
+  if (mode === 'off') {
+    descriptionEl.textContent = 'Categories disabled for this lobby.';
+    return;
+  }
+  if (mode === 'group_vote') {
+    descriptionEl.textContent = 'Category will be chosen by group vote when the host starts the game.';
+    return;
+  }
+  const entry = getCategoryEntryById(categoryId);
+  if (!entry) {
+    descriptionEl.textContent = mode === 'smart_random'
+      ? 'Smart Random rotates categories with anti-repeat balancing.'
+      : 'Select a category for this lobby.';
+    return;
+  }
+  descriptionEl.textContent = `${entry.displayName} • ${entry.family} • risk ${entry.riskLevel}`;
+}
+
+function renderCategoryOptions() {
+  const select = document.getElementById('categoryId');
+  if (!select) return;
+
+  const categories = getCategoryRegistryRows();
+  const currentValue = String((roomState && roomState.settings && roomState.settings.categoryId) || select.value || '').trim().toLowerCase();
+  select.innerHTML = '';
+
+  const autoOption = document.createElement('option');
+  autoOption.value = '';
+  autoOption.textContent = 'Auto (based on mode)';
+  select.appendChild(autoOption);
+
+  categories.forEach((entry) => {
+    const option = document.createElement('option');
+    option.value = entry.id;
+    option.textContent = `${entry.displayName} [${entry.family}]`;
+    select.appendChild(option);
+  });
+
+  select.value = categories.some((entry) => entry.id === currentValue) ? currentValue : '';
+  updateCategoryDescription(select.value);
+}
+
+function applyCategorySettingsInputs(settings = {}) {
+  const categoryModeInput = document.getElementById('categoriesMode');
+  const categoryIdInput = document.getElementById('categoryId');
+  const mode = String(settings && settings.categoriesMode || 'smart_random').trim().toLowerCase();
+  const categoryId = String(settings && settings.categoryId || '').trim().toLowerCase();
+  if (categoryModeInput) categoryModeInput.value = mode || 'smart_random';
+  if (categoryIdInput) {
+    if (!Array.from(categoryIdInput.options || []).some((option) => String(option.value || '').toLowerCase() === categoryId)) {
+      categoryIdInput.value = '';
+    } else {
+      categoryIdInput.value = categoryId;
+    }
+    categoryIdInput.disabled = mode === 'off' || mode === 'smart_random' || mode === 'group_vote';
+  }
+  updateCategoryDescription(categoryIdInput ? categoryIdInput.value : categoryId);
+}
+
+function renderCategoryTelemetrySummary(telemetry = null) {
+  const node = document.getElementById('categoryTelemetrySummary');
+  if (!node) return;
+  const safe = telemetry && typeof telemetry === 'object' ? telemetry : null;
+  if (!safe) {
+    node.textContent = '';
+    return;
+  }
+  const sessions = Number(safe.voteSessionsStarted) || 0;
+  const votes = Number(safe.votesCast) || 0;
+  const changed = Number(safe.votesChanged) || 0;
+  const blockedStarts = Number(safe.startBlockedByVote) || 0;
+  const resumedStarts = Number(safe.startResumedAfterVote) || 0;
+  const impact = safe.round4CategoryImpact && typeof safe.round4CategoryImpact === 'object'
+    ? safe.round4CategoryImpact
+    : null;
+  const impactText = impact && Number(impact.matches) > 0
+    ? ` • fairness avgFit ${Number(impact.avgCategoryFit || 0).toFixed(1)} avgImpact ${Number(impact.avgNetImpact || 0).toFixed(1)} over ${Number(impact.matches)} finals`
+    : '';
+  node.textContent = `Vote telemetry: sessions ${sessions}, votes ${votes} (${changed} changes), starts blocked ${blockedStarts}, starts resumed ${resumedStarts}${impactText}`;
+}
+
+function renderCategoryVotePanel(voteState = null) {
+  const statusEl = document.getElementById('categoryVoteStatus');
+  const selectEl = document.getElementById('categoryVoteChoice');
+  const castBtn = document.getElementById('castCategoryVoteBtn');
+  const metaEl = document.getElementById('categoryVoteMeta');
+  if (!statusEl || !selectEl || !castBtn) return;
+
+  const vote = voteState && typeof voteState === 'object' ? voteState : null;
+  const options = vote && Array.isArray(vote.options) ? vote.options : [];
+  const active = Boolean(vote && vote.active === true && options.length);
+  const isInRoom = Boolean(player && player.name && player.room);
+
+  selectEl.innerHTML = '';
+  if (!active) {
+    clearCategoryVoteCountdownTimer();
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No active options';
+    selectEl.appendChild(option);
+    castBtn.disabled = true;
+    statusEl.textContent = 'No active category vote.';
+    if (metaEl) metaEl.textContent = '';
+    renderCategoryVoteFullscreen(null);
+    return;
+  }
+
+  options.forEach((entry) => {
+    const option = document.createElement('option');
+    const id = String(entry && entry.id || '').trim().toLowerCase();
+    const displayName = String(entry && entry.displayName || id || 'Unknown');
+    const votes = Number(entry && entry.votes) || 0;
+    option.value = id;
+    option.textContent = `${displayName} (${votes})`;
+    selectEl.appendChild(option);
+  });
+
+  castBtn.disabled = !isInRoom;
+  const updateCountdown = () => {
+    const endsAtMs = Number(vote && vote.endsAtMs) || 0;
+    const secondsLeft = endsAtMs > 0 ? Math.max(0, Math.ceil((endsAtMs - Date.now()) / 1000)) : 0;
+    statusEl.textContent = `Pre-game category vote active • ${Number(vote.voteCount) || 0}/${Number(vote.totalPlayers) || 0} votes • ${secondsLeft}s left`;
+    if (secondsLeft <= 0) {
+      clearCategoryVoteCountdownTimer();
+    }
+  };
+  updateCountdown();
+  clearCategoryVoteCountdownTimer();
+  categoryVoteCountdownTimer = setInterval(updateCountdown, 1000);
+  if (metaEl) {
+    const startedBy = String(vote.startedBy || '').trim();
+    metaEl.textContent = startedBy
+      ? `Started by ${startedBy}. Match start is paused until this vote locks.`
+      : 'Started by system. Match start is paused until this vote locks.';
+  }
+  renderCategoryVoteFullscreen(vote);
+}
+
+function renderCategoryVoteFullscreen(voteState = null) {
+  const statusEl = document.getElementById('categoryVoteScreenStatus');
+  const metaEl = document.getElementById('categoryVoteScreenMeta');
+  const listEl = document.getElementById('categoryVoteScreenOptions');
+  if (!statusEl || !metaEl || !listEl) return;
+
+  const vote = voteState && typeof voteState === 'object' ? voteState : null;
+  const options = vote && Array.isArray(vote.options) ? vote.options : [];
+  const active = Boolean(vote && vote.active === true && options.length);
+
+  listEl.innerHTML = '';
+  if (!active) {
+    statusEl.textContent = 'Waiting for category vote...';
+    metaEl.textContent = 'The host can start a category vote when mode is Group Vote.';
+    return;
+  }
+
+  const endsAtMs = Number(vote.endsAtMs) || 0;
+  const secondsLeft = endsAtMs > 0 ? Math.max(0, Math.ceil((endsAtMs - Date.now()) / 1000)) : 0;
+  statusEl.textContent = `Category vote active • ${Number(vote.voteCount) || 0}/${Number(vote.totalPlayers) || 0} votes • ${secondsLeft}s left`;
+  const startedBy = String(vote.startedBy || '').trim();
+  metaEl.textContent = startedBy
+    ? `Started by ${startedBy}. Choose one category to continue.`
+    : 'Started by system. Choose one category to continue.';
+
+  options.forEach((entry) => {
+    const id = String(entry && entry.id || '').trim().toLowerCase();
+    if (!id) return;
+    const displayName = String(entry && entry.displayName || id);
+    const votes = Number(entry && entry.votes) || 0;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-secondary';
+    btn.dataset.categoryVoteId = id;
+    btn.textContent = `${displayName} (${votes})`;
+    listEl.appendChild(btn);
+  });
+}
+
+async function loadCategoryRegistryCatalog() {
+  try {
+    const response = await fetch('/api/categories', { cache: 'force-cache' });
+    if (!response || !response.ok) return;
+    const payload = await response.json();
+    roomState.categoryRegistry = normalizeCategoryRegistryPayload(payload);
+    renderCategoryOptions();
+    applyCategorySettingsInputs(roomState.settings || {});
+  } catch (error) {
+  }
+}
+
 function getPackCatalogPacks() {
   const catalog = roomState.packCatalog && typeof roomState.packCatalog === 'object' ? roomState.packCatalog : null;
   return catalog && Array.isArray(catalog.packs) ? catalog.packs : [];
@@ -7451,6 +7753,23 @@ socket.on('roomData', (data) => {
   }
   roomState.packCatalog = data && data.packCatalog ? data.packCatalog : roomState.packCatalog;
   roomState.selectedPackMeta = normalizePackMeta(data && data.selectedPackMeta) || roomState.selectedPackMeta;
+  if (data && data.settings && data.settings.categoryId) {
+    const roomCategoryId = String(data.settings.categoryId || '').trim().toLowerCase();
+    const roomCategory = getCategoryEntryById(roomCategoryId);
+    if (roomCategory) {
+      gameState.lockedCategory = {
+        id: roomCategory.id,
+        displayName: roomCategory.displayName,
+        family: roomCategory.family,
+        riskLevel: roomCategory.riskLevel
+      };
+    }
+  }
+  roomState.categoryRegistry = normalizeCategoryRegistryPayload(data && data.categoryRegistry) || roomState.categoryRegistry;
+  roomState.categoryVote = data && data.categoryVote && typeof data.categoryVote === 'object' ? data.categoryVote : null;
+  roomState.categoryTelemetry = data && data.categoryTelemetry && typeof data.categoryTelemetry === 'object'
+    ? data.categoryTelemetry
+    : roomState.categoryTelemetry;
   roomState.messages = normalizeChatMessages(data.messages);
   const prunedHistory = pruneChatMessages(roomState.messages);
   roomState.messages = prunedHistory.messages;
@@ -7482,6 +7801,10 @@ socket.on('roomData', (data) => {
   const settingsReadonlyHome = document.getElementById('settingsReadonlyHome');
   const hostBadge = document.getElementById('hostBadge');
   renderContentPackOptions();
+  renderCategoryOptions();
+  renderCategoryVotePanel(roomState.categoryVote);
+  renderCategoryTelemetrySummary(roomState.categoryTelemetry);
+  renderLockedCategoryContext();
 
   if (data.settings) {
     const difficultyInput = document.getElementById('difficulty');
@@ -7495,6 +7818,7 @@ socket.on('roomData', (data) => {
     if (contentPackInput && data.settings.contentPackId) contentPackInput.value = data.settings.contentPackId;
     if (plotTwistsInput && data.settings.plotTwists !== undefined) plotTwistsInput.checked = data.settings.plotTwists;
     updateContentPackDescription(data.settings.contentPackId);
+    applyCategorySettingsInputs(data.settings);
   }
 
   // Settings OS (new Settings tab UI)
@@ -7618,6 +7942,7 @@ socket.on('roomData', (data) => {
 socket.on('settingsUpdated', (settings) => {
   roomState.settings = settings;
   renderContentPackOptions();
+  renderCategoryOptions();
   const difficulty = document.getElementById('difficulty');
   const scenarioTheme = document.getElementById('scenarioTheme');
   const customScenario = document.getElementById('customScenario');
@@ -7629,6 +7954,12 @@ socket.on('settingsUpdated', (settings) => {
   if (contentPack && settings.contentPackId) contentPack.value = settings.contentPackId;
   if (plotTwists && settings.plotTwists !== undefined) plotTwists.checked = settings.plotTwists;
   updateContentPackDescription(settings && settings.contentPackId);
+  applyCategorySettingsInputs(settings || {});
+  if (settings && settings.categoryId) {
+    setLockedCategoryContext({ id: settings.categoryId });
+  } else {
+    renderLockedCategoryContext();
+  }
   roomState.selectedPackMeta = normalizePackMeta(getCatalogPackEntry(settings && settings.contentPackId)) || roomState.selectedPackMeta;
   if (typeof window !== 'undefined' && window.SettingsOS && typeof window.SettingsOS.refreshNowPlaying === 'function') {
     window.SettingsOS.refreshNowPlaying();
@@ -7641,6 +7972,9 @@ const SETTINGS_CHANGED_LABELS = {
   contentPackId: 'content pack',
   plotTwists: 'plot twists',
   customScenario: 'custom scenario',
+  categoriesMode: 'categories mode',
+  categoryId: 'category',
+  categoryVoteOptions: 'category vote options',
   teamsMode: 'teams mode',
   noVoting: 'no voting mode'
 };
@@ -7679,6 +8013,42 @@ socket.on('settingsChangePing', (payload) => {
   } catch (error) {
   }
   showToast(message, 'info', 2600);
+});
+
+socket.on('categoryVoteStart', (payload) => {
+  roomState.categoryVote = payload && typeof payload === 'object' ? payload : null;
+  renderCategoryVotePanel(roomState.categoryVote);
+  if (document.getElementById('categoryVoteScreen')) {
+    showScreen('categoryVoteScreen');
+  }
+  showToast('Category vote started. Cast your vote before timeout.', 'info', 2400);
+});
+
+socket.on('categoryVoteUpdate', (payload) => {
+  roomState.categoryVote = payload && typeof payload === 'object' ? payload : null;
+  renderCategoryVotePanel(roomState.categoryVote);
+  if (roomState.categoryVote && roomState.categoryVote.active === true && document.getElementById('categoryVoteScreen')) {
+    showScreen('categoryVoteScreen');
+  }
+});
+
+socket.on('categoryVoteLocked', (payload) => {
+  roomState.categoryVote = null;
+  renderCategoryVotePanel(null);
+  const winner = payload && payload.winner && typeof payload.winner === 'object' ? payload.winner : null;
+  if (winner && winner.id) {
+    const nextSettings = {
+      ...(roomState.settings || {}),
+      categoryId: String(winner.id || '').trim().toLowerCase()
+    };
+    roomState.settings = nextSettings;
+    applyCategorySettingsInputs(nextSettings);
+    setLockedCategoryContext(winner);
+    showToast(`Category locked: ${String(winner.displayName || winner.id)}.`, 'info', 2600);
+    return;
+  }
+  renderLockedCategoryContext();
+  showToast('Category vote locked.', 'info', 2200);
 });
 
 const handleNarratorVoiceQueuedSocket = (payload) => {
@@ -7799,6 +8169,17 @@ function sendStartGame() {
   socket.emit('startGame');
 }
 
+function castCategoryVote(explicitCategoryId = '') {
+  const select = document.getElementById('categoryVoteChoice');
+  const categoryId = String(explicitCategoryId || (select && select.value) || '').trim().toLowerCase();
+  if (!categoryId) {
+    showToast('Select a category option first.', 'warning', 1800);
+    return;
+  }
+  socket.emit('castCategoryVote', { categoryId });
+  showToast('Vote submitted.', 'info', 1400);
+}
+
 // ========================
 // GAME EVENTS
 // ========================
@@ -7813,12 +8194,18 @@ socket.on('gameStarting', (data) => {
   gameState.voted = false;
   gameState.voteLocked = false;
   gameState.draftWarnings = {};
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
   playPhaseShiftSound();
   showToast('🎉 Game starting! Get ready!', 'info');
   const finalPackMeta = document.getElementById('finalPackMeta');
   if (finalPackMeta) {
     finalPackMeta.hidden = true;
     finalPackMeta.innerHTML = '';
+  }
+  const finalLockedCategory = document.getElementById('finalLockedCategory');
+  if (finalLockedCategory) {
+    finalLockedCategory.hidden = true;
+    finalLockedCategory.innerHTML = '';
   }
   showScreen('preRound');
 });
@@ -7885,6 +8272,7 @@ socket.on('scenarioRevealed', (data) => {
   gameState.draftLocked = false;
   gameState.voteLocked = false;
   gameState.currentVoteChoice = null;
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
   syncDraftEntryComposerVisibility();
 
   document.getElementById('currentRound').textContent = gameState.currentRound;
@@ -8330,6 +8718,32 @@ function initializeInteractiveDomBindings() {
     syncChatComposerState();
   }
 
+  const categoryVoteBtn = document.getElementById('castCategoryVoteBtn');
+  if (categoryVoteBtn) {
+    categoryVoteBtn.addEventListener('click', () => {
+      castCategoryVote();
+    });
+  }
+
+  const categoryVoteChoice = document.getElementById('categoryVoteChoice');
+  if (categoryVoteChoice) {
+    categoryVoteChoice.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      castCategoryVote();
+    });
+  }
+
+  const categoryVoteScreenOptions = document.getElementById('categoryVoteScreenOptions');
+  if (categoryVoteScreenOptions) {
+    categoryVoteScreenOptions.addEventListener('click', (event) => {
+      const button = event.target && event.target.closest('[data-category-vote-id]');
+      if (!button) return;
+      const categoryId = String(button.dataset.categoryVoteId || '').trim().toLowerCase();
+      castCategoryVote(categoryId);
+    });
+  }
+
   document.querySelectorAll('.reaction-btn-modern').forEach((button) => {
     button.addEventListener('click', () => {
       triggerTransientClass(button, 'reaction-pop', 240);
@@ -8695,10 +9109,35 @@ socket.on('playerLocked', (data) => {
 // ========================
 // PLOT TWIST
 // ========================
+socket.on('categoryRevealed', (data) => {
+  clearTimers();
+  clearVoiceCues('category-revealed', { includeActive: true });
+  stopDraftWaitIntelPreviewPolling();
+  resetDraftWaitIntelPreview({ hide: true });
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
+
+  const categoryLabel = String(
+    (data && data.categoryLabel)
+    || (data && data.lockedCategory && (data.lockedCategory.label || data.lockedCategory.name || data.lockedCategory.slug))
+    || 'Open Category'
+  ).trim() || 'Open Category';
+
+  const categoryEl = document.getElementById('categoryRevealText');
+  if (categoryEl) categoryEl.textContent = categoryLabel;
+
+  enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : [], {
+    fallback: () => buildPhaseVoiceCues('category', data)
+  });
+  showScreen('categoryScreen');
+  playPhaseShiftSound();
+  showToast(`🏷️ Category: ${categoryLabel}`, 'info', 1800);
+});
+
 socket.on('plotTwistRevealed', (data) => {
   clearTimers();
   clearVoiceCues('twist-revealed', { includeActive: true });
   gameState.currentTwist = data.twist;
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
   document.getElementById('twistText').textContent = `"${data.twist}"`;
   stopDraftWaitIntelPreviewPolling();
   resetDraftWaitIntelPreview({ hide: true });
@@ -8723,6 +9162,7 @@ socket.on('votingPhaseStart', (data) => {
   gameState.voted = false;
   gameState.voteLocked = false;
   gameState.currentVoteChoice = null;
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
 
   const scenarioDisplay = document.getElementById('votingScenario');
   const twistDisplay = document.getElementById('votingTwist');
@@ -8804,7 +9244,7 @@ socket.on('votingPhaseStart', (data) => {
   showScreen('votingScreen');
   showToast('⚖️ Time to vote. Community vote + intel fit decides this round.', 'info', 4200);
 
-  let timeLeft = 30;
+  let timeLeft = Math.max(5, Number(data && data.votingTimeRemaining) || 30);
   document.getElementById('voteTimer').textContent = timeLeft;
 
   const voteTimer = setInterval(() => {
@@ -8845,6 +9285,7 @@ socket.on('draftWaitIntelPreview', (data) => {
 socket.on('round4Start', (data) => {
   resetCharacterCalloutSessionState('round4-start');
   clearVoiceCues('round4-start', { includeActive: true });
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
   console.log('🎮 Round 4 Start event received:', data);
   clearTimers();
   playPhaseShiftSound();
@@ -9442,6 +9883,7 @@ socket.on('roundResults', (data) => {
   clearTimers();
   clearVoiceCues('round-results', { includeActive: true });
   gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
   playWinSound();
   document.getElementById('resultRound').textContent = data.round;
 
@@ -9603,6 +10045,7 @@ socket.on('finalRoundResults', (data) => {
   clearTimers();
   clearVoiceCues('final-round-results', { includeActive: true });
   gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
   playWinSound();
   const tie = data && data.isTie === true;
   enqueueVoiceCues(Array.isArray(data && data.voiceCues) ? data.voiceCues : [], {
@@ -9619,6 +10062,7 @@ socket.on('gameEnded', (data) => {
   clearTimers();
   clearVoiceCues('game-ended', { includeActive: true });
   gameState.activePackMeta = normalizePackMeta(data && data.packMeta) || resolveActivePackMeta();
+  setLockedCategoryContext(data && data.lockedCategory ? data.lockedCategory : null);
   playWinSound();
   const finalGameEndedVoiceCues = Array.isArray(data && data.voiceCues) ? data.voiceCues : [];
   let finalGameEndedVoiceQueued = false;

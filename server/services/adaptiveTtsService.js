@@ -300,6 +300,18 @@ function getEdgeForceEnableFlag() {
   return value === '1' || value === 'true' || value === 'yes';
 }
 
+function shouldPreferEdgePythonFirst() {
+  const preferNode = String(process.env.LOBBY_TTS_EDGE_PREFER_NODE || '').trim().toLowerCase();
+  if (preferNode === '1' || preferNode === 'true' || preferNode === 'yes') {
+    return false;
+  }
+  const preferPython = String(process.env.LOBBY_TTS_EDGE_PREFER_PYTHON || '').trim().toLowerCase();
+  if (preferPython === '1' || preferPython === 'true' || preferPython === 'yes') {
+    return true;
+  }
+  return process.platform === 'win32';
+}
+
 function getEdgeNodeModuleCandidates() {
   const envPath = String(process.env.LOBBY_TTS_EDGE_NODE_MODULE_PATH || '').trim();
   const rootDir = path.join(__dirname, '..', '..');
@@ -941,7 +953,7 @@ async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route, time
   }
 
   const mod = await loadEdgeNodeModule();
-  if (!mod || (typeof mod.tts !== 'function' && typeof mod.EdgeTTS !== 'function')) {
+  if (!mod || typeof mod.tts !== 'function') {
     const error = new Error('edge_node_tts_missing');
     error.providerId = 'edge';
     throw error;
@@ -955,55 +967,22 @@ async function synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route, time
   let timer = null;
   try {
     let buffer;
-    if (typeof mod.EdgeTTS === 'function') {
-      const lang = String(edgeVoice.split('-').slice(0, 2).join('-') || 'en-US');
-      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'lobby-edge-node-'));
-      const outPath = path.join(tmpDir, 'out.mp3');
-      try {
-        const timeoutPromise = new Promise((_, reject) => {
-          timer = setTimeout(() => {
-            const err = new Error(`edge_node_timeout_${safeTimeoutMs}ms`);
-            err.providerId = 'edge';
-            reject(err);
-          }, safeTimeoutMs);
-        });
-        const ttsInstance = new mod.EdgeTTS({
-          voice: edgeVoice,
-          lang,
-          rate: edgeRateFromSpeed(speed),
-          pitch: edgePitchFromPitch(pitch),
-          timeout: safeTimeoutMs
-        });
-        await Promise.race([
-          Promise.resolve(ttsInstance.ttsPromise(text, outPath)),
-          timeoutPromise
-        ]);
-        buffer = await fsp.readFile(outPath);
-      } finally {
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-        try { await fsp.rm(tmpDir, { recursive: true, force: true }); } catch (_error) {}
-      }
-    } else {
-      const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          const err = new Error(`edge_node_timeout_${safeTimeoutMs}ms`);
-          err.providerId = 'edge';
-          reject(err);
-        }, safeTimeoutMs);
-      });
-      const result = await Promise.race([
-        Promise.resolve(mod.tts(text, {
-          voice: edgeVoice,
-          rate: edgeRateFromSpeed(speed),
-          pitch: edgePitchFromPitch(pitch)
-        })),
-        timeoutPromise
-      ]);
-      buffer = Buffer.isBuffer(result) ? result : Buffer.from(result || []);
-    }
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error(`edge_node_timeout_${safeTimeoutMs}ms`);
+        err.providerId = 'edge';
+        reject(err);
+      }, safeTimeoutMs);
+    });
+    const result = await Promise.race([
+      Promise.resolve(mod.tts(text, {
+        voice: edgeVoice,
+        rate: edgeRateFromSpeed(speed),
+        pitch: edgePitchFromPitch(pitch)
+      })),
+      timeoutPromise
+    ]);
+    buffer = Buffer.isBuffer(result) ? result : Buffer.from(result || []);
     if (!buffer || !buffer.length) {
       throw new Error('edge_empty_audio');
     }
@@ -1044,16 +1023,30 @@ async function synthesizeWithEdge({ text, voiceId, speed, pitch, route, timeoutM
   let nodeError = null;
   let pyError = null;
 
-  try {
-    return await synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
-  } catch (error) {
-    nodeError = error;
-  }
+  if (shouldPreferEdgePythonFirst()) {
+    try {
+      return await synthesizeWithEdgePython({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
+    } catch (error) {
+      pyError = error;
+    }
 
-  try {
-    return await synthesizeWithEdgePython({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
-  } catch (error) {
-    pyError = error;
+    try {
+      return await synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
+    } catch (error) {
+      nodeError = error;
+    }
+  } else {
+    try {
+      return await synthesizeWithEdgeNode({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
+    } catch (error) {
+      nodeError = error;
+    }
+
+    try {
+      return await synthesizeWithEdgePython({ text, voiceId, speed, pitch, route, timeoutMs, timeoutProfile });
+    } catch (error) {
+      pyError = error;
+    }
   }
 
   const err = new Error(`edge_unavailable:${String(pyError && pyError.message || nodeError && nodeError.message || 'unknown')}`.slice(0, 400));

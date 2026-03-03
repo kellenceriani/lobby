@@ -152,12 +152,13 @@ function calculateTeamOVRWithChemistryGate(averageOVR, chemistryBonus) {
   return Math.max(0, Math.min(110, Math.round(capped)));
 }
 
-function buildFinalEvalOptions({ char, draftedMeta, scenario, twist, teamPool, roundPool, resolverSeed }) {
+function buildFinalEvalOptions({ char, draftedMeta, scenario, twist, teamPool, roundPool, resolverSeed, categoryContext }) {
   return {
     originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
     originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
     evaluationMode: 'final',
     resolutionSeed: resolverSeed || null,
+    categoryContext: categoryContext || null,
     teamPool: Array.isArray(teamPool) ? teamPool : [],
     roundPool: Array.isArray(roundPool) ? roundPool : [],
     fetchContext: {
@@ -211,7 +212,7 @@ function buildRound4FallbackEvaluation(character) {
   };
 }
 
-async function evaluateTeamRoster({ playerName, roster, draftMeta, scenario, twist, roundPool, priorResolverSeedIndex }) {
+async function evaluateTeamRoster({ playerName, roster, draftMeta, scenario, twist, roundPool, priorResolverSeedIndex, categoryContext }) {
   let teamRefineBudgetUsed = 0;
 
   const batchRows = roster.map((char) => {
@@ -230,7 +231,8 @@ async function evaluateTeamRoster({ playerName, roster, draftMeta, scenario, twi
         twist,
         teamPool: roster,
         roundPool,
-        resolverSeed
+        resolverSeed,
+        categoryContext
       })
     };
   });
@@ -253,7 +255,8 @@ async function evaluateTeamRoster({ playerName, roster, draftMeta, scenario, twi
           twist,
           teamPool: roster,
           roundPool,
-          resolverSeed
+          resolverSeed,
+          categoryContext
         }));
       } catch (itemError) {
         console.warn(`Round 4 character fallback for "${char}": ${itemError && itemError.message ? itemError.message : 'unknown error'}`);
@@ -288,7 +291,8 @@ async function evaluateTeamRoster({ playerName, roster, draftMeta, scenario, twi
             twist,
             teamPool: roster,
             roundPool,
-            resolverSeed
+            resolverSeed,
+            categoryContext
           }),
           forceRefresh: true,
           fetchCacheTtlMs: 45000,
@@ -331,6 +335,21 @@ async function evaluateRound4FromGame(game) {
     roster: Array.isArray(player.finalTeam) ? player.finalTeam.slice(0, 6) : [],
     draftMeta: Array.isArray(player.finalTeamDraftMeta) ? player.finalTeamDraftMeta : []
   }));
+  const categoryContext = game && game.lockedCategory && game.lockedCategory.id
+    ? {
+      enabled: true,
+      id: String(game.lockedCategory.id),
+      name: String(game.lockedCategory.displayName || game.lockedCategory.id),
+      family: String(game.lockedCategory.family || 'unknown'),
+      version: String(game && game.settings && game.settings.categoryVersion || game.lockedCategory.version || 'v1')
+    }
+    : {
+      enabled: false,
+      id: null,
+      name: null,
+      family: null,
+      version: String(game && game.settings && game.settings.categoryVersion || 'v1')
+    };
   const roundPool = teams.flatMap((team) => (Array.isArray(team.roster) ? team.roster.filter(Boolean) : []));
   const priorResolverSeedIndex = buildPriorResolverSeedIndex(game);
 
@@ -342,7 +361,8 @@ async function evaluateRound4FromGame(game) {
       scenario,
       twist,
       roundPool,
-      priorResolverSeedIndex
+      priorResolverSeedIndex,
+      categoryContext
     });
 
     const chemistryInfo = calculateChemistryDetails(roster);
@@ -397,7 +417,10 @@ async function evaluateRound4FromGame(game) {
       `Competitive Bonus (OVR > 60): +${formula.competitivePoints}`,
       `Elite Bonus (OVR > 80 curve): +${formula.elitePoints}`,
       `Round 4 Total: ${formula.totalPoints}`,
-      `Top Pick: ${teamSummary.topPick}`
+      `Top Pick: ${teamSummary.topPick}`,
+      ...(categoryContext && categoryContext.enabled && categoryContext.name
+        ? [`Category: ${categoryContext.name}`]
+        : [])
     ];
   });
 
@@ -538,13 +561,56 @@ async function evaluateRound4FromGame(game) {
     }
   }
 
+  const categoryRows = allEvaluations
+    .map((entry) => {
+      const context = entry && entry.scoreMeta && entry.scoreMeta.categoryContext && typeof entry.scoreMeta.categoryContext === 'object'
+        ? entry.scoreMeta.categoryContext
+        : null;
+      return context
+        ? {
+          fit: Number(context.categoryFit) || 0,
+          impact: Number(context.netImpact) || 0,
+          membership: Number(context.membershipConfidence) || 0
+        }
+        : null;
+    })
+    .filter(Boolean);
+  const categoryImpactSummary = categoryRows.length
+    ? {
+      active: true,
+      sampleCount: categoryRows.length,
+      avgCategoryFit: Number((categoryRows.reduce((sum, row) => sum + row.fit, 0) / categoryRows.length).toFixed(2)),
+      avgMembershipConfidence: Number((categoryRows.reduce((sum, row) => sum + row.membership, 0) / categoryRows.length).toFixed(2)),
+      avgNetImpact: Number((categoryRows.reduce((sum, row) => sum + row.impact, 0) / categoryRows.length).toFixed(2)),
+      positiveImpactCount: categoryRows.filter((row) => row.impact > 0).length,
+      negativeImpactCount: categoryRows.filter((row) => row.impact < 0).length
+    }
+    : {
+      active: false,
+      sampleCount: 0,
+      avgCategoryFit: 0,
+      avgMembershipConfidence: 0,
+      avgNetImpact: 0,
+      positiveImpactCount: 0,
+      negativeImpactCount: 0
+    };
+
   return {
     scenario,
     twist,
+    lockedCategory: categoryContext && categoryContext.enabled
+      ? {
+        id: categoryContext.id,
+        displayName: categoryContext.name,
+        family: categoryContext.family,
+        version: categoryContext.version
+      }
+      : null,
     teamEvaluations,
     finalLeaderboard,
     roundPoints,
-    pointBreakdown
+    pointBreakdown,
+    categoryImpactSummary
   };
 }
 

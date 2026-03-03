@@ -52,6 +52,27 @@ export function buildPhaseVoiceCuesWithState(kind = '', data = {}, gameState = {
     }];
   }
 
+  if (kindKey === 'category') {
+    const lockedCategory = safe && safe.lockedCategory && typeof safe.lockedCategory === 'object'
+      ? safe.lockedCategory
+      : null;
+    const category = String(
+      safe.categoryLabel
+      || (lockedCategory && (lockedCategory.label || lockedCategory.name || lockedCategory.slug))
+      || ''
+    ).trim();
+    if (!category) return [];
+    return [{
+      type: 'narration',
+      text: `Category locked: ${category}.`,
+      subtitleText: `Category: ${category}`,
+      archetype: ARCHETYPES.ANNOUNCER,
+      intensity: 0.62,
+      priority: 68,
+      dedupeKey: `phase:category:${roundNumber}:${category.toLowerCase()}`
+    }];
+  }
+
   if (kindKey === 'twist') {
     if (!twist) return [];
     return [{

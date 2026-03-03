@@ -14,6 +14,7 @@ const { buildWeightProfile, computeWeightedOverall } = require('../scoring/weigh
 const { resolveEntryIdentity } = require('../resolver/resolveEntryIdentity');
 const { buildExplainabilityPayload } = require('../explain/buildExplainabilityPayload');
 const { DEFAULT_SUBSCORES } = require('../contracts/resultShape');
+const { resolveCategoryFit } = require('../../categoryRegistryService');
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -70,6 +71,14 @@ function inferEntityKind(scoringInfo, character) {
   const title = String(scoringInfo && (scoringInfo.title || scoringInfo.name) || character || '').toLowerCase();
   const corpus = `${title} ${description}`;
 
+  if (textIncludesAny(corpus, [
+    'born ', ' is an american ', ' is a british ', ' is a canadian ', ' is an english ', ' is an australian ',
+    'actor', 'actress', 'model', 'singer', 'musician', 'politician', 'businessman', 'businesswoman',
+    'inventor', 'scientist', 'athlete', 'television personality', 'radio host'
+  ])) {
+    return 'person';
+  }
+
   if (textIncludesAny(title, [
     'princess peach', 'nico robin', 'yuji itadori', 'baki hanma', 'baki the grappler',
     'kratos (god of war)', 'bugs bunny', 'kim possible', 'peter parker',
@@ -102,9 +111,6 @@ function inferEntityKind(scoringInfo, character) {
     ])
   ) {
     return 'fictional_character';
-  }
-  if (textIncludesAny(corpus, ['born ', ' is an american ', ' is a british ', ' radio host', 'actor', 'singer', 'politician', 'businessman', 'inventor'])) {
-    return 'person';
   }
   if (textIncludesAny(corpus, ['television series', 'tv series', 'film', 'movie', 'video game', 'album', 'novel'])) {
     return 'media_work';
@@ -992,6 +998,7 @@ function buildContextSubscores({
     chemistry,
     originalScenarioFit,
     originalTwistFit,
+    categoryFit: 50,
     _rarityBonus: rarityBonus,
     _originalRelevance: original.originalRelevance || null,
     _originalRawFits: {
@@ -1492,9 +1499,14 @@ function computeContextOvrModel({
   function inferNeutralPowerBand() {
     const hasMythic = textIncludesAny(desc, ['god', 'deity', 'demigod', 'omnipotent', 'cosmic entity', 'primordial']);
     const hasHeroLabel = textIncludesAny(desc, ['superhero']);
-    const hasSuper = textIncludesAny(desc, [
+    const hasPortrayalBioSignals = textIncludesAny(desc, [
+      'actor', 'actress', 'portrayed', 'role in', 'film', 'television', 'known for playing'
+    ]);
+    const hasLiteralPowerSignals = textIncludesAny(desc, [
       'superhuman', 'kryptonian', 'mutant', 'meta-human', 'supernatural', 'wizard', 'sorcerer', 'magic'
     ]);
+    const hasFranchiseSuperSignals = textIncludesAny(desc, ['superhero', 'comic book']);
+    const hasSuper = hasLiteralPowerSignals || (hasFranchiseSuperSignals && !hasPortrayalBioSignals);
     const hasAthleteSignals = textIncludesAny(desc, [
       'athlete', 'olympian', 'olympic', 'quarterback', 'running back', 'boxer', 'fighter', 'champion'
     ]);
@@ -1503,6 +1515,9 @@ function computeContextOvrModel({
     ]);
     const hasEliteHumanSignals = textIncludesAny(desc, [
       'founder', 'co-founder', 'entrepreneur', 'inventor', 'engineer', 'scientist', 'executive', 'ceo', 'commander', 'general'
+    ]);
+    const hasEntertainmentSignals = textIncludesAny(desc, [
+      'actor', 'actress', 'model', 'musician', 'singer', 'performer', 'comedian', 'television personality'
     ]);
     const isOperatorProfile = traitSet.has('engineering')
       || traitSet.has('intelligence')
@@ -1513,6 +1528,22 @@ function computeContextOvrModel({
 
     if (isBruceBannerIdentity && textIncludesAny(desc, ['scientist', 'gamma', 'research', 'engineer', 'inventor'])) {
       return { ceilingClass: 'elite_operator_human', baseFloor: 22, baseCeiling: 74, neutralCap: 84, attributeCap: 10 };
+    }
+
+    if (entityKind === 'person' && hasAthleteSignals) {
+      return { ceilingClass: 'elite_athlete_human', baseFloor: 24, baseCeiling: 74, neutralCap: 82, attributeCap: 10 };
+    }
+    if (entityKind === 'person' && hasEntertainmentSignals && !hasSuper && !hasMythic) {
+      return { ceilingClass: 'entertainment_human', baseFloor: 18, baseCeiling: 62, neutralCap: 72, attributeCap: 8 };
+    }
+    if (entityKind === 'person' && hasGeniusSignals && isOperatorProfile) {
+      return { ceilingClass: 'elite_operator_human', baseFloor: 24, baseCeiling: 76, neutralCap: 84, attributeCap: 11 };
+    }
+    if (entityKind === 'person' && (hasEliteHumanSignals || isOperatorProfile)) {
+      return { ceilingClass: 'elite_human', baseFloor: 22, baseCeiling: 72, neutralCap: 80, attributeCap: 10 };
+    }
+    if (entityKind === 'person') {
+      return { ceilingClass: 'human', baseFloor: 18, baseCeiling: 66, neutralCap: 74, attributeCap: 8 };
     }
 
     if (hasMythic) {
@@ -1532,18 +1563,6 @@ function computeContextOvrModel({
     }
     if (entityKind === 'fictional_character') {
       return { ceilingClass: 'heroic_fiction', baseFloor: 20, baseCeiling: 70, neutralCap: 80, attributeCap: 10 };
-    }
-    if (entityKind === 'person' && hasAthleteSignals) {
-      return { ceilingClass: 'elite_athlete_human', baseFloor: 24, baseCeiling: 74, neutralCap: 82, attributeCap: 10 };
-    }
-    if (entityKind === 'person' && hasGeniusSignals && isOperatorProfile) {
-      return { ceilingClass: 'elite_operator_human', baseFloor: 24, baseCeiling: 76, neutralCap: 84, attributeCap: 11 };
-    }
-    if (entityKind === 'person' && (hasEliteHumanSignals || isOperatorProfile)) {
-      return { ceilingClass: 'elite_human', baseFloor: 22, baseCeiling: 72, neutralCap: 80, attributeCap: 10 };
-    }
-    if (entityKind === 'person') {
-      return { ceilingClass: 'human', baseFloor: 18, baseCeiling: 66, neutralCap: 74, attributeCap: 8 };
     }
     if (entityKind === 'organization') {
       return { ceilingClass: 'organization', baseFloor: 16, baseCeiling: 68, neutralCap: 78, attributeCap: 8 };
@@ -1578,7 +1597,11 @@ function computeContextOvrModel({
   if (traitSet.has('leadership') || traitSet.has('control') || traitSet.has('communication')) attributeBonus += 1;
   if (traitSet.has('combat') || traitSet.has('stealth')) attributeBonus += 1;
 
-  if (!isBruceBannerIdentity && textIncludesAny(desc, ['superhero', 'superhuman', 'kryptonian', 'deity', 'god', 'demigod', 'magic', 'wizard', 'sorcerer'])) {
+  if (
+    !isBruceBannerIdentity
+    && textIncludesAny(desc, ['superhero', 'superhuman', 'kryptonian', 'deity', 'god', 'demigod', 'magic', 'wizard', 'sorcerer'])
+    && !(entityKind === 'person' && textIncludesAny(desc, ['actor', 'actress', 'portrayed', 'role in', 'film', 'television']))
+  ) {
     attributeBonus += 8;
   } else if (textIncludesAny(desc, ['alien', 'mutant', 'meta-human', 'supernatural'])) {
     attributeBonus += 5;
@@ -1688,8 +1711,14 @@ function computeContextOvrModel({
   ]);
   const powerTraitCount = countTraitMatches(traits, ['power', 'combat', 'speed']);
   const superPowerSignals = textIncludesAny(desc, [
-    'superhero', 'superhuman', 'kryptonian', 'deity', 'god', 'demigod', 'cosmic', 'omnipotent'
-  ]);
+    'superhuman', 'kryptonian', 'deity', 'god', 'demigod', 'cosmic', 'omnipotent', 'mutant', 'meta-human'
+  ]) || (
+    textIncludesAny(desc, ['superhero'])
+    && !(
+      entityKind === 'person'
+      && textIncludesAny(desc, ['actor', 'actress', 'portrayed', 'role in', 'film', 'television'])
+    )
+  );
   const techSpecialistSignals = textIncludesAny(desc, [
     'scientist', 'engineer', 'inventor', 'genius', 'physicist', 'chemist', 'technician', 'research', 'laboratory', 'lab'
   ]);
@@ -1895,6 +1924,7 @@ function computeContextOvrModel({
     elite_operator_human: 8,
     elite_athlete_human: 7,
     elite_human: 7,
+    entertainment_human: 6,
     human: 8,
     organization: 9,
     object_tool: 10,
@@ -1910,6 +1940,19 @@ function computeContextOvrModel({
   );
   let confidenceCappedFinalCap = finalCap;
   if (confidenceName < 0.8) confidenceCappedFinalCap -= Math.round((0.8 - confidenceName) * 10);
+  if (powerBand.ceilingClass === 'entertainment_human') {
+    confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 82);
+  }
+  if (
+    entityKind === 'person'
+    && !superPowerSignals
+    && textIncludesAny(desc, ['actor', 'actress', 'model', 'musician', 'singer', 'performer', 'comedian'])
+  ) {
+    confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 84);
+    if (opsTraitCount <= 2) {
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 80);
+    }
+  }
   if (confidenceName < 0.65 && resolutionRiskFlags.has('title_differs_from_input')) confidenceCappedFinalCap -= 6;
   if (resolutionRiskFlags.has('fast_round_timeout_fallback')) confidenceCappedFinalCap -= 10;
   if (resolutionRiskFlags.has('high_candidate_ambiguity') && confidenceName < 0.75) confidenceCappedFinalCap -= 5;
@@ -1927,6 +1970,7 @@ function computeContextOvrModel({
     elite_operator_human: 12,
     elite_athlete_human: 12,
     elite_human: 10,
+    entertainment_human: 8,
     human: 8,
     organization: 6,
     object_tool: 4,
@@ -2170,6 +2214,7 @@ function buildContextPublicResult({
   relevance,
   nameSignals,
   draftedFitBonus,
+  categoryFitResolution,
   weighted,
   confidence,
   subscores
@@ -2243,8 +2288,24 @@ function buildContextPublicResult({
       baseAbility: Number(subscores && subscores.baseAbility) || 0,
       rarity: Number(subscores && subscores.rarity) || 0,
       creativity: Number(subscores && subscores.creativity) || 0,
-      chemistry: Number(subscores && subscores.chemistry) || 0
+      chemistry: Number(subscores && subscores.chemistry) || 0,
+      categoryFit: Number(subscores && subscores.categoryFit) || 0
     },
+    categoryContext: categoryFitResolution && categoryFitResolution.active
+      ? {
+        categoryId: categoryFitResolution.categoryId,
+        categoryName: categoryFitResolution.categoryName,
+        categoryFamily: categoryFitResolution.categoryFamily,
+        categoryFit: Number(categoryFitResolution.categoryFit) || 0,
+        membershipConfidence: Number(categoryFitResolution.membershipConfidence) || 0,
+        withinCategoryPowerRank: Number(categoryFitResolution.withinCategoryPowerRank) || 0,
+        ambiguityHandling: Number(categoryFitResolution.ambiguityHandling) || 0,
+        eligibilityPenalty: Number(categoryFitResolution.eligibilityPenalty) || 0,
+        inCategoryBonus: Number(categoryFitResolution.inCategoryBonus) || 0,
+        netImpact: Number(categoryFitResolution.netImpact) || 0,
+        explain: categoryFitResolution.explain || ''
+      }
+      : null,
     contextSignals: {
       matchedTraits: engineTrace.matchedTraits,
       matchedIntents: engineTrace.matchedIntents,
@@ -2308,6 +2369,9 @@ function buildContextPublicResult({
   if (engineTrace.riskFlags.length) {
     notes.push(`Risk flags: ${engineTrace.riskFlags.slice(0, 6).join(', ')}.`);
   }
+  if (categoryFitResolution && categoryFitResolution.active && categoryFitResolution.explain) {
+    notes.push(categoryFitResolution.explain);
+  }
 
   const breakdown = buildBreakdown({
     character,
@@ -2334,6 +2398,22 @@ function buildContextPublicResult({
     subscores,
     scoringInfo
   });
+  if (
+    categoryFitResolution
+    && categoryFitResolution.active
+    && breakdown
+    && Array.isArray(breakdown.scoreBreakdown)
+  ) {
+    breakdown.categoryRelevance = `Category Fit ${categoryFitResolution.categoryFit}/100 | membership ${categoryFitResolution.membershipConfidence} | net impact ${categoryFitResolution.netImpact >= 0 ? '+' : ''}${categoryFitResolution.netImpact}`;
+    breakdown.scoreBreakdown = [
+      {
+        step: 'Category Fit',
+        points: Number(categoryFitResolution.netImpact) || 0,
+        description: `${categoryFitResolution.categoryName}: fit ${categoryFitResolution.categoryFit}/100 (membership ${categoryFitResolution.membershipConfidence}, rank ${categoryFitResolution.withinCategoryPowerRank}, impact ${categoryFitResolution.netImpact >= 0 ? '+' : ''}${categoryFitResolution.netImpact})`
+      },
+      ...breakdown.scoreBreakdown
+    ];
+  }
 
   if (breakdown && breakdown.ovrBreakdown && typeof breakdown.ovrBreakdown === 'object') {
     const ovrBreakdown = breakdown.ovrBreakdown;
@@ -2468,13 +2548,35 @@ async function evaluateEntryContext(entry) {
     nameSignals
   });
 
+  const categoryContext = options && options.categoryContext && typeof options.categoryContext === 'object'
+    ? options.categoryContext
+    : null;
+  const categoryFitResolution = resolveCategoryFit({
+    categoryContext,
+    rawEntryName: character,
+    scoringInfo,
+    subscores,
+    confidenceOverall: Number(resolution && resolution.infoConfidence) || 0,
+    confidenceName: Number(resolution && resolution.infoConfidence) || 0,
+    riskFlags: Array.isArray(resolution && resolution.riskFlags) ? resolution.riskFlags : []
+  });
+  subscores.categoryFit = Number(categoryFitResolution && categoryFitResolution.categoryFit) || 50;
+  subscores._categoryContext = categoryFitResolution && categoryFitResolution.active
+    ? { ...categoryFitResolution }
+    : null;
+
   const weightProfile = buildWeightProfile({
     evaluationMode: parsedContext.evaluationMode,
     currentTwist: parsedContext.twist,
     originalTwist: parsedContext.originalTwist
   });
 
-  const weighted = computeWeightedOverall(subscores, weightProfile);
+  const weighted = computeWeightedOverall(subscores, weightProfile, {
+    confidenceName: Number(resolution && resolution.infoConfidence) || 0,
+    confidenceOverall: Number(resolution && resolution.infoConfidence) || 0,
+    riskFlags: Array.isArray(resolution && resolution.riskFlags) ? resolution.riskFlags : [],
+    categoryActive: Boolean(categoryFitResolution && categoryFitResolution.active)
+  });
   const confidence = buildConfidencePacket({ resolution, relevance });
   const publicResult = buildContextPublicResult({
     character,
@@ -2487,6 +2589,7 @@ async function evaluateEntryContext(entry) {
     relevance,
     nameSignals,
     draftedFitBonus,
+    categoryFitResolution,
     weighted,
     confidence,
     subscores

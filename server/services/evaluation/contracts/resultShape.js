@@ -6,7 +6,8 @@ const DEFAULT_SUBSCORES = Object.freeze({
   creativity: 50,
   chemistry: 50,
   originalScenarioFit: 50,
-  originalTwistFit: 50
+  originalTwistFit: 50,
+  categoryFit: 50
 });
 
 const DEFAULT_CONFIDENCE = Object.freeze({

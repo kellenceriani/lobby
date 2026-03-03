@@ -21,6 +21,10 @@ This folder contains active, maintained project documentation.
 - `FUTURE_IMPLEMENTATIONS_ROADMAP.md` - active roadmap only.
 - `CATEGORIES_MODE_VISION.md` - core design vision and rollout plan for Categories Mode.
 
+## Deployment Planning
+
+- `RENDER_FREE_WEB_SERVICE_PLAN.md` - fallback migration plan for moving from Railway trial to Render Free.
+
 ## Notes
 
 - Historical one-off migration/changelog docs were removed to avoid stale guidance.

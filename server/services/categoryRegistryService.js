@@ -16,6 +16,29 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function escapeRegExp(value = '') {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeLooseText(value = '') {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function countRuleHits(corpusNormalized = '', rules = []) {
+  const seen = new Set();
+  let hits = 0;
+  (Array.isArray(rules) ? rules : []).forEach((rule) => {
+    const normalizedRule = normalizeLooseText(rule);
+    if (!normalizedRule || seen.has(normalizedRule)) return;
+    const pattern = new RegExp(`(?:^|\\s)${escapeRegExp(normalizedRule)}(?:\\s|$)`, 'i');
+    if (pattern.test(corpusNormalized)) {
+      hits += 1;
+      seen.add(normalizedRule);
+    }
+  });
+  return hits;
+}
+
 function asSlug(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return '';
@@ -259,10 +282,13 @@ function resolveCategoryFit({
     ? scoringInfo.aliases.map((entry) => String(entry || '').toLowerCase()).join(' ')
     : '';
   const corpus = `${rawName} ${title} ${description} ${categories} ${aliases}`.trim();
+  const corpusNormalized = normalizeLooseText(corpus);
 
-  const inclusionHits = category.inclusionRules.reduce((count, token) => count + (corpus.includes(token) ? 1 : 0), 0);
-  const exclusionHits = category.exclusionRules.reduce((count, token) => count + (corpus.includes(token) ? 1 : 0), 0);
-  const aliasHits = category.aliases.reduce((count, token) => count + (corpus.includes(token) ? 1 : 0), 0);
+  const inclusionHits = countRuleHits(corpusNormalized, category.inclusionRules);
+  const exclusionHits = countRuleHits(corpusNormalized, category.exclusionRules);
+  const aliasHits = countRuleHits(corpusNormalized, category.aliases);
+  const strongExampleHits = countRuleHits(corpusNormalized, category.exampleEntriesStrong || []);
+  const evidenceHits = inclusionHits + aliasHits + strongExampleHits;
   const lowEvidence = corpus.length < 120;
   const safeConfidenceName = clamp(Number(confidenceName) || 0, 0, 1);
   const safeConfidenceOverall = clamp(Number(confidenceOverall) || 0, 0, 1);
@@ -274,21 +300,32 @@ function resolveCategoryFit({
   const vehicleSignals = [
     'car', 'vehicle', 'automobile', 'supercar', 'sports car', 'driver', 'racing', 'motorsport', 'formula', 'nascar', 'ferrari', 'lamborghini', 'maserati', 'van', 'truck', 'suv', 'sedan', 'coupe'
   ];
-  const sportHits = sportSignals.reduce((count, token) => count + (corpus.includes(token) ? 1 : 0), 0);
-  const vehicleHits = vehicleSignals.reduce((count, token) => count + (corpus.includes(token) ? 1 : 0), 0);
+  const sportHits = countRuleHits(corpusNormalized, sportSignals);
+  const vehicleHits = countRuleHits(corpusNormalized, vehicleSignals);
   const normalizedCategoryId = String(category.id || '').toLowerCase();
+  const isSportsCategory = category.family === 'sports/competition' || normalizedCategoryId.includes('sport') || normalizedCategoryId.includes('athlete');
+  const isRoadVehicleCategory = normalizedCategoryId.includes('car') || normalizedCategoryId.includes('supercar') || normalizedCategoryId.includes('road-vehicle') || normalizedCategoryId.includes('automobile');
 
-  let membershipConfidence = 35 + (inclusionHits * 12) + (aliasHits * 7) - (exclusionHits * 18);
-  if (category.family === 'sports/competition' || normalizedCategoryId.includes('sport') || normalizedCategoryId.includes('athlete')) {
+  let membershipConfidence = 22 + (inclusionHits * 15) + (aliasHits * 10) + (strongExampleHits * 14) - (exclusionHits * 20);
+  if (inclusionHits > 0 && aliasHits > 0) membershipConfidence += 8;
+  if (strongExampleHits > 0) membershipConfidence += 6;
+  if (isSportsCategory) {
     membershipConfidence += Math.min(28, sportHits * 10);
   }
-  if (normalizedCategoryId.includes('car') || normalizedCategoryId.includes('vehicle') || normalizedCategoryId.includes('supercar')) {
+  if (isRoadVehicleCategory) {
     membershipConfidence += Math.min(30, vehicleHits * 10);
   }
-  if (lowEvidence) membershipConfidence -= 8;
-  if (safeConfidenceName < 0.72) membershipConfidence -= 8;
-  if (riskSet.has('high_candidate_ambiguity')) membershipConfidence -= 8;
-  if (riskSet.has('dangerous_title_diff_suspected')) membershipConfidence -= 14;
+  if (!isSportsCategory && sportHits >= 2 && (inclusionHits + aliasHits + strongExampleHits) <= 2) {
+    membershipConfidence -= 6;
+  }
+  if (!isRoadVehicleCategory && vehicleHits >= 2 && (inclusionHits + aliasHits + strongExampleHits) <= 2) {
+    membershipConfidence -= 6;
+  }
+  if (evidenceHits <= 1) membershipConfidence -= 4;
+  if (lowEvidence) membershipConfidence -= evidenceHits >= 2 ? 2 : 4;
+  if (safeConfidenceName < 0.72) membershipConfidence -= evidenceHits >= 1 ? 4 : 8;
+  if (riskSet.has('high_candidate_ambiguity')) membershipConfidence -= evidenceHits >= 2 ? 4 : 8;
+  if (riskSet.has('dangerous_title_diff_suspected')) membershipConfidence -= evidenceHits >= 2 ? 6 : 14;
   membershipConfidence = clamp(Math.round(membershipConfidence), 0, 100);
 
   const baseAbility = clamp(Number(subscores && subscores.baseAbility) || 55, 0, 100);
@@ -305,20 +342,20 @@ function resolveCategoryFit({
   ambiguityHandling = clamp(Math.round(ambiguityHandling), 0, 100);
 
   const rawCategoryFit = clamp(
-    Math.round((membershipConfidence * 0.5) + (withinCategoryPowerRank * 0.35) + (ambiguityHandling * 0.15)),
+    Math.round((membershipConfidence * 0.57) + (withinCategoryPowerRank * 0.28) + (ambiguityHandling * 0.15)),
     0,
     100
   );
 
   let eligibilityPenalty = 0;
-  if (membershipConfidence < 20) eligibilityPenalty = -22;
-  else if (membershipConfidence < 35) eligibilityPenalty = -12;
-  else if (membershipConfidence < 50) eligibilityPenalty = -5;
+  if (membershipConfidence < 15) eligibilityPenalty = -22;
+  else if (membershipConfidence < 28) eligibilityPenalty = -12;
+  else if (membershipConfidence < 40) eligibilityPenalty = -5;
 
   let inCategoryBonus = 0;
-  if (membershipConfidence >= 70 && withinCategoryPowerRank >= 60) inCategoryBonus = 14;
-  else if (membershipConfidence >= 60 && withinCategoryPowerRank >= 54) inCategoryBonus = 8;
-  else if (membershipConfidence >= 50 && withinCategoryPowerRank >= 50) inCategoryBonus = 4;
+  if (membershipConfidence >= 72 && withinCategoryPowerRank >= 40) inCategoryBonus = 14;
+  else if (membershipConfidence >= 58 && withinCategoryPowerRank >= 34) inCategoryBonus = 8;
+  else if (membershipConfidence >= 48 && withinCategoryPowerRank >= 30) inCategoryBonus = 4;
 
   const netImpact = clamp(inCategoryBonus + eligibilityPenalty, -24, 20);
   const categoryFit = clamp(rawCategoryFit + netImpact, 0, 100);
@@ -335,7 +372,7 @@ function resolveCategoryFit({
     eligibilityPenalty,
     inCategoryBonus,
     netImpact,
-    explain: `Category ${category.displayName}: fit ${categoryFit}/100, membership ${membershipConfidence}, rank ${withinCategoryPowerRank}, ambiguity ${ambiguityHandling}, impact ${netImpact >= 0 ? '+' : ''}${netImpact} (hits: inc ${inclusionHits}, alias ${aliasHits}, sport ${sportHits}, vehicle ${vehicleHits}, exc ${exclusionHits}).`
+    explain: `Category ${category.displayName}: fit ${categoryFit}/100, membership ${membershipConfidence}, rank ${withinCategoryPowerRank}, ambiguity ${ambiguityHandling}, impact ${netImpact >= 0 ? '+' : ''}${netImpact} (hits: inc ${inclusionHits}, alias ${aliasHits}, strong ${strongExampleHits}, sport ${sportHits}, vehicle ${vehicleHits}, exc ${exclusionHits}).`
   };
 }
 

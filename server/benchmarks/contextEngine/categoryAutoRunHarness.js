@@ -88,11 +88,16 @@ function inferDomainForCategory(category) {
   const id = String(category && category.id || '').toLowerCase();
   const family = String(category && category.family || '').toLowerCase();
   const displayName = String(category && category.displayName || '').toLowerCase();
+  if (id.includes('martial-artists')) return 'martial';
+  if (id.includes('combat-sports')) return 'combat_sports';
+  if (id.includes('monster-hunters')) return 'monster_hunters';
+  if (id.includes('mecha-pilots')) return 'mecha_pilots';
+  if (id.includes('scifi-franchises') || id.includes('sci-fi-franchises')) return 'scifi';
   if (id.includes('leader') || family.includes('leader') || displayName.includes('leader')) return 'leaders';
   if (id.includes('medical-professional') || id.includes('medical') || displayName.includes('medical')) return 'medical';
   if (id.includes('detective') || id.includes('investigator') || displayName.includes('detective')) return 'detective';
   if (id.includes('firefighter') || id.includes('rescuer') || displayName.includes('rescue')) return 'rescue';
-  if (id.includes('martial') || id.includes('combat-sports')) return 'sports';
+  if (id.includes('martial')) return 'martial';
   if (id.includes('sport') || id.includes('athlete') || family.includes('sports')) return 'sports';
   if (id.includes('musician') || id.includes('performer')) return 'music';
   if (id.includes('actor') || id.includes('entertainer')) return 'actor';
@@ -132,6 +137,11 @@ function inferDomainForCategory(category) {
 }
 
 Object.assign(FIT_LIBRARY, {
+  martial: ['Bruce Lee', 'Jackie Chan', 'Jet Li', 'Ip Man', 'Chuck Norris', 'Ronda Rousey', 'Conor McGregor', 'Anderson Silva', 'karate', 'taekwondo', 'judo', 'dojo'],
+  combat_sports: ['boxing', 'mma', 'kickboxing', 'muay thai', 'judo', 'wrestling', 'Conor McGregor', 'Ronda Rousey', 'Khabib Nurmagomedov', 'Amanda Nunes', 'Floyd Mayweather', 'Jon Jones'],
+  monster_hunters: ['Geralt of Rivia', 'Van Helsing', 'Buffy Summers', 'Demon Slayer Corps', 'Witcher', 'monster hunter', 'slayer', 'demon hunter', 'vampire hunter', 'Trevor Belmont', 'Doom Slayer', 'exorcist'],
+  mecha_pilots: ['Amuro Ray', 'Shinji Ikari', 'Char Aznable', 'Kira Yamato', 'Heero Yuy', 'gundam pilot', 'eva pilot', 'mecha pilot', 'jaeger pilot', 'Lelouch Lamperouge', 'Mikazuki Augus', 'Sousuke Sagara'],
+  scifi: ['Star Wars', 'Star Trek', 'Mass Effect', 'Dune', 'The Expanse', 'Doctor Who', 'Battlestar Galactica', 'sci-fi franchise', 'science fiction', 'space opera', 'cyberpunk', 'Alien franchise'],
   leaders: ['Nelson Mandela', 'Winston Churchill', 'Abraham Lincoln', 'Angela Merkel', 'Jacinda Ardern', 'Theodore Roosevelt', 'Margaret Thatcher', 'Barack Obama', 'Lee Kuan Yew', 'Volodymyr Zelenskyy', 'Mahatma Gandhi', 'Franklin D. Roosevelt'],
   medical: ['Florence Nightingale', 'Jonas Salk', 'Anthony Fauci', 'Atul Gawande', 'Paul Farmer', 'Harvey Cushing', 'Virginia Apgar', 'Elizabeth Blackwell', 'Sanjay Gupta', 'Christiaan Barnard', 'Mae Jemison', 'Patch Adams'],
   detective: ['Sherlock Holmes', 'Hercule Poirot', 'Nancy Drew', 'Benoit Blanc', 'Jessica Fletcher', 'L', 'Columbo', 'Batman', 'Dick Tracy', 'Miss Marple', 'Philip Marlowe', 'Veronica Mars'],
@@ -539,10 +549,8 @@ async function buildRuntimeEntryPack(category, scenario, twist) {
       });
     });
 
-    const scoredProgress = Array.from(scoredByKey.values());
-    const positiveCount = scoredProgress.filter((entry) => entry.netImpact > 0).length;
-    const negativeCount = scoredProgress.filter((entry) => entry.netImpact < 0).length;
-    if (positiveCount >= 12 && negativeCount >= 10) break;
+    // Intentionally evaluate full pool so weaker categories still surface enough strong fits
+    // for strict reliability checks, rather than stopping early on mixed signal counts.
   }
 
   const scored = Array.from(scoredByKey.values()).map((entry) => {
@@ -553,22 +561,32 @@ async function buildRuntimeEntryPack(category, scenario, twist) {
       character: entry.character,
       key: entry.key,
       netImpact: Number(context && context.netImpact) || 0,
-      categoryFit: Number(context && context.categoryFit) || 0
+      categoryFit: Number(context && context.categoryFit) || 0,
+      membershipConfidence: Number(context && context.membershipConfidence) || 0
     };
   });
 
   const used = new Set();
   const fitOrder = [
     ...scored
-      .filter((entry) => entry.categoryFit >= 70)
-      .sort((a, b) => b.categoryFit - a.categoryFit || b.netImpact - a.netImpact),
+      .filter((entry) => entry.categoryFit >= 75 && entry.membershipConfidence >= 60 && entry.netImpact >= 4)
+      .sort((a, b) => b.categoryFit - a.categoryFit || b.membershipConfidence - a.membershipConfidence || b.netImpact - a.netImpact),
     ...scored
-      .filter((entry) => entry.categoryFit >= 60)
-      .sort((a, b) => b.categoryFit - a.categoryFit || b.netImpact - a.netImpact),
+      .filter((entry) => entry.categoryFit >= 68 && entry.membershipConfidence >= 55 && entry.netImpact >= 0)
+      .sort((a, b) => b.categoryFit - a.categoryFit || b.membershipConfidence - a.membershipConfidence || b.netImpact - a.netImpact),
     ...scored
-      .filter((entry) => entry.categoryFit >= 50 && entry.netImpact > 0)
-      .sort((a, b) => b.categoryFit - a.categoryFit || b.netImpact - a.netImpact),
-    ...scored.sort((a, b) => b.categoryFit - a.categoryFit || b.netImpact - a.netImpact)
+      .filter((entry) => entry.categoryFit >= 62 && entry.membershipConfidence >= 50 && entry.netImpact >= 0)
+      .sort((a, b) => b.categoryFit - a.categoryFit || b.membershipConfidence - a.membershipConfidence || b.netImpact - a.netImpact),
+    ...scored
+      .filter((entry) => entry.categoryFit >= 58 && entry.membershipConfidence >= 45 && entry.netImpact >= 0)
+      .sort((a, b) => b.categoryFit - a.categoryFit || b.membershipConfidence - a.membershipConfidence || b.netImpact - a.netImpact),
+    ...scored
+      .filter((entry) => entry.categoryFit >= 72)
+      .sort((a, b) => b.categoryFit - a.categoryFit || b.membershipConfidence - a.membershipConfidence || b.netImpact - a.netImpact),
+    ...scored
+      .filter((entry) => entry.netImpact >= 0)
+      .sort((a, b) => b.categoryFit - a.categoryFit || b.membershipConfidence - a.membershipConfidence || b.netImpact - a.netImpact),
+    ...scored.sort((a, b) => b.netImpact - a.netImpact || b.categoryFit - a.categoryFit || b.membershipConfidence - a.membershipConfidence)
   ];
   const fitEntries = [];
   const fitRows = [];
@@ -665,6 +683,15 @@ function summarizePart2(rowsByName, fitEntries, nonFitEntries) {
     ? nonFitContexts.reduce((sum, ctx) => sum + (Number(ctx.netImpact) || 0), 0) / nonFitContexts.length
     : 0;
 
+  const fitAnchored = fitContexts.filter((ctx) => {
+    const explain = String(ctx && ctx.explain || '');
+    const incMatch = explain.match(/inc\s+(\d+)/i);
+    const aliasMatch = explain.match(/alias\s+(\d+)/i);
+    const inc = Number(incMatch && incMatch[1]) || 0;
+    const alias = Number(aliasMatch && aliasMatch[1]) || 0;
+    return (inc + alias) >= 1;
+  }).length;
+
   const breakdownEvidenceCount = [...fitRows, ...nonFitRows].filter((row) => {
     const breakdown = row && row.breakdown && typeof row.breakdown === 'object' ? row.breakdown : null;
     const hasCategoryLine = Boolean(breakdown && String(breakdown.categoryRelevance || '').trim());
@@ -693,9 +720,10 @@ function summarizePart2(rowsByName, fitEntries, nonFitEntries) {
   const gates = [
     evaluateGate(
       'part2_fit_entries_supported_8of10',
-      fitSupported >= 8 && fitHighCategory >= 6,
+      fitSupported >= 8 && fitHighCategory >= 7 && fitPositive >= 6 && fitAvgImpact >= 2,
       `fitSupported=${fitSupported}/10 fitPositive=${fitPositive}/10 fitHighCategory=${fitHighCategory}/10 suppressed=${fitSuppressedHighCategory} avgImpact=${fitAvgImpact.toFixed(2)}`
     ),
+    evaluateGate('part2_fit_anchor_evidence_8of10', fitAnchored >= 8, `fitAnchored=${fitAnchored}/10`),
     evaluateGate(
       'part2_nonfit_entries_suppressed_6of8',
       nonFitSupported >= 6 && nonFitLowCategory >= 4,
@@ -712,6 +740,7 @@ function summarizePart2(rowsByName, fitEntries, nonFitEntries) {
       fitHighCategory,
       fitSupported,
       fitSuppressedHighCategory,
+      fitAnchored,
       nonFitNegative,
       nonFitLowCategory,
       nonFitSupported,
@@ -734,8 +763,13 @@ function computeOverall(part1, part2) {
     part1.metrics.infoResolved === 18
     && part1.metrics.imagePresent === 18
     && Number(part2.metrics.fitSupported) >= 9
-    && Number(part2.metrics.fitHighCategory) >= 7
+    && Number(part2.metrics.fitHighCategory) >= 8
+    && Number(part2.metrics.fitPositive) >= 8
+    && Number(part2.metrics.fitAvgImpact) >= 4
+    && Number(part2.metrics.fitAnchored) >= 9
     && Number(part2.metrics.nonFitSupported) >= 7
+    && Number(part2.metrics.nonFitNegative) >= 5
+    && Number(part2.metrics.nonFitAvgImpact) <= -1
     && part2.metrics.riskyOutliers === 0
   );
 

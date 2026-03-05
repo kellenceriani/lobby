@@ -63,6 +63,7 @@ const ROOM_SETTINGS_DEFAULTS = Object.freeze({
   difficulty: 'normal',
   scenarioTheme: 'all',
   plotTwists: true,
+  noFinalScenarioTwist: false,
   maxPlayers: 6,
   customScenario: '',
   categoriesMode: 'smart_random',
@@ -380,6 +381,16 @@ function scheduleDraftWarmup(game, character) {
   }
   warmCharacterEvaluationCaches(character, scenario, twist, {
     evaluationMode: 'round',
+    fastRoundMode: false,
+    roundQualityPass: true,
+    roundResolveTimeoutMs: Math.max(1800, Number(process.env.ROUND_QUALITY_RESOLVE_TIMEOUT_MS) || 2600),
+    roundAliasOverrideTimeoutMs: Math.max(500, Number(process.env.ROUND_QUALITY_ALIAS_TIMEOUT_MS) || 900),
+    skipImageEnrichment: false,
+    skipImageBackfill: false,
+    skipSyntheticImageUpgrade: false,
+    imageBackfillTimeoutMs: Math.max(700, Number(process.env.ROUND_QUALITY_IMAGE_BACKFILL_TIMEOUT_MS) || 1250),
+    imageBackfillBudgetMs: Math.max(900, Number(process.env.ROUND_QUALITY_IMAGE_BACKFILL_BUDGET_MS) || 1500),
+    maxImageBackfillQueries: Math.max(4, Number(process.env.ROUND_QUALITY_MAX_BACKFILL_QUERIES) || 6),
     fetchContext: {
       scenario,
       twist
@@ -1569,10 +1580,31 @@ function registerSocketHandlers(io) {
 
       const player = game.players.find(p => p.name === name);
       if (!player) return;
+      ensurePlayerDraftSlotArrays(game, player, name);
+      for (let slotIndex = 0; slotIndex < 2; slotIndex += 1) {
+        const character = String(player.team[slotIndex] || '').trim();
+        if (!character) continue;
+        if (game.draftEntries[name][slotIndex] && String(game.draftEntries[name][slotIndex].character || '').trim()) continue;
+        game.draftEntries[name][slotIndex] = {
+          character,
+          originalScenario: game.currentScenario || '',
+          originalTwist: getDraftWarmupTwist(game),
+          draftedRound: (Number(game.currentRound) || 0) + 1,
+          pickNumberInRound: slotIndex + 1,
+          globalDraftOrder: Array.isArray(game.allCharactersDrafted) ? game.allCharactersDrafted.length + 1 : (slotIndex + 1),
+          draftedAtMs: Math.max(0, Date.now() - (game.roundStartTime || Date.now())),
+          draftedAtWallMs: Date.now(),
+          updatedAtMs: Date.now(),
+          autoFilled: player.teamAutoFilled[slotIndex] === true,
+          editLocked: player.teamEditLocks[slotIndex] === true,
+          lockReason: player.teamAutoFilled[slotIndex] === true ? 'auto_fill' : ''
+        };
+      }
 
       const playerEntryCount = countDraftEntriesForPlayer(game, name);
+      const filledSlotCount = getFilledDraftSlotCount(player);
 
-      if (playerEntryCount < 2) {
+      if (playerEntryCount < 2 || filledSlotCount < 2) {
         socket.emit('draftError', 'You must have 2 characters to lock in!');
         return;
       }

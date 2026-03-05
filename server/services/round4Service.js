@@ -570,7 +570,8 @@ async function evaluateRound4FromGame(game) {
         ? {
           fit: Number(context.categoryFit) || 0,
           impact: Number(context.netImpact) || 0,
-          membership: Number(context.membershipConfidence) || 0
+          membership: Number(context.membershipConfidence) || 0,
+          status: String(context.categoryStatus || 'not_in_category').trim().toLowerCase() || 'not_in_category'
         }
         : null;
     })
@@ -583,7 +584,10 @@ async function evaluateRound4FromGame(game) {
       avgMembershipConfidence: Number((categoryRows.reduce((sum, row) => sum + row.membership, 0) / categoryRows.length).toFixed(2)),
       avgNetImpact: Number((categoryRows.reduce((sum, row) => sum + row.impact, 0) / categoryRows.length).toFixed(2)),
       positiveImpactCount: categoryRows.filter((row) => row.impact > 0).length,
-      negativeImpactCount: categoryRows.filter((row) => row.impact < 0).length
+      negativeImpactCount: categoryRows.filter((row) => row.impact < 0).length,
+      inCategoryCount: categoryRows.filter((row) => row.status === 'in_category').length,
+      borderlineCount: categoryRows.filter((row) => row.status === 'borderline').length,
+      notInCategoryCount: categoryRows.filter((row) => row.status !== 'in_category' && row.status !== 'borderline').length
     }
     : {
       active: false,
@@ -592,8 +596,21 @@ async function evaluateRound4FromGame(game) {
       avgMembershipConfidence: 0,
       avgNetImpact: 0,
       positiveImpactCount: 0,
-      negativeImpactCount: 0
+      negativeImpactCount: 0,
+      inCategoryCount: 0,
+      borderlineCount: 0,
+      notInCategoryCount: 0
     };
+
+  if (categoryImpactSummary.active) {
+    console.log(
+      `Round 4 Category Verdicts in=${categoryImpactSummary.inCategoryCount}` +
+      ` borderline=${categoryImpactSummary.borderlineCount}` +
+      ` out=${categoryImpactSummary.notInCategoryCount}` +
+      ` avgFit=${categoryImpactSummary.avgCategoryFit}` +
+      ` avgImpact=${categoryImpactSummary.avgNetImpact}`
+    );
+  }
 
   return {
     scenario,

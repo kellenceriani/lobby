@@ -24,6 +24,16 @@ function detectTwistConnectorPhrase(twist = '') {
   return { connector, remainder: parts.slice(1).join(' ').trim() };
 }
 
+function normalizeContextToken(value = '') {
+  const cleaned = String(value || '').trim().replace(/[.]+$/g, '');
+  const upper = cleaned.toUpperCase();
+  if (!upper) return '';
+  if (upper === 'NO PLOT TWIST' || upper === 'NO FINAL TWIST' || upper === 'NO FINAL SCENARIO' || upper === 'NONE' || upper === 'N/A') {
+    return '';
+  }
+  return cleaned;
+}
+
 export function buildFallbackRoundStartLead(roundNumber, scenario = '', twist = '') {
   return pickVoiceCueVariant([
     `Round ${roundNumber}!`,
@@ -44,7 +54,7 @@ export function buildFallbackScenarioLead(roundNumber, scenario = '') {
 }
 
 export function buildFallbackTwistLine(twist = '', roundNumber = 0) {
-  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
+  const safeTwist = normalizeContextToken(twist);
   const spokenTwist = String(safeTwist || '').split('|')[0].trim();
   if (!spokenTwist) return '';
   const { connector, remainder } = detectTwistConnectorPhrase(spokenTwist);
@@ -63,8 +73,8 @@ export function buildFallbackTwistLine(twist = '', roundNumber = 0) {
 }
 
 export function buildFallbackRound4PreludeLine(scenario = '', twist = '') {
-  const safeScenario = String(scenario || '').trim().replace(/[.]+$/g, '');
-  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
+  const safeScenario = normalizeContextToken(scenario);
+  const safeTwist = normalizeContextToken(twist);
   if (!safeScenario && !safeTwist) {
     return pickVoiceCueVariant([
       'Round 4! Full team final check!',
@@ -83,8 +93,8 @@ export function buildFallbackRound4PreludeLine(scenario = '', twist = '') {
 }
 
 export function buildFallbackRound4BriefLine(scenario = '', twist = '') {
-  const safeScenario = String(scenario || '').trim().replace(/[.]+$/g, '');
-  const safeTwist = String(twist || '').trim().replace(/[.]+$/g, '');
+  const safeScenario = normalizeContextToken(scenario);
+  const safeTwist = normalizeContextToken(twist);
   const parts = [];
   if (safeScenario) {
     const lead = pickVoiceCueVariant(['Scenario locked:', 'Mission:', 'Target objective:'], `round4-scenario-lead:${safeScenario}`);

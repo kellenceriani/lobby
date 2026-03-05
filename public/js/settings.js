@@ -2,7 +2,7 @@
 // This file is intentionally UI-focused and integrates with existing app.js bindings.
 // It does NOT own authoritative room state; it simply reflects + helps navigate settings.
 
-const LOBBY_SETTINGS_BUILD = '20260302-interactions2';
+const LOBBY_SETTINGS_BUILD = '20260304-core-rules-refresh1';
 try {
   window.__lobbyBuild = window.__lobbyBuild || {};
   window.__lobbyBuild.settings = LOBBY_SETTINGS_BUILD;
@@ -55,7 +55,7 @@ function initializeSettingsOsBindings() {
   refreshNowPlaying();
 
   // Keep Now Playing in sync with user edits
-  for (const id of ['difficulty', 'scenarioTheme', 'contentPack', 'plotTwists', 'customScenario', 'categoriesMode', 'categoryId']) {
+  for (const id of ['difficulty', 'scenarioTheme', 'contentPack', 'plotTwists', 'noPlotTwists', 'noFinalScenarioTwist', 'customScenario', 'categoriesMode', 'categoryId']) {
     const el = document.getElementById(id);
     if (!el) continue;
     el.addEventListener('change', refreshNowPlaying);
@@ -64,6 +64,8 @@ function initializeSettingsOsBindings() {
       if (id === 'customScenario') refreshNowPlaying();
     });
   }
+
+  syncCoreRuleToggles();
 }
 
 if (document.readyState === 'loading') {
@@ -74,6 +76,17 @@ if (document.readyState === 'loading') {
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function syncCoreRuleToggles() {
+  const plotTwists = $('plotTwists');
+  const noPlotTwists = $('noPlotTwists');
+  if (noPlotTwists) {
+    const noPlotEnabled = Boolean(noPlotTwists.checked);
+    if (plotTwists) plotTwists.checked = !noPlotEnabled;
+  } else if (plotTwists) {
+    plotTwists.checked = Boolean(plotTwists.checked);
+  }
 }
 
 function bindCollections() {
@@ -219,6 +232,18 @@ if (modeKey === 'coreRules') {
             />
             <p class="field-help">📝 Optional — if set, this becomes the scenario for the round.</p>
           </div>
+
+          <div class="field field-wide">
+            <label for="preview-noPlotTwists"><strong>🌪️ No Plot Twists</strong></label>
+            <input type="checkbox" id="preview-noPlotTwists" disabled aria-label="Disable plot twists (preview)">
+            <p class="field-help">Rounds 1-3 skip twist reveal when enabled.</p>
+          </div>
+
+          <div class="field field-wide">
+            <label for="preview-noFinalScenarioTwist"><strong>🧪 No Final Scenario/Twist</strong></label>
+            <input type="checkbox" id="preview-noFinalScenarioTwist" disabled aria-label="Disable final scenario and twist (preview)">
+            <p class="field-help">Round 4 evaluates rosters without extra final context.</p>
+          </div>
         </div>
       </div>
     </details>
@@ -278,10 +303,18 @@ if (modeKey === 'coreRules') {
   const theme = $('scenarioTheme')?.value || 'all';
   const pack = $('contentPack')?.value || 'default';
   const customScenario = $('customScenario')?.value || '';
+  const plotTwists = $('plotTwists') ? Boolean($('plotTwists').checked) : true;
+  const noFinalScenarioTwist = $('noFinalScenarioTwist') ? Boolean($('noFinalScenarioTwist').checked) : false;
   body.querySelector('#preview-difficulty').value = difficulty;
   body.querySelector('#preview-scenarioTheme').value = theme;
   body.querySelector('#preview-contentPack').value = pack;
   body.querySelector('#preview-customScenario').value = customScenario;
+  if (body.querySelector('#preview-noPlotTwists')) {
+    body.querySelector('#preview-noPlotTwists').checked = !plotTwists;
+  }
+  if (body.querySelector('#preview-noFinalScenarioTwist')) {
+    body.querySelector('#preview-noFinalScenarioTwist').checked = noFinalScenarioTwist;
+  }
   openSheet();
   return;
 }
@@ -442,6 +475,7 @@ function resetCoreRules() {
     scenarioTheme: 'all',
     contentPackId: 'default',
     plotTwists: true,
+    noFinalScenarioTwist: false,
     customScenario: '',
     categoriesMode: 'smart_random',
     categoryId: null
@@ -452,6 +486,8 @@ function resetCoreRules() {
   if ($('scenarioTheme')) $('scenarioTheme').value = defaults.scenarioTheme;
   if ($('contentPack')) $('contentPack').value = defaults.contentPackId;
   if ($('plotTwists')) $('plotTwists').checked = defaults.plotTwists;
+  if ($('noPlotTwists')) $('noPlotTwists').checked = !defaults.plotTwists;
+  if ($('noFinalScenarioTwist')) $('noFinalScenarioTwist').checked = defaults.noFinalScenarioTwist;
   if ($('customScenario')) $('customScenario').value = defaults.customScenario;
   if ($('categoriesMode')) $('categoriesMode').value = defaults.categoriesMode;
   if ($('categoryId')) $('categoryId').value = '';
@@ -464,6 +500,7 @@ function resetCoreRules() {
     window.updateSetting('scenarioTheme', defaults.scenarioTheme);
     window.updateSetting('contentPackId', defaults.contentPackId);
     window.updateSetting('plotTwists', defaults.plotTwists);
+    window.updateSetting('noFinalScenarioTwist', defaults.noFinalScenarioTwist);
     window.updateSetting('customScenario', defaults.customScenario);
     window.updateSetting('categoriesMode', defaults.categoriesMode);
     window.updateSetting('categoryId', defaults.categoryId);
@@ -477,13 +514,20 @@ function resetCoreRules() {
 }
 
 function refreshNowPlaying() {
+  syncCoreRuleToggles();
+
   const difficulty = $('difficulty')?.value || 'normal';
   const theme = $('scenarioTheme')?.value || 'all';
   const packSelect = $('contentPack');
   const packLabel = packSelect?.selectedOptions?.[0]?.textContent?.trim()
     || packSelect?.value
     || 'Default';
-  const plotTwistsOn = $('plotTwists') ? Boolean($('plotTwists').checked) : true;
+  const plotTwistsOn = $('plotTwists') ? Boolean($('plotTwists').checked) : !Boolean($('noPlotTwists')?.checked);
+  const noFinalScenarioTwist = $('noFinalScenarioTwist') ? Boolean($('noFinalScenarioTwist').checked) : false;
+  const categoriesMode = String($('categoriesMode')?.value || 'smart_random').trim().toLowerCase();
+  const categorySelect = $('categoryId');
+  const categoryLabel = categorySelect?.selectedOptions?.[0]?.textContent?.trim() || 'Auto';
+  const hasCustomScenario = Boolean(String($('customScenario')?.value || '').trim());
 
   const difficultyLabel = ({
     easy: 'Easy (60s)',
@@ -500,6 +544,12 @@ function refreshNowPlaying() {
     performance: 'Performance',
     absurd: 'Absurd'
   })[theme] || theme;
+  const categoryModeLabel = ({
+    off: 'Off',
+    host_select: 'Host Select',
+    smart_random: 'Smart Random',
+    group_vote: 'Group Vote'
+  })[categoriesMode] || categoriesMode;
 
   // In the summary bar, "Mode" reflects the selected scenario theme.
   const modeLabelEl = $('nowModeLabel');
@@ -511,11 +561,52 @@ function refreshNowPlaying() {
   const packEl = $('nowPackLabel');
   if (packEl) packEl.textContent = packLabel.replace(/\s*\(.*?\)\s*$/, '') || packLabel;
 
+  const categoryModeEl = $('nowCategoryModeLabel');
+  if (categoryModeEl) categoryModeEl.textContent = categoryModeLabel;
+
+  const finalContextEl = $('nowFinalContextLabel');
+  if (finalContextEl) finalContextEl.textContent = noFinalScenarioTwist ? 'Disabled' : 'Enabled';
+
   // Chips
   const chipTwists = $('chipPlotTwists');
-  if (chipTwists) chipTwists.classList.toggle('chip-muted', !plotTwistsOn);
+  if (chipTwists) {
+    chipTwists.textContent = plotTwistsOn ? 'Plot Twists On' : 'No Plot Twists';
+    chipTwists.classList.toggle('chip-muted', !plotTwistsOn);
+    chipTwists.classList.toggle('chip-strong', plotTwistsOn);
+  }
+
+  const chipFinalContext = $('chipFinalContext');
+  if (chipFinalContext) {
+    chipFinalContext.textContent = noFinalScenarioTwist ? 'No Final Scenario/Twist' : 'Final Context On';
+    chipFinalContext.classList.toggle('chip-muted', noFinalScenarioTwist);
+    chipFinalContext.classList.toggle('chip-strong', !noFinalScenarioTwist);
+  }
+
+  const chipCategories = $('chipCategories');
+  if (chipCategories) {
+    const categoryChipText = categoriesMode === 'host_select' && categoryLabel
+      ? `Category ${categoryLabel}`
+      : `Category ${categoryModeLabel}`;
+    chipCategories.textContent = categoryChipText;
+    chipCategories.classList.toggle('chip-muted', categoriesMode === 'off');
+    chipCategories.classList.toggle('chip-strong', categoriesMode !== 'off');
+  }
+
+  const chipCustomScenario = $('chipCustomScenario');
+  if (chipCustomScenario) {
+    chipCustomScenario.textContent = hasCustomScenario ? 'Custom Scenario On' : 'Custom Scenario Off';
+    chipCustomScenario.classList.toggle('chip-muted', !hasCustomScenario);
+    chipCustomScenario.classList.toggle('chip-strong', hasCustomScenario);
+  }
 
   // Status line “premium” text (optional)
   const status = $('settingsStatusLine');
-  if (status) status.textContent = `Difficulty: ${difficultyLabel} • Theme: ${themeLabel} • Pack: ${packEl ? packEl.textContent : packLabel}`;
+  if (status) {
+    status.textContent =
+      `Difficulty: ${difficultyLabel} • Theme: ${themeLabel} • ` +
+      `Pack: ${packEl ? packEl.textContent : packLabel} • ` +
+      `Twists: ${plotTwistsOn ? 'On' : 'Off'} • ` +
+      `Final Context: ${noFinalScenarioTwist ? 'Off' : 'On'} • ` +
+      `Categories: ${categoryModeLabel}`;
+  }
 }

@@ -35,7 +35,13 @@ function compactList(list) {
 }
 
 function cleanScenarioOrTwist(value, maxLen = 170) {
-  return cleanText(value, maxLen).replace(/[.]+$/g, '').trim();
+  const cleaned = cleanText(value, maxLen).replace(/[.]+$/g, '').trim();
+  const normalized = String(cleaned || '').toUpperCase();
+  if (!normalized) return '';
+  if (normalized === 'NO PLOT TWIST' || normalized === 'NO FINAL SCENARIO' || normalized === 'NO FINAL TWIST' || normalized === 'NONE' || normalized === 'N/A') {
+    return '';
+  }
+  return cleaned;
 }
 
 function hashSeed(input = '') {

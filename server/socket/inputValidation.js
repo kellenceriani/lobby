@@ -49,6 +49,10 @@ function sanitizeSettings(input) {
     cleaned.plotTwists = settings.plotTwists;
   }
 
+  if (typeof settings.noFinalScenarioTwist === 'boolean') {
+    cleaned.noFinalScenarioTwist = settings.noFinalScenarioTwist;
+  }
+
   if (typeof settings.maxPlayers === 'number') {
     cleaned.maxPlayers = Math.min(6, Math.max(3, Math.floor(settings.maxPlayers)));
   }

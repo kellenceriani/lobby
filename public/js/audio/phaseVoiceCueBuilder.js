@@ -7,6 +7,16 @@ import {
   buildFallbackRound4PreludeLine
 } from './phaseVoiceCueFallbacks.js';
 
+function isDisabledContextToken(value = '') {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) return true;
+  return normalized === 'NO PLOT TWIST'
+    || normalized === 'NO FINAL SCENARIO'
+    || normalized === 'NO FINAL TWIST'
+    || normalized === 'NONE'
+    || normalized === 'N/A';
+}
+
 export function buildPhaseVoiceCuesWithState(kind = '', data = {}, gameState = {}) {
   const safe = data && typeof data === 'object' ? data : {};
   const gs = gameState && typeof gameState === 'object' ? gameState : {};
@@ -74,7 +84,7 @@ export function buildPhaseVoiceCuesWithState(kind = '', data = {}, gameState = {
   }
 
   if (kindKey === 'twist') {
-    if (!twist) return [];
+    if (!twist || isDisabledContextToken(twist)) return [];
     return [{
       type: 'twist',
       text: buildFallbackTwistLine(twist, roundNumber),
@@ -88,7 +98,7 @@ export function buildPhaseVoiceCuesWithState(kind = '', data = {}, gameState = {
 
   if (kindKey === 'round4start') {
     const cues = [];
-    if (scenario) {
+    if (scenario && !isDisabledContextToken(scenario)) {
       cues.push({
         type: 'round4',
         text: `Scenario: ${scenario}.`,
@@ -99,7 +109,7 @@ export function buildPhaseVoiceCuesWithState(kind = '', data = {}, gameState = {
         dedupeKey: `round4:start:scenario:${(scenario || '').toLowerCase()}`
       });
     }
-    if (twist) {
+    if (twist && !isDisabledContextToken(twist)) {
       const spokenTwist = String(twist || '').split('|')[0].trim();
       if (spokenTwist) {
         cues.push({

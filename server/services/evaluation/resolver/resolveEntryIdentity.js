@@ -341,12 +341,34 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   pepsimax: ['Pepsi Max', 'Pepsi Zero Sugar'],
   zeldabotw: ['The Legend of Zelda: Breath of the Wild', 'Zelda'],
   yennefer: ['Yennefer of Vengerberg', 'Yennefer'],
-  thorinoakenshield: ['Thorin Oakenshield', 'Thorin']
+  thorinoakenshield: ['Thorin Oakenshield', 'Thorin'],
+  lightningmcqueen: ['Lightning McQueen', 'Cars (film)'],
+  dochudson: ['Doc Hudson', 'Hudson Hornet', 'Cars (film)'],
+  theking: ['Strip Weathers', 'The King (Cars)', 'Cars (film)'],
+  racerx: ['Racer X', 'Speed Racer'],
+  mac5: ['Mach Five', 'Speed Racer'],
+  shawnwhite: ['Shaun White'],
+  babydriver: ['Baby (Baby Driver)', 'Baby Driver'],
+  turbo: ['Turbo (film)', 'Turbo (character)']
   ,
   hadesunderworld: ['Hades', 'Greek underworld', 'Underworld'],
   cybertron: ['Cybertron', 'Transformers'],
   wakandan: ['Wakanda', 'Wakandan'],
-  senate: ['Senate', 'Galactic Senate']
+  detectiveconan: ['Detective Conan', 'Case Closed', 'Conan Edogawa'],
+  detectivepikachu: ['Detective Pikachu (video game)', 'Detective Pikachu', 'Pikachu'],
+  perrytheplatypus: ['Perry the Platypus', 'Agent P', 'Phineas and Ferb'],
+  monkeyddragon: ['Monkey D. Dragon', 'Monkey D Dragon', 'One Piece'],
+  drwatson: ['Dr. Watson', 'John Watson', 'Doctor Watson'],
+  aceventura: ['Ace Ventura', 'Ace Ventura: Pet Detective'],
+  loidforger: ['Loid Forger', 'Twilight (Spy x Family)', 'Spy x Family'],
+  senate: ['Senate', 'Galactic Senate'],
+  margotrobbie: ['Margot Robbie', 'Margot Elise Robbie'],
+  natskisubaru: ['Natsuki Subaru', 'Subaru Natsuki', 'Re:Zero'],
+  natsukisubaru: ['Natsuki Subaru', 'Subaru Natsuki', 'Re:Zero'],
+  emiyashirou: ['Shirou Emiya', 'Fate/stay night', 'Fate series'],
+  kiritsugushirou: ['Kiritsugu Emiya', 'Fate/Zero', 'Fate series'],
+  charilechaplin: ['Charlie Chaplin'],
+  charliechaplin: ['Charlie Chaplin']
 };
 const RESOLUTION_ALIAS_OVERRIDES = {
   ironman: {
@@ -484,6 +506,46 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     queries: ['Nico Robin (One Piece)', 'Nico Robin', 'Robin (DC Comics)', 'Robin'],
     rejectTitles: ['Robin (disambiguation)'],
     allowTitles: ['Nico Robin (One Piece)', 'Nico Robin', 'Robin (DC Comics)', 'Robin']
+  },
+  lightningmcqueen: {
+    queries: ['Lightning McQueen', 'Lightning McQueen (Cars)'],
+    rejectTitles: ['Lightning McQueen (disambiguation)'],
+    allowTitles: ['Lightning McQueen', 'Lightning McQueen (Cars)']
+  },
+  dochudson: {
+    queries: ['Doc Hudson', 'Hudson Hornet', 'Cars (film)'],
+    rejectTitles: ['Doc Hudson (disambiguation)'],
+    allowTitles: ['Doc Hudson', 'Hudson Hornet']
+  },
+  theking: {
+    queries: ['Strip Weathers (Cars)', 'Strip Weathers', 'The King (Cars)', 'Cars (film)'],
+    rejectTitles: ['The King (disambiguation)'],
+    allowTitles: ['Strip Weathers (Cars)', 'Strip Weathers', 'The King (Cars)']
+  },
+  racerx: {
+    queries: ['Racer X', 'Speed Racer'],
+    rejectTitles: ['Racer X (disambiguation)'],
+    allowTitles: ['Racer X']
+  },
+  mac5: {
+    queries: ['Mach Five (Speed Racer)', 'Mach Five', 'Speed Racer'],
+    rejectTitles: ['Mac 5 (disambiguation)'],
+    allowTitles: ['Mach Five (Speed Racer)', 'Mach Five']
+  },
+  shawnwhite: {
+    queries: ['Shaun White'],
+    rejectTitles: ['Shawn White'],
+    allowTitles: ['Shaun White']
+  },
+  babydriver: {
+    queries: ['Baby (Baby Driver)', 'Baby Driver'],
+    rejectTitles: ['Baby (disambiguation)'],
+    allowTitles: ['Baby (Baby Driver)', 'Baby Driver']
+  },
+  turbo: {
+    queries: ['Turbo (film)', 'Turbo (character)'],
+    rejectTitles: ['Turbo (disambiguation)'],
+    allowTitles: ['Turbo (film)', 'Turbo (character)']
   },
   hulk: {
     queries: ['Hulk (Marvel Comics)', 'Hulk'],
@@ -1395,10 +1457,80 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     rejectTitles: ['Advanced Idea Mechanics'],
     allowTitles: ['Wakanda', 'Wakandan']
   },
+  detectiveconan: {
+    queries: ['Detective Conan', 'Case Closed', 'Conan Edogawa'],
+    rejectTitles: ['Detective Conan: Police Academy Arc', 'Detective Conan (disambiguation)'],
+    allowTitles: ['Detective Conan', 'Case Closed', 'Conan Edogawa']
+  },
+  detectivepikachu: {
+    queries: ['Detective Pikachu', 'Detective Pikachu (video game)', 'Detective Pikachu (film)'],
+    rejectTitles: ['Pikachu (disambiguation)'],
+    allowTitles: ['Detective Pikachu', 'Detective Pikachu (video game)', 'Detective Pikachu (film)']
+  },
+  perrytheplatypus: {
+    queries: ['Perry the Platypus', 'Agent P', 'Phineas and Ferb'],
+    rejectTitles: ['Platypus', 'Platypus (disambiguation)'],
+    allowTitles: ['Perry the Platypus', 'Agent P']
+  },
+  monkeyddragon: {
+    queries: ['Monkey D. Dragon', 'Monkey D Dragon', 'One Piece'],
+    rejectTitles: ['Monkey (character)', 'Monkey'],
+    allowTitles: ['Monkey D. Dragon', 'Monkey D Dragon']
+  },
+  drwatson: {
+    queries: ['Dr. Watson', 'John Watson', 'Doctor Watson'],
+    rejectTitles: ['Watson (disambiguation)'],
+    allowTitles: ['Dr. Watson', 'John Watson', 'Doctor Watson']
+  },
+  aceventura: {
+    queries: ['Ace Ventura', 'Ace Ventura: Pet Detective'],
+    rejectTitles: ['Ace Ventura (disambiguation)'],
+    allowTitles: ['Ace Ventura', 'Ace Ventura: Pet Detective']
+  },
+  loidforger: {
+    queries: ['Loid Forger', 'Twilight (Spy x Family)', 'Spy x Family'],
+    rejectTitles: ['Loid (disambiguation)'],
+    allowTitles: ['Loid Forger', 'Twilight (Spy x Family)']
+  },
   bmo: {
     queries: ['BMO (Adventure Time)', 'Adventure Time'],
     rejectTitles: ['Bank of Montreal', 'Islands (miniseries)'],
     allowTitles: ['BMO (Adventure Time)', 'Adventure Time']
+  },
+  margotrobbie: {
+    queries: ['Margot Robbie', 'Margot Elise Robbie'],
+    rejectTitles: ['Margot', 'Margot (disambiguation)'],
+    allowTitles: ['Margot Robbie', 'Margot Elise Robbie']
+  },
+  natskisubaru: {
+    queries: ['Natsuki Subaru', 'Subaru Natsuki', 'Re:Zero'],
+    rejectTitles: ['Subaru', 'Subaru (disambiguation)', 'Subaru Corporation', 'Subaru (name)'],
+    allowTitles: ['Natsuki Subaru', 'Subaru Natsuki']
+  },
+  natsukisubaru: {
+    queries: ['Natsuki Subaru', 'Subaru Natsuki', 'Re:Zero'],
+    rejectTitles: ['Subaru', 'Subaru (disambiguation)', 'Subaru Corporation', 'Subaru (name)'],
+    allowTitles: ['Natsuki Subaru', 'Subaru Natsuki']
+  },
+  emiyashirou: {
+    queries: ['Shirou Emiya', 'Fate/stay night'],
+    rejectTitles: ['Bishōjo game', 'Bishoujo game', 'Visual novel'],
+    allowTitles: ['Shirou Emiya']
+  },
+  kiritsugushirou: {
+    queries: ['Kiritsugu Emiya', 'Fate/Zero'],
+    rejectTitles: ['Shirou Emiya', 'Bishōjo game', 'Bishoujo game', 'Visual novel'],
+    allowTitles: ['Kiritsugu Emiya']
+  },
+  charilechaplin: {
+    queries: ['Charlie Chaplin'],
+    rejectTitles: ['Chaplin (disambiguation)'],
+    allowTitles: ['Charlie Chaplin']
+  },
+  charliechaplin: {
+    queries: ['Charlie Chaplin'],
+    rejectTitles: ['Chaplin (disambiguation)'],
+    allowTitles: ['Charlie Chaplin']
   }
 };
 
@@ -2026,7 +2158,7 @@ async function tryBackfillImage(character, info, fetchOptions = {}) {
 async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
   if (!info || !info.imageSynthetic) return info;
   const mode = String((fetchOptions && fetchOptions.mode) || '').toLowerCase();
-  if (mode === 'round') return info;
+  if (mode === 'round' && !fetchOptions.roundQualityPass) return info;
   const confidence = Number(info && info.confidence);
   if (Number.isFinite(confidence) && confidence < 0.32) return info;
   const compact = canonicalizeName((info && (info.title || info.name)) || character);
@@ -2088,7 +2220,6 @@ async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
 async function tryUpgradeLowFidelityIdentity(character, info, fetchOptions = {}) {
   if (!info || typeof info !== 'object') return info;
   const mode = String((fetchOptions && fetchOptions.mode) || '').toLowerCase();
-  if (mode === 'round') return info;
 
   const source = String(info.source || '').toLowerCase();
   const title = String(info.title || '').trim();
@@ -2102,8 +2233,21 @@ async function tryUpgradeLowFidelityIdentity(character, info, fetchOptions = {})
     || (titleCompact && (IMAGE_BACKFILL_ALIAS_HINTS[titleCompact] || RESOLUTION_ALIAS_OVERRIDES[titleCompact]))
   );
   const phraseProfile = buildResolverInputProfile(character);
-  const lowFidelity = Boolean(
+  const roundRecoverable = mode === 'round' && (
     info.timeoutFallback
+    || source.includes('fast-fallback')
+    || (
+      fetchOptions.roundQualityPass === true
+      && (
+        (source === 'local-index' && (genericSingleToken || hasAliasHint))
+        || (info.imageSynthetic && lowConfidence)
+      )
+    )
+  );
+  if (mode === 'round' && !roundRecoverable) return info;
+  const lowFidelity = Boolean(
+    roundRecoverable
+    || info.timeoutFallback
     || source.includes('fast-fallback')
     || (source === 'local-index' && genericSingleToken)
     || (mode === 'final' && source === 'local-index' && hasAliasHint)
@@ -2136,6 +2280,7 @@ async function tryUpgradeLowFidelityIdentity(character, info, fetchOptions = {})
     if (strongAliasForPhrase) return aliasUpgraded;
   }
   if (!upgraded || upgraded === info) {
+    if (mode === 'round') return info;
     upgraded = await withTimeout(
       tryGenericIdentityUpgrade(character, info, {
         ...fetchOptions,
@@ -2280,6 +2425,93 @@ function getGenericUpgradeHintSets(character) {
   return {
     contextHints: Array.from(new Set(contextHints)).slice(0, 4),
     entityHints: Array.from(new Set(entityHints)).slice(0, 4)
+  };
+}
+
+function buildCategoryFetchHints(categoryContext = null) {
+  const ctx = categoryContext && typeof categoryContext === 'object' ? categoryContext : {};
+  const id = String(ctx.id || '').toLowerCase();
+  const family = String(ctx.family || '').toLowerCase();
+  const label = String(ctx.name || ctx.displayName || '').toLowerCase();
+  const text = `${id} ${family} ${label}`.trim();
+  if (!text) return { contextHints: [], entityHints: [] };
+
+  const contextHints = [];
+  const entityHints = [];
+  const genericHintStop = new Set(['with', 'from', 'into', 'over', 'under', 'mode', 'category', 'categories', 'group']);
+  const push = (target, values = []) => {
+    values.forEach((value) => {
+      const token = String(value || '').trim().toLowerCase();
+      if (!token || token.length < 3) return;
+      target.push(token);
+    });
+  };
+
+  if (id.includes('detective') || id.includes('investigator') || label.includes('detective')) {
+    push(contextHints, ['investigation', 'crime', 'mystery', 'forensics']);
+    push(entityHints, ['detective', 'investigator', 'fictional character', 'person']);
+  }
+  if (id.includes('aircraft') || id.includes('pilot') || id.includes('aviator')) {
+    push(contextHints, ['aviation', 'flight', 'aircraft', 'aerospace']);
+    push(entityHints, ['aircraft', 'pilot', 'vehicle']);
+  }
+  if (id.includes('spacecraft') || id.includes('aerospace')) {
+    push(contextHints, ['spaceflight', 'orbital', 'launch vehicle', 'mission']);
+    push(entityHints, ['spacecraft', 'vehicle', 'system']);
+  }
+  if (id.includes('robot') || id.includes('ai') || id.includes('comput') || id.includes('cyber')) {
+    push(contextHints, ['technology', 'computing', 'automation', 'engineering']);
+    push(entityHints, ['technology', 'device', 'system']);
+  }
+  if (id.includes('medical') || id.includes('biotech') || id.includes('genetic')) {
+    push(contextHints, ['medicine', 'clinical', 'healthcare', 'biomedical']);
+    push(entityHints, ['person', 'medical', 'equipment', 'technology']);
+  }
+  if (id.includes('sport') || id.includes('athlete') || id.includes('martial') || id.includes('combat')) {
+    push(contextHints, ['sports', 'competition', 'training', 'championship']);
+    push(entityHints, ['athlete', 'person', 'team']);
+  }
+  if (id.includes('chef') || id.includes('culinary') || id.includes('cuisine')) {
+    push(contextHints, ['food', 'dish', 'culinary', 'restaurant']);
+    push(entityHints, ['food', 'dish', 'person']);
+  }
+  if (id.includes('city') || id.includes('environment') || id.includes('site')) {
+    push(contextHints, ['location', 'geography', 'landmark', 'environment']);
+    push(entityHints, ['place', 'landmark', 'region']);
+  }
+  if (id.includes('deities') || id.includes('mythic')) {
+    push(contextHints, ['mythology', 'legend', 'folklore', 'pantheon']);
+    push(entityHints, ['mythological figure', 'creature', 'deity']);
+  }
+  if (id.includes('superhero') || id.includes('villain') || id.includes('anime') || id.includes('franchise')) {
+    push(contextHints, ['fictional', 'franchise', 'character', 'canon']);
+    push(entityHints, ['fictional character', 'character', 'franchise']);
+  }
+  if (family.includes('vehicles')) {
+    push(contextHints, ['transport', 'vehicle', 'navigation']);
+    push(entityHints, ['vehicle', 'transport']);
+  } else if (family.includes('science')) {
+    push(contextHints, ['science', 'research', 'engineering']);
+    push(entityHints, ['technology', 'system', 'person']);
+  } else if (family.includes('history')) {
+    push(contextHints, ['history', 'politics', 'historical']);
+    push(entityHints, ['person', 'event', 'place']);
+  } else if (family.includes('media') || family.includes('fiction')) {
+    push(contextHints, ['media', 'fictional', 'franchise']);
+    push(entityHints, ['character', 'fictional character', 'person']);
+  }
+
+  const genericTokens = text
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !genericHintStop.has(token));
+  push(contextHints, genericTokens.slice(0, 4));
+  push(entityHints, genericTokens.slice(0, 3));
+
+  return {
+    contextHints: Array.from(new Set(contextHints)).slice(0, 6),
+    entityHints: Array.from(new Set(entityHints)).slice(0, 6)
   };
 }
 
@@ -2871,14 +3103,35 @@ function buildFetchOptions(character, options = {}, scenario, twist) {
   const fetchContext = options && options.fetchContext && typeof options.fetchContext === 'object'
     ? options.fetchContext
     : {};
+  const hasOwn = (key) => Boolean(options && Object.prototype.hasOwnProperty.call(options, key));
+  const defaultRoundQualityPass = ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.CONTEXT_ROUND_QUALITY_PASS || 'false').toLowerCase()
+  );
+  const roundQualityPass = hasOwn('roundQualityPass')
+    ? Boolean(options.roundQualityPass)
+    : Boolean(options && options.evaluationMode === 'round' && defaultRoundQualityPass);
+
+  const categoryHintSeed = buildCategoryFetchHints(
+    (options && options.categoryContext && typeof options.categoryContext === 'object')
+      ? options.categoryContext
+      : null
+  );
+  const mergedContextHints = Array.from(new Set([
+    ...(Array.isArray(fetchContext.contextHints) ? fetchContext.contextHints : []),
+    ...categoryHintSeed.contextHints
+  ])).slice(0, 6);
+  const mergedEntityHints = Array.from(new Set([
+    ...(Array.isArray(fetchContext.entityHints) ? fetchContext.entityHints : []),
+    ...categoryHintSeed.entityHints
+  ])).slice(0, 6);
 
   return {
     character,
     mode: options && options.evaluationMode ? options.evaluationMode : 'context',
     forceRefresh: Boolean(options && options.forceRefresh),
     fetchCacheTtlMs: Number(options && options.fetchCacheTtlMs) || 0,
-    contextHints: Array.isArray(fetchContext.contextHints) ? fetchContext.contextHints : [],
-    entityHints: Array.isArray(fetchContext.entityHints) ? fetchContext.entityHints : [],
+    contextHints: mergedContextHints,
+    entityHints: mergedEntityHints,
     scenario: fetchContext.scenario || scenario,
     twist: fetchContext.twist || twist,
     originalScenario: fetchContext.originalScenario || options.originalScenario || scenario,
@@ -2888,20 +3141,28 @@ function buildFetchOptions(character, options = {}, scenario, twist) {
       ...(Array.isArray(options && options.roundPool) ? options.roundPool : []),
       ...(Array.isArray(options && options.teamPool) ? options.teamPool : [])
     ].filter(Boolean).slice(0, 40),
-    fastRoundMode: options && Object.prototype.hasOwnProperty.call(options, 'fastRoundMode')
+    fastRoundMode: hasOwn('fastRoundMode')
       ? Boolean(options.fastRoundMode)
-      : Boolean(options && options.evaluationMode === 'round'),
-    skipImageEnrichment: options && Object.prototype.hasOwnProperty.call(options, 'skipImageEnrichment')
+      : Boolean(options && options.evaluationMode === 'round' && !roundQualityPass),
+    roundQualityPass,
+    skipImageEnrichment: hasOwn('skipImageEnrichment')
       ? Boolean(options.skipImageEnrichment)
-      : Boolean(options && options.evaluationMode === 'round'),
-    skipImageBackfill: options && Object.prototype.hasOwnProperty.call(options, 'skipImageBackfill')
+      : Boolean(options && options.evaluationMode === 'round' && !roundQualityPass),
+    skipImageBackfill: hasOwn('skipImageBackfill')
       ? Boolean(options.skipImageBackfill)
-      : Boolean(options && options.evaluationMode === 'round'),
+      : Boolean(options && options.evaluationMode === 'round' && !roundQualityPass),
     skipIdentityUpgrade: Boolean(options && options.skipIdentityUpgrade),
-    skipExternalFactEnrichment: options && Object.prototype.hasOwnProperty.call(options, 'skipExternalFactEnrichment')
+    skipExternalFactEnrichment: hasOwn('skipExternalFactEnrichment')
       ? Boolean(options.skipExternalFactEnrichment)
-      : false,
+      : Boolean(options && options.evaluationMode === 'round'),
     skipSyntheticImageUpgrade: Boolean(options && options.skipSyntheticImageUpgrade),
+    fastAliasOverride: Boolean(options && options.fastAliasOverride),
+    aliasOverrideBudgetMs: Number(options && options.aliasOverrideBudgetMs) || undefined,
+    imageBackfillTimeoutMs: Number(options && options.imageBackfillTimeoutMs) || undefined,
+    imageBackfillBudgetMs: Number(options && options.imageBackfillBudgetMs) || undefined,
+    maxImageBackfillQueries: Number(options && options.maxImageBackfillQueries) || undefined,
+    preferSummaryFirst: hasOwn('preferSummaryFirst') ? Boolean(options.preferSummaryFirst) : undefined,
+    identityUpgradeBudgetMs: Number(options && options.identityUpgradeBudgetMs) || undefined,
     roundResolveTimeoutMs: Number(options && options.roundResolveTimeoutMs) || undefined,
     roundAliasOverrideTimeoutMs: Number(options && options.roundAliasOverrideTimeoutMs) || undefined,
     externalFactTimeoutMs: Number(options && options.externalFactTimeoutMs) || undefined
@@ -3426,6 +3687,68 @@ function applyKnownResolutionPatches(character, info) {
     };
   }
 
+  if (compact === 'dochudson' && !/doc hudson/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Doc Hudson',
+      description: 'Doc Hudson is the veteran racer and mentor from Pixar\'s Cars, known for racing experience, discipline, precision driving, and tactical coaching under pressure.',
+      imageUrl: /hudson hornet|cars/i.test(`${title} ${String(safeInfo.description || '')}`) ? safeInfo.imageUrl : null,
+      imageSynthetic: /hudson hornet|cars/i.test(`${title} ${String(safeInfo.description || '')}`)
+        ? Boolean(safeInfo.imageSynthetic)
+        : true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.82),
+      confidenceBand: 'high'
+    };
+  }
+
+  if (compact === 'mac5' && !/mach five|speed racer/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Mach Five',
+      description: 'The Mach Five is Speed Racer\'s iconic high-performance race car, known for specialized gadgets, speed, and precision maneuvering in dangerous competitions.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.78),
+      confidenceBand: 'medium'
+    };
+  }
+
+  if (compact === 'theking' && !/strip weathers|cars/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Strip Weathers',
+      description: 'Strip "The King" Weathers is a legendary race car from Pixar\'s Cars, known for elite track performance, consistency, and veteran leadership.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.8),
+      confidenceBand: 'high'
+    };
+  }
+
+  if (compact === 'turbo' && !/turbo \(film\)|animated film|snail|dreamworks/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Turbo (film character)',
+      description: 'Turbo is the speed-powered snail protagonist from DreamWorks\' Turbo, associated with acceleration, agility bursts, and underdog racing performance.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.78),
+      confidenceBand: 'medium'
+    };
+  }
+
+  if (compact === 'babydriver' && !/baby driver|2017 action film|ansel elgort|edgar wright/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Baby (Baby Driver)',
+      description: 'Baby is the precision getaway driver protagonist from the film Baby Driver, associated with high-speed control, timing, and evasive tactical driving.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.78),
+      confidenceBand: 'medium'
+    };
+  }
+
   if (compact === 'billiee' && /billie eilish/i.test(`${title} ${String(safeInfo.description || '')}`)) {
     return {
       ...safeInfo,
@@ -3735,6 +4058,101 @@ function applyKnownResolutionPatches(character, info) {
       ...safeInfo,
       title: /peter parker/i.test(title) ? title : 'Peter Parker',
       description: `${String(safeInfo.description || '').replace(/\s+/g, ' ').trim()} Peter Parker is Spider-Man, a superhuman hero with agility, strength, rapid reflexes, scientific intelligence, rescue experience, and team-coordination leadership under pressure.`.trim()
+    };
+  }
+
+  if (compact === 'detectiveconan' && (/police academy arc/i.test(title) || /arc/i.test(title))) {
+    return {
+      ...safeInfo,
+      title: 'Detective Conan',
+      description: 'Detective Conan (Case Closed) centers on Conan Edogawa, a prodigy detective known for deduction, forensic reasoning, and high-volume case solving.',
+      imageUrl: safeInfo.imageUrl || null,
+      imageSynthetic: Boolean(safeInfo.imageSynthetic)
+    };
+  }
+
+  if (compact === 'perrytheplatypus' && /^platypus$/i.test(title)) {
+    return {
+      ...safeInfo,
+      title: 'Perry the Platypus',
+      description: 'Perry the Platypus (Agent P) is an undercover investigator/operative from Phineas and Ferb known for surveillance, infiltration, and mission problem-solving.',
+      imageUrl: null,
+      imageSynthetic: true
+    };
+  }
+
+  if (compact === 'monkeyddragon' && /^monkey(\s|\b)/i.test(title) && !/monkey d\.? dragon/i.test(title)) {
+    return {
+      ...safeInfo,
+      title: 'Monkey D. Dragon',
+      description: 'Monkey D. Dragon is a One Piece revolutionary leader and strategist, distinct from generic monkey entries.',
+      imageUrl: null,
+      imageSynthetic: true
+    };
+  }
+
+  if (compact === 'margotrobbie' && (!/margot robbie|margot elise robbie/i.test(`${title} ${String(safeInfo.description || '')}`) || /^margot$/i.test(title))) {
+    return {
+      ...safeInfo,
+      title: 'Margot Robbie',
+      description: 'Margot Robbie is an Australian actress and producer known for high-profile film roles and performance-led screen work.',
+      imageUrl: /margot robbie|margot elise robbie/i.test(`${title} ${String(safeInfo.description || '')}`)
+        ? (safeInfo.imageUrl || null)
+        : null,
+      imageSynthetic: /margot robbie|margot elise robbie/i.test(`${title} ${String(safeInfo.description || '')}`)
+        ? Boolean(safeInfo.imageSynthetic)
+        : true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.82),
+      confidenceBand: 'high'
+    };
+  }
+
+  if ((compact === 'natskisubaru' || compact === 'natsukisubaru')
+    && !/natsuki subaru|subaru natsuki|re:zero|rezero|re zero/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Natsuki Subaru',
+      description: 'Natsuki Subaru is the central protagonist of Re:Zero, known for persistence, adaptation under repeated failure loops, and survival-focused decision-making.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.8),
+      confidenceBand: 'high'
+    };
+  }
+
+  if (compact === 'emiyashirou' && !/shirou emiya|emiya shirou|fate\/stay night|fate series|fate\/zero/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Shirou Emiya',
+      description: 'Shirou Emiya is a Fate/stay night protagonist known for idealistic resolve, tactical adaptability, and blade-projection combat specialization.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.8),
+      confidenceBand: 'medium'
+    };
+  }
+
+  if (compact === 'kiritsugushirou' && !/kiritsugu emiya|fate\/zero|fate series/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Kiritsugu Emiya',
+      description: 'Kiritsugu Emiya is a Fate/Zero strategist and assassin known for pragmatic planning, precision execution, and high-stakes decision-making.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.8),
+      confidenceBand: 'medium'
+    };
+  }
+
+  if ((compact === 'charilechaplin' || compact === 'charliechaplin') && !/charlie chaplin|charles chaplin/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Charlie Chaplin',
+      description: 'Charlie Chaplin was an iconic actor, filmmaker, and comedian of the silent-film era known for visual storytelling and performance craft.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.82),
+      confidenceBand: 'high'
     };
   }
 

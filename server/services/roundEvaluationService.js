@@ -25,8 +25,18 @@ const ROUND_INTEL_TUNING = {
   maxIntelBonus: 12
 };
 
-const ROUND_INTEL_PLAYER_CONCURRENCY = Math.max(1, Math.min(6, Number(process.env.ROUND_INTEL_PLAYER_CONCURRENCY) || 3));
+const ROUND_INTEL_PLAYER_CONCURRENCY = Math.max(1, Math.min(6, Number(process.env.ROUND_INTEL_PLAYER_CONCURRENCY) || 2));
 const ROUND_INTEL_ENTRY_CONCURRENCY = Math.max(1, Math.min(6, Number(process.env.ROUND_INTEL_ENTRY_CONCURRENCY) || 2));
+const ROUND_EVAL_QUALITY_MODE = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.ROUND_EVAL_QUALITY_MODE || 'false').toLowerCase()
+);
+const ROUND_FAST_RESOLVE_TIMEOUT_MS = Math.max(450, Number(process.env.ROUND_FAST_RESOLVE_TIMEOUT_MS) || 900);
+const ROUND_FAST_ALIAS_TIMEOUT_MS = Math.max(250, Number(process.env.ROUND_FAST_ALIAS_TIMEOUT_MS) || 380);
+const ROUND_QUALITY_RESOLVE_TIMEOUT_MS = Math.max(1200, Number(process.env.ROUND_QUALITY_RESOLVE_TIMEOUT_MS) || 2600);
+const ROUND_QUALITY_ALIAS_TIMEOUT_MS = Math.max(350, Number(process.env.ROUND_QUALITY_ALIAS_TIMEOUT_MS) || 900);
+const ROUND_QUALITY_IMAGE_BACKFILL_TIMEOUT_MS = Math.max(550, Number(process.env.ROUND_QUALITY_IMAGE_BACKFILL_TIMEOUT_MS) || 1250);
+const ROUND_QUALITY_IMAGE_BACKFILL_BUDGET_MS = Math.max(700, Number(process.env.ROUND_QUALITY_IMAGE_BACKFILL_BUDGET_MS) || 1500);
+const ROUND_QUALITY_MAX_BACKFILL_QUERIES = Math.max(3, Number(process.env.ROUND_QUALITY_MAX_BACKFILL_QUERIES) || 6);
 
 async function mapWithConcurrency(items, concurrency, mapper) {
   const safeItems = Array.isArray(items) ? items : [];
@@ -127,15 +137,24 @@ function buildFailedEvaluation(character) {
   };
 }
 
-function buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex }) {
+function buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex, categoryContext }) {
   const draftedMeta = (Array.isArray(draftMeta) ? draftMeta : []).find((entry) =>
     entry && entry.character && String(entry.character).toLowerCase() === String(character).toLowerCase()
   );
 
-  return {
+  const base = {
     originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
     originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
     evaluationMode: 'round',
+    categoryContext: categoryContext || null,
+    fastRoundMode: true,
+    roundQualityPass: false,
+    roundResolveTimeoutMs: ROUND_FAST_RESOLVE_TIMEOUT_MS,
+    roundAliasOverrideTimeoutMs: ROUND_FAST_ALIAS_TIMEOUT_MS,
+    skipImageEnrichment: true,
+    skipImageBackfill: true,
+    skipSyntheticImageUpgrade: true,
+    skipExternalFactEnrichment: true,
     teamPool: Array.isArray(roster) ? roster : [],
     fetchContext: {
       scenario,
@@ -144,6 +163,22 @@ function buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, 
       originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
       draftedRound: (roundIndex || 0) + 1
     }
+  };
+
+  if (!ROUND_EVAL_QUALITY_MODE) return base;
+  return {
+    ...base,
+    fastRoundMode: false,
+    roundQualityPass: true,
+    skipExternalFactEnrichment: false,
+    roundResolveTimeoutMs: ROUND_QUALITY_RESOLVE_TIMEOUT_MS,
+    roundAliasOverrideTimeoutMs: ROUND_QUALITY_ALIAS_TIMEOUT_MS,
+    skipImageEnrichment: false,
+    skipImageBackfill: false,
+    skipSyntheticImageUpgrade: false,
+    imageBackfillTimeoutMs: ROUND_QUALITY_IMAGE_BACKFILL_TIMEOUT_MS,
+    imageBackfillBudgetMs: ROUND_QUALITY_IMAGE_BACKFILL_BUDGET_MS,
+    maxImageBackfillQueries: ROUND_QUALITY_MAX_BACKFILL_QUERIES
   };
 }
 
@@ -155,6 +190,7 @@ async function evaluatePlayerRoster({
   twist,
   roundIndex,
   roundPool,
+  categoryContext,
   onCharacterEvaluated
 }) {
   const batchRows = roster.map((character) => ({
@@ -162,7 +198,7 @@ async function evaluatePlayerRoster({
     scenario,
     twist,
     options: {
-      ...buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex }),
+      ...buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex, categoryContext }),
       roundPool
     }
   }));
@@ -184,7 +220,7 @@ async function evaluatePlayerRoster({
     return mapWithConcurrency(roster, ROUND_INTEL_ENTRY_CONCURRENCY, async (character) => {
       try {
         const evaluated = await evaluateCharacter(character, scenario, twist, {
-          ...buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex }),
+          ...buildRoundEvalOptions({ character, roster, draftMeta, scenario, twist, roundIndex, categoryContext }),
           roundPool
         });
         if (onCharacterEvaluated) {
@@ -218,6 +254,21 @@ async function evaluateRoundFromGame(game, roundIndex, options = {}) {
       Array.isArray(player && player.team) ? player.team.slice(0, 2).filter(Boolean) : []
     ))
     : [];
+  const categoryContext = game && game.lockedCategory && game.lockedCategory.id
+    ? {
+      enabled: true,
+      id: String(game.lockedCategory.id),
+      name: String(game.lockedCategory.displayName || game.lockedCategory.id),
+      family: String(game.lockedCategory.family || 'unknown'),
+      version: String(game && game.settings && game.settings.categoryVersion || game.lockedCategory.version || 'v1')
+    }
+    : {
+      enabled: false,
+      id: null,
+      name: null,
+      family: null,
+      version: String(game && game.settings && game.settings.categoryVersion || 'v1')
+    };
 
   await mapWithConcurrency(game.players, ROUND_INTEL_PLAYER_CONCURRENCY, async (player) => {
     const roster = Array.isArray(player.team) ? player.team.slice(0, 2) : [];
@@ -231,6 +282,7 @@ async function evaluateRoundFromGame(game, roundIndex, options = {}) {
       twist,
       roundIndex,
       roundPool,
+      categoryContext,
       onCharacterEvaluated
     });
 

@@ -137,6 +137,179 @@ function getScenarioDelta(evalData) {
   return 0;
 }
 
+function buildOvrDriverDescriptors(evalData) {
+  const ovrBreakdown = evalData && evalData.breakdown ? evalData.breakdown.ovrBreakdown : null;
+  if (!ovrBreakdown || typeof ovrBreakdown !== 'object') return [];
+
+  const rows = [];
+  const baseFromScore = Number(ovrBreakdown.baseFromScore);
+  const rarityBonus = Number(ovrBreakdown.rarityBonus);
+  const attributeBonus = Number(ovrBreakdown.attributeBonus);
+  const scenarioDelta = getScenarioDelta(evalData);
+
+  if (Number.isFinite(baseFromScore)) {
+    rows.push({
+      key: 'base',
+      tone: 'neutral',
+      text: `Base ${Math.round(baseFromScore)}`
+    });
+  }
+  if (Number.isFinite(rarityBonus)) {
+    rows.push({
+      key: 'rarity',
+      tone: rarityBonus >= 0 ? 'boost' : 'drag',
+      text: `Rarity ${signed(Math.round(rarityBonus))}`
+    });
+  }
+  if (Number.isFinite(attributeBonus)) {
+    rows.push({
+      key: 'attribute',
+      tone: attributeBonus >= 0 ? 'boost' : 'drag',
+      text: `Attribute ${signed(Math.round(attributeBonus))}`
+    });
+  }
+  if (Number.isFinite(scenarioDelta)) {
+    rows.push({
+      key: 'fit',
+      tone: scenarioDelta >= 0 ? 'boost' : 'drag',
+      text: `Fit ${signed(Math.round(scenarioDelta))}`
+    });
+  }
+
+  return rows;
+}
+
+function buildOvrDriverChipsHtml(evalData, { maxChips = 4 } = {}) {
+  const chips = buildOvrDriverDescriptors(evalData).slice(0, Math.max(1, Number(maxChips) || 4));
+  if (!chips.length) return '';
+  return chips.map((chip) => (
+    `<span class="eval-ovr-driver-chip ${escapeHtml(chip.tone)} ${escapeHtml(chip.key)}">${escapeHtml(chip.text)}</span>`
+  )).join('');
+}
+
+function normalizeCategoryVerdict(status = '') {
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+    .replace(/[^a-z_]/g, '');
+  const isInCategory = normalized === 'in_category'
+    || normalized === 'incategory'
+    || normalized === 'in';
+  const isBorderline = normalized === 'borderline'
+    || normalized === 'borderline_entry'
+    || normalized === 'borderlineentry';
+  const isOutCategory = normalized === 'not_in_category'
+    || normalized === 'notincategory'
+    || normalized === 'out_of_category'
+    || normalized === 'out';
+  if (isInCategory) {
+    return {
+      key: 'in_category',
+      label: 'IN CATEGORY',
+      tone: 'positive',
+      icon: '&#128077;'
+    };
+  }
+  if (isBorderline) {
+    return {
+      key: 'borderline',
+      label: 'BORDERLINE ENTRY',
+      tone: 'neutral',
+      icon: '&#129335;'
+    };
+  }
+  if (!isOutCategory && normalized.includes('borderline')) {
+    return {
+      key: 'borderline',
+      label: 'BORDERLINE ENTRY',
+      tone: 'neutral',
+      icon: '&#129335;'
+    };
+  }
+  if (!isOutCategory && normalized.includes('in_category') && !normalized.includes('not')) {
+    return {
+      key: 'in_category',
+      label: 'IN CATEGORY',
+      tone: 'positive',
+      icon: '&#128077;'
+    };
+  }
+  return {
+    key: 'not_in_category',
+    label: 'NOT IN CATEGORY',
+    tone: 'negative',
+    icon: '&#128078;'
+  };
+}
+
+function deriveCategoryVerdictFromNumbers(fit = 0, membership = 0, impact = 0) {
+  if (fit >= 67 && membership >= 58 && impact >= 0) return normalizeCategoryVerdict('in_category');
+  if (fit >= 45 || membership >= 32 || impact >= -4) return normalizeCategoryVerdict('borderline');
+  return normalizeCategoryVerdict('not_in_category');
+}
+
+function getCategoryVerdictFromEval(evalData) {
+  const scoreMeta = evalData && evalData.scoreMeta && typeof evalData.scoreMeta === 'object'
+    ? evalData.scoreMeta
+    : {};
+  const context = scoreMeta && scoreMeta.categoryContext && typeof scoreMeta.categoryContext === 'object'
+    ? scoreMeta.categoryContext
+    : null;
+  const fit = Number((context && context.categoryFit) || evalData && evalData.categoryFit) || 0;
+  const membership = Number((context && context.membershipConfidence) || evalData && evalData.categoryMembershipConfidence) || 0;
+  const impact = Number((context && context.netImpact) || evalData && evalData.categoryNetImpact) || 0;
+  const status = String(
+    (context && context.categoryStatus)
+    || (evalData && evalData.categoryStatus)
+    || ''
+  );
+  const statusLabelRaw = String(
+    (context && context.categoryStatusLabel)
+    || (evalData && evalData.categoryStatusLabel)
+    || ''
+  );
+  const explicit = status
+    ? normalizeCategoryVerdict(status)
+    : statusLabelRaw
+      ? normalizeCategoryVerdict(statusLabelRaw)
+      : deriveCategoryVerdictFromNumbers(fit, membership, impact);
+  const label = String(
+    statusLabelRaw
+    || explicit.label
+  );
+  return {
+    ...explicit,
+    label,
+    fit,
+    membership,
+    impact
+  };
+}
+
+function buildCategoryVerdictChip(verdict, { compact = false, className = '' } = {}) {
+  const safeVerdict = verdict && typeof verdict === 'object'
+    ? verdict
+    : normalizeCategoryVerdict('not_in_category');
+  const compactLabel = safeVerdict.key === 'in_category'
+    ? 'IN CATEGORY'
+    : safeVerdict.key === 'borderline'
+      ? 'BORDERLINE'
+      : 'NOT IN';
+  const classes = [
+    'eval-category-verdict-chip',
+    `tone-${safeVerdict.tone || 'neutral'}`,
+    compact ? 'is-compact' : '',
+    className || ''
+  ].filter(Boolean).join(' ');
+  return `
+    <span class="${classes}" data-category-status="${escapeHtml(safeVerdict.key || 'not_in_category')}">
+      <span class="eval-category-verdict-icon" aria-hidden="true">${safeVerdict.icon || ''}</span>
+      <span class="eval-category-verdict-label">${escapeHtml(compact ? compactLabel : (safeVerdict.label || 'NOT IN CATEGORY'))}</span>
+    </span>
+  `;
+}
+
 function getOVRTierFromValue(ovr) {
   if (ovr >= 99) return { tier: 'icon', label: 'Icon' };
   if (ovr >= 95) return { tier: 'legendary', label: 'Legendary' };
@@ -498,6 +671,22 @@ function triggerLoadingPriorityReveal(card) {
   window.setTimeout(() => card.classList.remove('is-updated'), 650);
 }
 
+function formatRound4ScenarioLabel(scenario) {
+  const raw = String(scenario || '').trim();
+  const normalized = raw.toUpperCase();
+  if (!raw || normalized === 'UNKNOWN SCENARIO') return 'Unknown scenario';
+  if (normalized === 'NO FINAL SCENARIO') return 'No final scenario (mode enabled)';
+  return raw;
+}
+
+function formatRound4TwistLabel(twist) {
+  const raw = String(twist || '').trim();
+  const normalized = raw.toUpperCase();
+  if (!raw || normalized === 'UNKNOWN TWIST') return 'Unknown twist';
+  if (normalized === 'NO PLOT TWIST' || normalized === 'NO FINAL TWIST') return 'No final twist (mode enabled)';
+  return raw;
+}
+
 function setLoadingBotContext(scenario, twist, speech, category = null) {
   const scenarioHeroEl = document.getElementById('evalLoadScenarioHero');
   const twistHeroEl = document.getElementById('evalLoadTwistHero');
@@ -507,8 +696,8 @@ function setLoadingBotContext(scenario, twist, speech, category = null) {
   const twistCard = twistHeroEl ? twistHeroEl.closest('.eval-priority-card') : null;
   const categoryCard = categoryHeroEl ? categoryHeroEl.closest('.eval-priority-card') : null;
 
-  if (scenario) round4State.loadingScenario = String(scenario);
-  if (twist) round4State.loadingTwist = String(twist);
+  if (scenario) round4State.loadingScenario = formatRound4ScenarioLabel(scenario);
+  if (twist) round4State.loadingTwist = formatRound4TwistLabel(twist);
   if (category != null && String(category || '').trim()) round4State.loadingCategory = String(category);
 
   const currentScenario = round4State.loadingScenario || 'Unknown scenario';
@@ -846,8 +1035,10 @@ function resetCinematicState() {
 }
 
 function initRound4Evaluation(data) {
-  const scenario = data && data.scenario ? data.scenario : 'Unknown scenario';
-  const twist = data && data.twist ? data.twist : 'Unknown twist';
+  const scenarioRaw = data && data.scenario ? data.scenario : 'Unknown scenario';
+  const twistRaw = data && data.twist ? data.twist : 'Unknown twist';
+  const scenario = formatRound4ScenarioLabel(scenarioRaw);
+  const twist = formatRound4TwistLabel(twistRaw);
   const lockedCategory = normalizeLockedCategory(data && data.lockedCategory ? data.lockedCategory : null);
   const finalTeams = data && data.finalTeams ? data.finalTeams : {};
 
@@ -880,7 +1071,7 @@ function initRound4Evaluation(data) {
   if (twistText) twistText.textContent = twist;
   if (categoryText) categoryText.textContent = getLockedCategoryLabel();
   if (causalityText) causalityText.textContent = 'Scenario sets the lane. Twist bends the lane. OVR shows who still dominates.';
-  setLoadingBotContext(scenario, twist, '', getLockedCategoryLabel());
+  setLoadingBotContext(scenarioRaw, twistRaw, '', getLockedCategoryLabel());
 
   const loading = document.getElementById('evalLoading');
   const loadingTitle = document.getElementById('evalLoadingTitle');
@@ -994,6 +1185,14 @@ function buildCinematicData() {
             ? `SH ${trustPct}%`
             : 'LG'
       };
+      const categoryVerdict = getCategoryVerdictFromEval(normalized);
+      normalized.evalCategoryStatus = categoryVerdict.key;
+      normalized.evalCategoryStatusLabel = categoryVerdict.label;
+      normalized.evalCategoryTone = categoryVerdict.tone;
+      normalized.evalCategoryIcon = categoryVerdict.icon;
+      normalized.evalCategoryFit = categoryVerdict.fit;
+      normalized.evalCategoryMembership = categoryVerdict.membership;
+      normalized.evalCategoryImpact = categoryVerdict.impact;
 
       queue.push({
         teamIndex,
@@ -1057,6 +1256,7 @@ function renderTeamBoards() {
       const evalData = placed.evalData;
       const image = resolveCharacterImage(evalData.imageUrl, evalData.character || 'No Portrait');
       const tierClass = getTierClassFromEval(evalData);
+      const ovrDriverChips = buildOvrDriverChipsHtml(evalData, { maxChips: 2 });
       return `
         <div class="eval-slot is-filled" data-team-index="${team.teamIndex}" data-slot-index="${slotIndex}">
           <button class="eval-docked-plaque ${tierClass}" type="button" data-eval-key="${escapeHtml(placed.key)}" aria-label="View OVR breakdown for ${escapeHtml(evalData.character || 'character')}">
@@ -1064,6 +1264,7 @@ function renderTeamBoards() {
             <span>
               <span class="eval-docked-name ${tierClass}">${escapeHtml(evalData.character || 'Unknown')}</span>
               <span class="eval-docked-ovr ${tierClass}">OVR ${Number(evalData.ovr) || 0} | ${escapeHtml(evalData.evalTraceBadge || 'LG')}</span>
+              <span class="eval-docked-drivers">${ovrDriverChips || '<span class="eval-ovr-driver-chip neutral">No OVR trace</span>'}</span>
             </span>
           </button>
         </div>
@@ -1117,6 +1318,13 @@ function renderActivePlaque() {
   const fitDelta = Number(evalData.fitDelta) || 0;
   const fitClass = fitDelta >= 0 ? 'fit-positive' : 'fit-negative';
   const image = resolveCharacterImage(evalData.imageUrl, evalData.character || 'No Portrait');
+  const ovrDriverChips = buildOvrDriverChipsHtml(evalData, { maxChips: 4 });
+  const categoryVerdict = getCategoryVerdictFromEval(evalData);
+  const categoryVerdictChip = buildCategoryVerdictChip(categoryVerdict, { className: 'eval-active-category-verdict' });
+  const categoryActive = Boolean(normalizeLockedCategory(round4State.lockedCategory));
+  const dynamicChip = categoryActive
+    ? categoryVerdictChip
+    : `<div class="eval-active-chip"><span>Trace (R/C)</span><strong>${Number(evalData.evalResolvePct) || 0}/${Number(evalData.evalContextPct) || 0}</strong></div>`;
 
   host.innerHTML = `
     <article id="evalActivePlaque" class="eval-active-plaque ${tierClass} reveal-tier-${getRevealTierFromEval(evalData)}" data-reveal-tier="${getRevealTierFromEval(evalData)}" aria-live="polite">
@@ -1137,9 +1345,13 @@ function renderActivePlaque() {
         </button>
         <div class="eval-active-chip"><span>Score</span><strong>${Number(evalData.score) || 0}</strong></div>
         <div class="eval-active-chip ${fitClass}"><span>Fit Delta</span><strong>${signed(fitDelta)}</strong></div>
+        ${dynamicChip}
         <div class="eval-active-chip"><span>Trust</span><strong>${Number(evalData.evalTrustPct) || 0}%</strong></div>
-        <div class="eval-active-chip"><span>Trace (R/C)</span><strong>${Number(evalData.evalResolvePct) || 0}/${Number(evalData.evalContextPct) || 0}</strong></div>
         <div class="eval-active-chip trace-${escapeHtml(String(evalData.evalRiskSeverity || 'low'))}"><span>Risk</span><strong>${escapeHtml(String(evalData.evalRiskSeverity || 'low').toUpperCase())}</strong></div>
+      </div>
+      <div class="eval-active-ovr-drivers" aria-label="Top OVR drivers">
+        <span class="eval-active-ovr-drivers-label">Why this OVR:</span>
+        ${ovrDriverChips || '<span class="eval-ovr-driver-chip neutral">Open OVR breakdown for details</span>'}
       </div>
     </article>
   `;
@@ -2500,15 +2712,26 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
       ? ownerName.split(/\s+/).filter(Boolean).map((part) => part[0]).join('').slice(0, 3).toUpperCase()
       : '';
     const isChampionMember = entry && entry.isChampionMember === true;
+    const categoryVerdict = getCategoryVerdictFromEval(entry || {});
+    const categoryChip = buildCategoryVerdictChip(categoryVerdict, { compact: true, className: 'eval-finale-elite-category' });
+    const slotTitle = `${safeName}${ownerName ? ` | ${escapeHtml(ownerName)}` : ''} | ${escapeHtml(categoryVerdict.label)} (${Math.round(categoryVerdict.fit)}/100)`;
     return `
-      <div class="eval-finale-elite-slot ${isChampionMember ? 'is-champion-member' : ''}" data-elite-index="${index}" aria-label="${safeName} profile" title="${safeName}${ownerName ? ` | ${escapeHtml(ownerName)}` : ''}">
+      <div class="eval-finale-elite-slot ${isChampionMember ? 'is-champion-member' : ''}" data-elite-index="${index}" aria-label="${safeName} profile" title="${slotTitle}">
         <img src="${escapeHtml(imageUrl)}" alt="${safeName}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${buildMissingCharacterImage('No Portrait')}';">
         <span class="eval-finale-elite-ovr" aria-hidden="true"><small>OVR</small><strong>${eliteOVR}</strong></span>
         <span class="eval-finale-elite-rank">#${eliteRank}</span>
         ${ownerAbbr ? `<span class="eval-finale-elite-owner">${escapeHtml(ownerAbbr)}</span>` : ''}
+        ${categoryChip}
       </div>
     `;
   }).join('');
+  const categoryLegend = `
+    <div class="eval-finale-category-legend" aria-label="Category verdict legend">
+      ${buildCategoryVerdictChip(normalizeCategoryVerdict('in_category'), { className: 'eval-finale-category-legend-item' })}
+      ${buildCategoryVerdictChip(normalizeCategoryVerdict('borderline'), { className: 'eval-finale-category-legend-item' })}
+      ${buildCategoryVerdictChip(normalizeCategoryVerdict('not_in_category'), { className: 'eval-finale-category-legend-item' })}
+    </div>
+  `;
 
   let finaleMount = container.querySelector('.eval-finale-mount');
   if (!finaleMount) {
@@ -2596,8 +2819,9 @@ function renderRound4FinaleCeremony(gameEndedData = {}) {
               <section class="eval-finale-elite-strip" aria-label="Top 6 Profiles preview">
                 <div class="eval-finale-section-head">
                   <strong>Top 6 Profiles</strong>
-                  <small>OVR showcase (score champion remains separate)</small>
+                  <small>OVR showcase plus category verdict per card</small>
                 </div>
+                ${categoryLegend}
                 <div class="eval-finale-elite-grid">${eliteSlots}</div>
               </section>
             </div>

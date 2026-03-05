@@ -19,9 +19,22 @@ function hasUsableTwist(twist) {
   return normalized && normalized !== 'NO PLOT TWIST' && normalized !== 'NONE' && normalized !== 'N/A';
 }
 
-function buildWeightProfile({ evaluationMode = 'round', currentTwist, originalTwist } = {}) {
+function hasUsableScenario(scenario) {
+  const normalized = String(scenario || '').trim().toUpperCase();
+  return Boolean(normalized && normalized !== 'NO FINAL SCENARIO' && normalized !== 'NONE' && normalized !== 'N/A');
+}
+
+function buildWeightProfile({
+  evaluationMode = 'round',
+  currentScenario,
+  currentTwist,
+  originalTwist,
+  disableCurrentContext = false
+} = {}) {
   const finalMode = evaluationMode === 'final';
-  const hasCurrentTwist = hasUsableTwist(currentTwist);
+  const hasCurrentScenario = hasUsableScenario(currentScenario);
+  const disableFinalContext = Boolean(finalMode && (disableCurrentContext === true || !hasCurrentScenario));
+  const hasCurrentTwist = !disableFinalContext && hasUsableTwist(currentTwist);
   const hasOriginalTwist = hasUsableTwist(originalTwist);
 
   if (!finalMode) {
@@ -43,6 +56,28 @@ function buildWeightProfile({ evaluationMode = 'round', currentTwist, originalTw
         baseAbility: 0.2,
         category: 0,
         restraints: 0.1
+      };
+  }
+
+  if (disableFinalContext) {
+    return hasOriginalTwist
+      ? {
+        carryoverScenario: 0.22,
+        carryoverTwist: 0.18,
+        currentScenario: 0,
+        currentTwist: 0,
+        baseAbility: 0.20,
+        category: 0.30,
+        restraints: 0.10
+      }
+      : {
+        carryoverScenario: 0.40,
+        carryoverTwist: 0,
+        currentScenario: 0,
+        currentTwist: 0,
+        baseAbility: 0.20,
+        category: 0.30,
+        restraints: 0.10
       };
   }
 
@@ -143,13 +178,15 @@ function computeWeightedOverall(scores = {}, profile = {}, controls = {}) {
     ((normalized.categoryFit - 50) * 0.20 * categoryWeightScale) +
     ((normalized.baseAbility - 55) * 0.1) +
     ((restraintSource - 50) * 0.03);
+  const scenarioWeightActive = totalScenarioWeight > 0;
+  const twistWeightActive = totalTwistWeight > 0;
   let synergyBonus = 0;
-  if (normalized.baseAbility >= 65 && normalized.currentScenarioFit >= 65) synergyBonus += 3;
-  if ((Number(profile.currentTwist) || 0) > 0 && normalized.baseAbility >= 60 && normalized.currentTwistFit >= 60) synergyBonus += 2;
-  if (normalized.currentScenarioFit >= 78 && normalized.currentTwistFit >= 68) synergyBonus += 3;
-  if (categoryWeight > 0 && normalized.categoryFit >= 82 && normalized.currentScenarioFit >= 68) synergyBonus += 3;
+  if (scenarioWeightActive && normalized.baseAbility >= 65 && blendedScenarioFit >= 65) synergyBonus += 3;
+  if (twistWeightActive && normalized.baseAbility >= 60 && blendedTwistFit >= 60) synergyBonus += 2;
+  if (scenarioWeightActive && twistWeightActive && blendedScenarioFit >= 78 && blendedTwistFit >= 68) synergyBonus += 3;
+  if (categoryWeight > 0 && scenarioWeightActive && normalized.categoryFit >= 82 && blendedScenarioFit >= 68) synergyBonus += 3;
   if (categoryWeight > 0 && normalized.categoryFit <= 42) synergyBonus -= 5;
-  if (normalized.currentScenarioFit < 45 && normalized.currentTwistFit < 45) synergyBonus -= 4;
+  if (scenarioWeightActive && twistWeightActive && blendedScenarioFit < 45 && blendedTwistFit < 45) synergyBonus -= 4;
   if (normalized.baseAbility < 45 && overallPct < 50) synergyBonus -= 3;
   let ovr99 = clamp(Math.round(baseCurve + fitDelta + synergyBonus), 0, 99);
 
@@ -157,12 +194,30 @@ function computeWeightedOverall(scores = {}, profile = {}, controls = {}) {
   const confidenceOverall = toPercent(controls.confidenceOverall, 1);
   const riskFlags = new Set((Array.isArray(controls.riskFlags) ? controls.riskFlags : []).map((v) => String(v || '').toLowerCase()));
   const categoryActive = controls.categoryActive === true && categoryWeight > 0;
+  const categoryStatus = String(controls.categoryStatus || '').trim().toLowerCase();
   let dynamicCap = 99;
   if (categoryActive) {
-    if (normalized.categoryFit < 35) dynamicCap = 74;
-    else if (normalized.categoryFit < 50) dynamicCap = 84;
-    else if (normalized.categoryFit < 65) dynamicCap = 91;
-    else dynamicCap = 97;
+    if (categoryStatus === 'not_in_category') {
+      if (normalized.categoryFit < 30) dynamicCap = 64;
+      else if (normalized.categoryFit < 42) dynamicCap = 68;
+      else dynamicCap = 72;
+    } else if (categoryStatus === 'borderline') {
+      if (normalized.categoryFit < 45) dynamicCap = 78;
+      else if (normalized.categoryFit < 60) dynamicCap = 84;
+      else dynamicCap = 88;
+    } else if (categoryStatus === 'in_category') {
+      if (normalized.categoryFit < 45) dynamicCap = 86;
+      else if (normalized.categoryFit < 60) dynamicCap = 92;
+      else dynamicCap = 97;
+    } else if (normalized.categoryFit < 35) {
+      dynamicCap = 74;
+    } else if (normalized.categoryFit < 50) {
+      dynamicCap = 84;
+    } else if (normalized.categoryFit < 65) {
+      dynamicCap = 91;
+    } else {
+      dynamicCap = 97;
+    }
   }
   if (confidenceName < 0.84) dynamicCap = Math.min(dynamicCap, 95);
   if (confidenceName < 0.72) dynamicCap = Math.min(dynamicCap, 91);

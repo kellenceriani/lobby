@@ -2806,6 +2806,24 @@
   background: color-mix(in srgb, var(--secondary) 16%, white);
 }
 
+.winner-char-category.pos {
+  background: color-mix(in srgb, #16a34a 22%, white);
+  border-color: color-mix(in srgb, #15803d 34%, white);
+  color: #14532d;
+}
+
+.winner-char-category.neutral {
+  background: color-mix(in srgb, #f59e0b 26%, white);
+  border-color: color-mix(in srgb, #d97706 34%, white);
+  color: #78350f;
+}
+
+.winner-char-category.neg {
+  background: color-mix(in srgb, #ef4444 22%, white);
+  border-color: color-mix(in srgb, #dc2626 34%, white);
+  color: #7f1d1d;
+}
+
 .winner-char-elite-badges {
   margin-top: 5px;
   display: flex;

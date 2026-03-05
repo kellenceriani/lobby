@@ -69,6 +69,10 @@ const {
 } = require('../services/categoryRegistryService');
 
 const GAME_NARRATOR_VOICE_IDS = new Set(['af_heart', 'af_bella', 'am_michael', 'bm_george']);
+const EVAL_PRESEED_ENABLED = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.EVAL_PRESEED_ENABLED || 'false').toLowerCase()
+);
+const EVAL_PRECOMPUTE_AWAIT_TIMEOUT_MS = Math.max(2500, Number(process.env.EVAL_PRECOMPUTE_AWAIT_TIMEOUT_MS) || 9000);
 
 async function emitWithVoiceCuePrewarm(io, roomCode, eventName, payload, { timeoutMs = 1600 } = {}) {
   io.to(roomCode).emit(eventName, payload);
@@ -306,6 +310,47 @@ function getRandomWord() {
     return safeCache[Math.floor(Math.random() * safeCache.length)];
   }
   return wordCache[Math.floor(Math.random() * wordCache.length)];
+}
+
+function normalizeDraftCharacterLabel(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function buildUsedDraftCharacterSet(game) {
+  const used = new Set();
+  if (game && Array.isArray(game.players)) {
+    game.players.forEach((player) => {
+      const team = Array.isArray(player && player.team) ? player.team : [];
+      for (let i = 0; i < 2; i += 1) {
+        const entry = normalizeDraftCharacterLabel(team[i]);
+        if (!entry) continue;
+        used.add(entry.toLowerCase());
+      }
+    });
+  }
+  if (game && Array.isArray(game.allCharactersDrafted)) {
+    game.allCharactersDrafted.forEach((entry) => {
+      const clean = normalizeDraftCharacterLabel(entry);
+      if (!clean) return;
+      used.add(clean.toLowerCase());
+    });
+  }
+  return used;
+}
+
+function takeUniqueAutoFillWord(used = new Set()) {
+  const attempts = Math.max(60, Math.min(600, (wordCache.length || FALLBACK_WORDS.length || 40) * 3));
+  for (let i = 0; i < attempts; i += 1) {
+    const candidate = normalizeDraftCharacterLabel(getRandomWord());
+    if (!candidate) continue;
+    if (used.has(candidate.toLowerCase())) continue;
+    return candidate;
+  }
+  for (let suffix = 1; suffix <= 9999; suffix += 1) {
+    const fallback = `Auto Pick ${suffix}`;
+    if (!used.has(fallback.toLowerCase())) return fallback;
+  }
+  return `Auto Pick ${Date.now()}`;
 }
 
 const WORD_BANKS = {
@@ -1696,6 +1741,7 @@ function startRoundIntelPrecompute(roomCode, game) {
 }
 
 function preseedRoundContextCache(roomCode, game) {
+  if (!EVAL_PRESEED_ENABLED) return Promise.resolve({ scheduled: 0, completed: 0, disabled: true });
   if (!game || !Array.isArray(game.players)) return Promise.resolve({ scheduled: 0, completed: 0 });
   const mode = getEvaluationEngineMode();
   if (mode !== 'context' && mode !== 'context_shadow') return Promise.resolve({ scheduled: 0, completed: 0 });
@@ -1707,7 +1753,16 @@ function preseedRoundContextCache(roomCode, game) {
   const roundPool = game.players.flatMap((player) => (
     Array.isArray(player && player.team) ? player.team.slice(0, 2).filter(Boolean) : []
   ));
-  const concurrency = Math.max(1, Math.min(6, Number(process.env.EVAL_PRESEED_CONCURRENCY) || 2));
+  const categoryContext = game && game.lockedCategory && game.lockedCategory.id
+    ? {
+      enabled: true,
+      id: String(game.lockedCategory.id),
+      name: String(game.lockedCategory.displayName || game.lockedCategory.id),
+      family: String(game.lockedCategory.family || 'unknown'),
+      version: String(game && game.settings && game.settings.categoryVersion || game.lockedCategory.version || 'v1')
+    }
+    : null;
+  const concurrency = Math.max(1, Math.min(4, Number(process.env.EVAL_PRESEED_CONCURRENCY) || 1));
   const jobs = [];
 
   for (const player of game.players) {
@@ -1722,6 +1777,15 @@ function preseedRoundContextCache(roomCode, game) {
           const result = await warmCharacterEvaluationCaches(character, scenario, twist, {
             precomputeContext: true,
             evaluationMode: 'round',
+            categoryContext,
+            fastRoundMode: true,
+            roundQualityPass: false,
+            roundResolveTimeoutMs: Math.max(450, Number(process.env.ROUND_FAST_RESOLVE_TIMEOUT_MS) || 900),
+            roundAliasOverrideTimeoutMs: Math.max(250, Number(process.env.ROUND_FAST_ALIAS_TIMEOUT_MS) || 380),
+            skipImageEnrichment: true,
+            skipImageBackfill: true,
+            skipSyntheticImageUpgrade: true,
+            skipExternalFactEnrichment: true,
             originalScenario: draftedMeta && draftedMeta.originalScenario ? draftedMeta.originalScenario : scenario,
             originalTwist: draftedMeta && draftedMeta.originalTwist ? draftedMeta.originalTwist : twist,
             roundPool,
@@ -1811,7 +1875,10 @@ function prepareFinalRoundState(game, roomCode) {
   if (!game || !Array.isArray(game.players)) return null;
 
   const hasPreparedTeams = game.players.every((player) =>
-    Array.isArray(player.finalTeam) && player.finalTeam.length > 0 && Array.isArray(player.finalTeamDraftMeta)
+    Array.isArray(player.finalTeam)
+    && player.finalTeam.filter((entry) => normalizeDraftCharacterLabel(entry)).length >= 6
+    && Array.isArray(player.finalTeamDraftMeta)
+    && player.finalTeamDraftMeta.length >= 6
   );
 
   if (!hasPreparedTeams) {
@@ -1829,16 +1896,31 @@ function prepareFinalRoundState(game, roomCode) {
     });
   }
 
+  const finalIntegrity = ensureFinalRoundTeamsComplete(game);
+  if (finalIntegrity.totalFilled > 0 && roomCode) {
+    const detail = Object.entries(finalIntegrity.byPlayer)
+      .map(([name, count]) => `${name}:${count}`)
+      .join(', ');
+    console.warn(`[Final prep] Auto-filled ${finalIntegrity.totalFilled} missing final slot(s) (${detail || 'n/a'})`);
+  }
+
   if (!game.pendingFinalRound || !game.pendingFinalRound.scenario || !game.pendingFinalRound.twist) {
     const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
     const theme = game.settings && game.settings.scenarioTheme ? game.settings.scenarioTheme : 'all';
+    const noFinalScenarioTwist = Boolean(game.settings && game.settings.noFinalScenarioTwist === true);
     const pack = resolveContentPack(game && game.packMeta && game.packMeta.id
       ? game.packMeta.id
       : (game.settings && game.settings.contentPackId));
-    const finalConditions = generateFinalScenarioAndTwist(difficulty, pack, theme);
+    const finalConditions = noFinalScenarioTwist
+      ? {
+        scenario: 'NO FINAL SCENARIO',
+        twist: 'NO PLOT TWIST'
+      }
+      : generateFinalScenarioAndTwist(difficulty, pack, theme);
     game.pendingFinalRound = {
       scenario: finalConditions.scenario,
       twist: finalConditions.twist,
+      noFinalScenarioTwist,
       createdAtMs: Date.now()
     };
     if (roomCode) {
@@ -1855,6 +1937,7 @@ function buildDefaultRoomSettings(source = {}) {
     difficulty: 'normal',
     scenarioTheme: 'all',
     plotTwists: true,
+    noFinalScenarioTwist: false,
     maxPlayers: Math.min(6, Math.max(3, Number(source && source.maxPlayers) || 6)),
     customScenario: '',
     ...categorySettings,
@@ -1993,6 +2076,147 @@ function getVoteSeconds(settings) {
   return 30;
 }
 
+function ensureRoundDraftTeamsFilled(game, {
+  scenario = '',
+  twist = 'NO PLOT TWIST',
+  autoFillReason = 'draft_autofill_guard'
+} = {}) {
+  if (!game || !Array.isArray(game.players)) return { totalFilled: 0, byPlayer: {} };
+  if (!game.draftEntries || typeof game.draftEntries !== 'object') game.draftEntries = {};
+  if (!Array.isArray(game.allCharactersDrafted)) game.allCharactersDrafted = [];
+
+  const used = buildUsedDraftCharacterSet(game);
+  const byPlayer = {};
+  let totalFilled = 0;
+  const draftedAtMs = Math.max(0, Date.now() - (game.roundStartTime || Date.now()));
+
+  game.players.forEach((player) => {
+    if (!player) return;
+    const playerName = String(player.name || '').trim();
+    if (!playerName) return;
+    if (!Array.isArray(player.team)) player.team = [];
+    if (!Array.isArray(player.teamAutoFilled)) player.teamAutoFilled = [];
+    if (!Array.isArray(player.teamEditLocks)) player.teamEditLocks = [];
+    if (!Array.isArray(game.draftEntries[playerName])) game.draftEntries[playerName] = [];
+
+    for (let slotIndex = 0; slotIndex < 2; slotIndex += 1) {
+      const existing = normalizeDraftCharacterLabel(player.team[slotIndex]);
+      if (existing) {
+        const key = existing.toLowerCase();
+        if (!used.has(key)) used.add(key);
+        if (!game.allCharactersDrafted.some((entry) => normalizeDraftCharacterLabel(entry).toLowerCase() === key)) {
+          game.allCharactersDrafted.push(existing);
+        }
+        continue;
+      }
+
+      const autoFill = takeUniqueAutoFillWord(used);
+      const key = autoFill.toLowerCase();
+      used.add(key);
+      if (!game.allCharactersDrafted.some((entry) => normalizeDraftCharacterLabel(entry).toLowerCase() === key)) {
+        game.allCharactersDrafted.push(autoFill);
+      }
+
+      player.team[slotIndex] = autoFill;
+      player.teamAutoFilled[slotIndex] = true;
+      player.teamEditLocks[slotIndex] = true;
+
+      const existingMeta = game.draftEntries[playerName][slotIndex] && typeof game.draftEntries[playerName][slotIndex] === 'object'
+        ? game.draftEntries[playerName][slotIndex]
+        : {};
+      game.draftEntries[playerName][slotIndex] = {
+        ...existingMeta,
+        character: autoFill,
+        originalScenario: existingMeta.originalScenario || scenario || game.currentScenario || '',
+        originalTwist: existingMeta.originalTwist || twist || game.currentTwist || 'NO PLOT TWIST',
+        draftedRound: existingMeta.draftedRound || ((game.currentRound || 0) + 1),
+        pickNumberInRound: slotIndex + 1,
+        globalDraftOrder: existingMeta.globalDraftOrder || game.allCharactersDrafted.length,
+        draftedAtMs: Number.isFinite(Number(existingMeta.draftedAtMs))
+          ? Number(existingMeta.draftedAtMs)
+          : draftedAtMs,
+        draftedAtWallMs: Number(existingMeta.draftedAtWallMs) || Date.now(),
+        updatedAtMs: Date.now(),
+        autoFilled: true,
+        editLocked: true,
+        lockReason: 'auto_fill',
+        autoFillReason,
+        editCount: Math.max(0, Number(existingMeta.editCount) || 0)
+      };
+
+      totalFilled += 1;
+      byPlayer[playerName] = (byPlayer[playerName] || 0) + 1;
+    }
+  });
+
+  return { totalFilled, byPlayer };
+}
+
+function ensureFinalRoundTeamsComplete(game) {
+  if (!game || !Array.isArray(game.players)) return { totalFilled: 0, byPlayer: {} };
+
+  const used = new Set();
+  game.players.forEach((player) => {
+    const roster = Array.isArray(player && player.finalTeam) ? player.finalTeam : [];
+    roster.forEach((entry) => {
+      const clean = normalizeDraftCharacterLabel(entry);
+      if (!clean) return;
+      used.add(clean.toLowerCase());
+    });
+  });
+
+  const byPlayer = {};
+  let totalFilled = 0;
+
+  game.players.forEach((player) => {
+    if (!player) return;
+    const playerName = String(player.name || '').trim();
+    if (!Array.isArray(player.finalTeam)) player.finalTeam = [];
+    if (!Array.isArray(player.finalTeamDraftMeta)) player.finalTeamDraftMeta = [];
+    for (let slotIndex = 0; slotIndex < 6; slotIndex += 1) {
+      const existing = normalizeDraftCharacterLabel(player.finalTeam[slotIndex]);
+      if (existing) {
+        used.add(existing.toLowerCase());
+        continue;
+      }
+      const autoFill = takeUniqueAutoFillWord(used);
+      used.add(autoFill.toLowerCase());
+      player.finalTeam[slotIndex] = autoFill;
+
+      const existingMeta = player.finalTeamDraftMeta[slotIndex] && typeof player.finalTeamDraftMeta[slotIndex] === 'object'
+        ? player.finalTeamDraftMeta[slotIndex]
+        : {};
+      player.finalTeamDraftMeta[slotIndex] = {
+        ...existingMeta,
+        character: autoFill,
+        originalScenario: existingMeta.originalScenario || 'AUTO-FILLED FINAL SLOT',
+        originalTwist: existingMeta.originalTwist || 'AUTO-FILLED FINAL SLOT',
+        draftedRound: existingMeta.draftedRound || 4,
+        pickNumberInRound: Number.isFinite(Number(existingMeta.pickNumberInRound))
+          ? Number(existingMeta.pickNumberInRound)
+          : ((slotIndex % 2) + 1),
+        globalDraftOrder: Number.isFinite(Number(existingMeta.globalDraftOrder))
+          ? Number(existingMeta.globalDraftOrder)
+          : (slotIndex + 1),
+        draftedAtMs: Number.isFinite(Number(existingMeta.draftedAtMs))
+          ? Number(existingMeta.draftedAtMs)
+          : 0,
+        draftedAtWallMs: Number(existingMeta.draftedAtWallMs) || Date.now(),
+        updatedAtMs: Date.now(),
+        autoFilled: true,
+        editLocked: true,
+        lockReason: 'final_autofill_guard',
+        autoFillReason: 'final_team_integrity'
+      };
+
+      totalFilled += 1;
+      if (playerName) byPlayer[playerName] = (byPlayer[playerName] || 0) + 1;
+    }
+  });
+
+  return { totalFilled, byPlayer };
+}
+
 function getRoundPointConfig(totalPlayers) {
   const players = Math.max(3, Number(totalPlayers) || 3);
   return {
@@ -2033,7 +2257,10 @@ function calculateRoundBonuses(game, round) {
     points[p.name] = 0;
     pointBreakdown[p.name] = [];
 
-    if (p.team.length === 2) {
+    const filledTeamCount = Array.isArray(p.team)
+      ? p.team.filter((entry) => normalizeDraftCharacterLabel(entry)).length
+      : 0;
+    if (filledTeamCount === 2) {
       const hasAutoFilled = p.teamAutoFilled.some(filled => filled === true);
       if (!hasAutoFilled) {
         points[p.name] += config.fullTeamBonus;
@@ -2283,56 +2510,44 @@ async function revealPlotTwist(io, roomCode) {
   if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
   const scenario = game.scenarios[game.currentRound];
-  if (!game.settings.plotTwists) {
+  const plotTwistsEnabled = Boolean(game.settings && game.settings.plotTwists);
+  if (!plotTwistsEnabled) {
     game.currentTwist = 'NO PLOT TWIST';
+  } else {
+    const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
+    const pack = resolveContentPack(game && game.packMeta && game.packMeta.id
+      ? game.packMeta.id
+      : (game.settings && game.settings.contentPackId));
+    const generatedTwists = (Array.isArray(scenario && scenario.twists) && scenario.twists.length)
+      ? scenario.twists
+      : generateTwists(
+        difficulty,
+        6,
+        game.currentScenario || (scenario && scenario.scenario) || '',
+        pack,
+        game.settings && game.settings.scenarioTheme ? game.settings.scenarioTheme : 'all'
+      );
+    game.currentTwist = generatedTwists[Math.floor(Math.random() * generatedTwists.length)] || 'NO RULE BREAKERS';
+  }
+
+  const autoFilled = ensureRoundDraftTeamsFilled(game, {
+    scenario: game.currentScenario || (scenario && scenario.scenario) || '',
+    twist: game.currentTwist || 'NO PLOT TWIST',
+    autoFillReason: plotTwistsEnabled ? 'draft_timeout_before_twist' : 'draft_timeout_no_plot_twists'
+  });
+  if (autoFilled.totalFilled > 0) {
+    const detail = Object.entries(autoFilled.byPlayer)
+      .map(([name, count]) => `${name}:${count}`)
+      .join(', ');
+    console.log(`[Draft auto-fill] Filled ${autoFilled.totalFilled} slot(s) before voting/twist (${detail || 'n/a'})`);
+  }
+
+  if (!plotTwistsEnabled) {
     startVoting(io, roomCode);
     return;
   }
 
-  const difficulty = game.settings && game.settings.difficulty ? game.settings.difficulty : 'normal';
-  const pack = resolveContentPack(game && game.packMeta && game.packMeta.id
-    ? game.packMeta.id
-    : (game.settings && game.settings.contentPackId));
-  const generatedTwists = (Array.isArray(scenario && scenario.twists) && scenario.twists.length)
-    ? scenario.twists
-    : generateTwists(
-      difficulty,
-      6,
-      game.currentScenario || (scenario && scenario.scenario) || '',
-      pack,
-      game.settings && game.settings.scenarioTheme ? game.settings.scenarioTheme : 'all'
-    );
-  game.currentTwist = generatedTwists[Math.floor(Math.random() * generatedTwists.length)] || 'NO RULE BREAKERS';
-
   game.activePhase = 'TWIST';
-
-  game.players.forEach(p => {
-    while (p.team.length < 2) {
-      let randomWord = getRandomWord();
-      while (game.players.some(other => other.name !== p.name && other.team.some(c => c.toLowerCase() === randomWord.toLowerCase())) ||
-             game.allCharactersDrafted.some(c => c.toLowerCase() === randomWord.toLowerCase())) {
-        randomWord = getRandomWord();
-      }
-      p.team.push(randomWord);
-      p.teamAutoFilled.push(true);
-      p.teamEditLocks.push(true);
-      game.allCharactersDrafted.push(randomWord);
-      if (!Array.isArray(game.draftEntries[p.name])) {
-        game.draftEntries[p.name] = [];
-      }
-      game.draftEntries[p.name].push({
-        character: randomWord,
-        originalScenario: game.currentScenario || '',
-        originalTwist: game.currentTwist || '',
-        draftedRound: (game.currentRound || 0) + 1,
-        pickNumberInRound: p.team.length,
-        globalDraftOrder: game.allCharactersDrafted.length,
-        draftedAtMs: Math.max(0, Date.now() - (game.roundStartTime || Date.now())),
-        autoFilled: true,
-        editLocked: true
-      });
-    }
-  });
 
   const twistPayload = {
     twist: game.currentTwist,
@@ -2350,7 +2565,7 @@ async function revealPlotTwist(io, roomCode) {
   };
   await emitWithVoiceCuePrewarm(io, roomCode, 'plotTwistRevealed', twistPayload, { timeoutMs: 1900 });
 
-  const preseedHeadStartMs = Math.max(0, Math.min(3000, Number(process.env.EVAL_PRESEED_HEADSTART_MS) || 900));
+  const preseedHeadStartMs = Math.max(0, Math.min(2000, Number(process.env.EVAL_PRESEED_HEADSTART_MS) || 300));
   const preseedPromise = preseedRoundContextCache(roomCode, game);
   Promise.race([
     Promise.resolve(preseedPromise).catch(() => null),
@@ -2373,6 +2588,18 @@ function startVoting(io, roomCode) {
   game.voteTallyStarted = false;
   game.roundResolutionLocks = game.roundResolutionLocks || {};
   game.roundResolutionLocks[game.currentRound] = false;
+
+  const guardedFill = ensureRoundDraftTeamsFilled(game, {
+    scenario: game.currentScenario || '',
+    twist: game.currentTwist || 'NO PLOT TWIST',
+    autoFillReason: 'voting_phase_guard'
+  });
+  if (guardedFill.totalFilled > 0) {
+    const detail = Object.entries(guardedFill.byPlayer)
+      .map(([name, count]) => `${name}:${count}`)
+      .join(', ');
+    console.warn(`[Draft guard] Auto-filled ${guardedFill.totalFilled} missing draft slot(s) before voting (${detail || 'n/a'})`);
+  }
 
   const voteSeconds = getVoteSeconds(game.settings);
   const teamsDisplay = game.players.map(p => ({
@@ -2556,7 +2783,31 @@ async function tallyResults(io, roomCode) {
       });
       console.log(`[Eval precompute] Reused round ${roundIndex + 1} intel for room ${roomCode}`);
     } else if (precomputedRound && precomputedRound.promise) {
-      roundIntel = await precomputedRound.promise;
+      let usedFallback = false;
+      roundIntel = await Promise.race([
+        precomputedRound.promise,
+        new Promise((resolve) => setTimeout(() => resolve(null), EVAL_PRECOMPUTE_AWAIT_TIMEOUT_MS))
+      ]);
+      if (!roundIntel) {
+        usedFallback = true;
+        console.warn(
+          `[Eval precompute] Round ${roundIndex + 1} precompute wait timeout for room ${roomCode} ` +
+          `after ${EVAL_PRECOMPUTE_AWAIT_TIMEOUT_MS}ms; switching to direct evaluation`
+        );
+        roundIntel = await evaluateRoundFromGame(game, roundIndex, {
+          onCharacterEvaluated: ({ playerName, character, success }) => {
+            completedFetches += 1;
+            io.to(roomCode).emit('voteTallyProgress', {
+              completed: completedFetches,
+              total: Math.max(1, totalFetches),
+              playerName,
+              character,
+              success: success !== false,
+              source: 'precomputed_timeout_fallback'
+            });
+          }
+        });
+      }
       completedFetches = Math.max(1, totalFetches);
       io.to(roomCode).emit('voteTallyProgress', {
         completed: completedFetches,
@@ -2564,9 +2815,11 @@ async function tallyResults(io, roomCode) {
         playerName: null,
         character: null,
         success: true,
-        source: 'precomputed_wait'
+        source: usedFallback ? 'precomputed_timeout_fallback' : 'precomputed_wait'
       });
-      console.log(`[Eval precompute] Awaited in-flight round ${roundIndex + 1} intel for room ${roomCode}`);
+      if (!usedFallback) {
+        console.log(`[Eval precompute] Awaited in-flight round ${roundIndex + 1} intel for room ${roomCode}`);
+      }
     } else {
       roundIntel = await evaluateRoundFromGame(game, roundIndex, {
         onCharacterEvaluated: ({ playerName, character, success }) => {
@@ -2871,6 +3124,24 @@ async function endGame(io, roomCode) {
     const contextSignals = scoreMeta.contextSignals && typeof scoreMeta.contextSignals === 'object'
       ? scoreMeta.contextSignals
       : {};
+    const categoryContext = scoreMeta.categoryContext && typeof scoreMeta.categoryContext === 'object'
+      ? scoreMeta.categoryContext
+      : (entry && entry.categoryContext && typeof entry.categoryContext === 'object' ? entry.categoryContext : null);
+    const categoryStatus = categoryContext && categoryContext.categoryStatus
+      ? String(categoryContext.categoryStatus)
+      : (entry && entry.categoryStatus ? String(entry.categoryStatus) : 'not_in_category');
+    const categoryStatusLabel = categoryContext && categoryContext.categoryStatusLabel
+      ? String(categoryContext.categoryStatusLabel)
+      : (entry && entry.categoryStatusLabel ? String(entry.categoryStatusLabel) : 'NOT IN CATEGORY');
+    const categoryStatusTone = categoryContext && categoryContext.categoryStatusTone
+      ? String(categoryContext.categoryStatusTone)
+      : (entry && entry.categoryStatusTone ? String(entry.categoryStatusTone) : 'negative');
+    const categoryStatusIcon = categoryContext && categoryContext.categoryStatusIcon
+      ? String(categoryContext.categoryStatusIcon)
+      : (entry && entry.categoryStatusIcon ? String(entry.categoryStatusIcon) : 'thumbs_down');
+    const categoryFit = Number(categoryContext && categoryContext.categoryFit) || Number(entry && entry.categoryFit) || 0;
+    const categoryMembershipConfidence = Number(categoryContext && categoryContext.membershipConfidence) || Number(entry && entry.categoryMembershipConfidence) || 0;
+    const categoryNetImpact = Number(categoryContext && categoryContext.netImpact) || Number(entry && entry.categoryNetImpact) || 0;
 
     return {
       character: entry && entry.character ? entry.character : 'Unknown',
@@ -2902,7 +3173,27 @@ async function endGame(io, roomCode) {
       evalStatusLabel: explain && explain.statusLabel ? String(explain.statusLabel) : null,
       evalRiskSeverity: explain && explain.riskSeverity ? String(explain.riskSeverity) : null,
       evalRiskFlags: Array.isArray(contextSignals.riskFlags) ? contextSignals.riskFlags.slice(0, 4) : [],
-      evalMatchedTraits: Array.isArray(contextSignals.matchedTraits) ? contextSignals.matchedTraits.slice(0, 4) : []
+      evalMatchedTraits: Array.isArray(contextSignals.matchedTraits) ? contextSignals.matchedTraits.slice(0, 4) : [],
+      categoryFit,
+      categoryMembershipConfidence,
+      categoryNetImpact,
+      categoryStatus,
+      categoryStatusLabel,
+      categoryStatusTone,
+      categoryStatusIcon,
+      scoreMeta: {
+        infoConfidence: Number(scoreMeta.infoConfidence) || 0,
+        evaluationEngineMode: scoreMeta.evaluationEngineMode ? String(scoreMeta.evaluationEngineMode) : null,
+        categoryContext: {
+          categoryFit,
+          membershipConfidence: categoryMembershipConfidence,
+          netImpact: categoryNetImpact,
+          categoryStatus,
+          categoryStatusLabel,
+          categoryStatusTone,
+          categoryStatusIcon
+        }
+      }
     };
   }
 

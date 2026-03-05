@@ -12,7 +12,7 @@ const WARMUP_INFLIGHT = new Map();
 const RESOLUTION_SEED_CACHE = new EvaluationCache(10 * 60 * 1000);
 const EVAL_WARMUP_JOIN_TIMEOUT_MS = Math.max(0, Number(process.env.EVAL_WARMUP_JOIN_TIMEOUT_MS) || 1200);
 const EVAL_WARMUP_PRESEED_CONTEXT = ['1', 'true', 'yes', 'on'].includes(
-  String(process.env.EVAL_WARMUP_PRESEED_CONTEXT || 'true').toLowerCase()
+  String(process.env.EVAL_WARMUP_PRESEED_CONTEXT || 'false').toLowerCase()
 );
 
 function clamp(value, min, max) {

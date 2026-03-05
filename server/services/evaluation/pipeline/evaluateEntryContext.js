@@ -1467,6 +1467,18 @@ function computeContextOvrModel({
   const currentTwistFit = clamp(Number(subscores && subscores.currentTwistFit) || 50, 0, 100);
   const originalScenarioFit = clamp(Number(subscores && subscores.originalScenarioFit) || 50, 0, 100);
   const originalTwistFit = clamp(Number(subscores && subscores.originalTwistFit) || 50, 0, 100);
+  const categoryContext = subscores && subscores._categoryContext && typeof subscores._categoryContext === 'object'
+    ? subscores._categoryContext
+    : null;
+  const categoryActive = Boolean(categoryContext && categoryContext.active !== false);
+  const categoryFit = clamp(
+    Number(categoryContext && categoryContext.categoryFit) || Number(subscores && subscores.categoryFit) || 50,
+    0,
+    100
+  );
+  const categoryMembership = clamp(Number(categoryContext && categoryContext.membershipConfidence) || 50, 0, 100);
+  const categoryImpact = Number(categoryContext && categoryContext.netImpact) || 0;
+  const categoryStatus = String(categoryContext && categoryContext.categoryStatus || '').trim().toLowerCase();
 
   const traits = Array.isArray(relevance && relevance.profile && relevance.profile.topTraits)
     ? relevance.profile.topTraits.map((t) => String(t || '').toLowerCase()).filter(Boolean)
@@ -1911,6 +1923,16 @@ function computeContextOvrModel({
   if (lowTrustRiskStack) fitDelta -= 7;
   if (riskySearchMismatch) fitDelta -= 6;
   if (riskySearchMismatch && moderateRiskCount >= 2) fitDelta -= 4;
+  if (categoryActive) {
+    let categoryPenalty = 0;
+    if (categoryStatus === 'not_in_category') categoryPenalty -= 14;
+    if (categoryFit < 30 || categoryMembership < 20) categoryPenalty -= 14;
+    else if (categoryFit < 40 || categoryMembership < 30) categoryPenalty -= 10;
+    else if (categoryFit < 50 || categoryMembership < 40) categoryPenalty -= 4;
+    if (categoryImpact <= -20) categoryPenalty -= 4;
+    else if (categoryImpact <= -12) categoryPenalty -= 2;
+    fitDelta += categoryPenalty;
+  }
 
   let finalOVR = neutralBaseOVR + fitDelta + restraintDelta;
   const weightedTarget = clamp(Number(weighted && weighted.ovr99) || finalOVR, 0, 99);
@@ -1961,6 +1983,17 @@ function computeContextOvrModel({
   if (severeRiskCount >= 2 && moderateRiskCount >= 1) confidenceCappedFinalCap -= 6;
   if (lowTrustRiskStack) confidenceCappedFinalCap -= 6;
   if (riskySearchMismatch) confidenceCappedFinalCap -= 6;
+  if (categoryActive) {
+    if (categoryStatus === 'not_in_category' || categoryFit < 30 || categoryMembership < 20) {
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 68);
+    } else if (categoryFit < 40 || categoryMembership < 30) {
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 74);
+    } else if (categoryFit < 50 || categoryMembership < 40) {
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 80);
+    } else if (categoryStatus === 'borderline' || categoryFit < 60) {
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 88);
+    }
+  }
   confidenceCappedFinalCap = clamp(confidenceCappedFinalCap, 0, 99);
   const finalFloorByClass = {
     mythic: 34,
@@ -2027,6 +2060,10 @@ function computeContextOvrModel({
       finalCap: confidenceCappedFinalCap,
       uncappedFinalCap: finalCap,
       confidenceName,
+      categoryFit,
+      categoryMembership,
+      categoryImpact,
+      categoryStatus: categoryStatus || null,
       severeRiskCount,
       moderateRiskCount,
       riskySearchMismatch: riskySearchMismatch ? 1 : 0
@@ -2303,6 +2340,19 @@ function buildContextPublicResult({
         eligibilityPenalty: Number(categoryFitResolution.eligibilityPenalty) || 0,
         inCategoryBonus: Number(categoryFitResolution.inCategoryBonus) || 0,
         netImpact: Number(categoryFitResolution.netImpact) || 0,
+        categoryStatus: categoryFitResolution.categoryStatus || 'not_in_category',
+        categoryStatusLabel: categoryFitResolution.categoryStatusLabel || 'NOT IN CATEGORY',
+        categoryStatusTone: categoryFitResolution.categoryStatusTone || 'negative',
+        categoryStatusIcon: categoryFitResolution.categoryStatusIcon || 'thumbs_down',
+        strictCoreHits: Number(categoryFitResolution.strictCoreHits) || 0,
+        coreSignalHits: Number(categoryFitResolution.coreSignalHits) || 0,
+        relatedSignalHits: Number(categoryFitResolution.relatedSignalHits) || 0,
+        negativeSignalHits: Number(categoryFitResolution.negativeSignalHits) || 0,
+        supportSignalHits: Number(categoryFitResolution.supportSignalHits) || 0,
+        primaryNameHits: Number(categoryFitResolution.primaryNameHits) || 0,
+        supportNameHits: Number(categoryFitResolution.supportNameHits) || 0,
+        anchorInclusionHits: Number(categoryFitResolution.anchorInclusionHits) || 0,
+        anchorAliasHits: Number(categoryFitResolution.anchorAliasHits) || 0,
         explain: categoryFitResolution.explain || ''
       }
       : null,
@@ -2404,12 +2454,13 @@ function buildContextPublicResult({
     && breakdown
     && Array.isArray(breakdown.scoreBreakdown)
   ) {
-    breakdown.categoryRelevance = `Category Fit ${categoryFitResolution.categoryFit}/100 | membership ${categoryFitResolution.membershipConfidence} | net impact ${categoryFitResolution.netImpact >= 0 ? '+' : ''}${categoryFitResolution.netImpact}`;
+    const statusLabel = String(categoryFitResolution.categoryStatusLabel || 'NOT IN CATEGORY');
+    breakdown.categoryRelevance = `${categoryFitResolution.categoryName}: ${statusLabel} | fit ${categoryFitResolution.categoryFit}/100 | membership ${categoryFitResolution.membershipConfidence} | net impact ${categoryFitResolution.netImpact >= 0 ? '+' : ''}${categoryFitResolution.netImpact}`;
     breakdown.scoreBreakdown = [
       {
         step: 'Category Fit',
         points: Number(categoryFitResolution.netImpact) || 0,
-        description: `${categoryFitResolution.categoryName}: fit ${categoryFitResolution.categoryFit}/100 (membership ${categoryFitResolution.membershipConfidence}, rank ${categoryFitResolution.withinCategoryPowerRank}, impact ${categoryFitResolution.netImpact >= 0 ? '+' : ''}${categoryFitResolution.netImpact})`
+        description: `${categoryFitResolution.categoryName}: ${statusLabel} | fit ${categoryFitResolution.categoryFit}/100 (membership ${categoryFitResolution.membershipConfidence}, rank ${categoryFitResolution.withinCategoryPowerRank}, impact ${categoryFitResolution.netImpact >= 0 ? '+' : ''}${categoryFitResolution.netImpact})`
       },
       ...breakdown.scoreBreakdown
     ];
@@ -2465,6 +2516,7 @@ function buildContextPublicResult({
     }
   }
 
+  const categoryActiveResult = Boolean(categoryFitResolution && categoryFitResolution.active);
   return {
     character,
     emotion: mapScoreToEmotion(score),
@@ -2481,6 +2533,21 @@ function buildContextPublicResult({
       : engineTrace.status === 'low_confidence_resolve'
         ? 'Context Engine evaluation (low-confidence resolver)'
         : 'Context Engine fallback heuristics',
+    categoryFit: Number(categoryFitResolution && categoryFitResolution.categoryFit) || 0,
+    categoryMembershipConfidence: Number(categoryFitResolution && categoryFitResolution.membershipConfidence) || 0,
+    categoryNetImpact: Number(categoryFitResolution && categoryFitResolution.netImpact) || 0,
+    categoryStatus: categoryActiveResult && categoryFitResolution && categoryFitResolution.categoryStatus
+      ? String(categoryFitResolution.categoryStatus)
+      : 'category_inactive',
+    categoryStatusLabel: categoryActiveResult && categoryFitResolution && categoryFitResolution.categoryStatusLabel
+      ? String(categoryFitResolution.categoryStatusLabel)
+      : 'CATEGORY INACTIVE',
+    categoryStatusTone: categoryActiveResult && categoryFitResolution && categoryFitResolution.categoryStatusTone
+      ? String(categoryFitResolution.categoryStatusTone)
+      : 'neutral',
+    categoryStatusIcon: categoryActiveResult && categoryFitResolution && categoryFitResolution.categoryStatusIcon
+      ? String(categoryFitResolution.categoryStatusIcon)
+      : 'meh',
     notes,
     breakdown,
     scoreMeta
@@ -2567,6 +2634,7 @@ async function evaluateEntryContext(entry) {
 
   const weightProfile = buildWeightProfile({
     evaluationMode: parsedContext.evaluationMode,
+    currentScenario: parsedContext.scenario,
     currentTwist: parsedContext.twist,
     originalTwist: parsedContext.originalTwist
   });
@@ -2575,7 +2643,10 @@ async function evaluateEntryContext(entry) {
     confidenceName: Number(resolution && resolution.infoConfidence) || 0,
     confidenceOverall: Number(resolution && resolution.infoConfidence) || 0,
     riskFlags: Array.isArray(resolution && resolution.riskFlags) ? resolution.riskFlags : [],
-    categoryActive: Boolean(categoryFitResolution && categoryFitResolution.active)
+    categoryActive: Boolean(categoryFitResolution && categoryFitResolution.active),
+    categoryStatus: categoryFitResolution && categoryFitResolution.active
+      ? String(categoryFitResolution.categoryStatus || '')
+      : ''
   });
   const confidence = buildConfidencePacket({ resolution, relevance });
   const publicResult = buildContextPublicResult({

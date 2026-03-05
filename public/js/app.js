@@ -90,6 +90,7 @@ const networkOutageUiState = {
 };
 
 let categoryVoteCountdownTimer = null;
+let categoryVoteLocalChoice = '';
 
 function updateNetworkOutageIndicators(reason = '', { showToastNotice = false } = {}) {
   const detail = String(reason || '').trim() || 'server_unreachable';
@@ -7489,6 +7490,14 @@ function renderCategoryVotePanel(voteState = null) {
     selectEl.appendChild(option);
   });
 
+  const hasLocalChoice = options.some((entry) => String(entry && entry.id || '').trim().toLowerCase() === categoryVoteLocalChoice);
+  if (hasLocalChoice) {
+    selectEl.value = categoryVoteLocalChoice;
+  } else if (options.length) {
+    selectEl.value = String(options[0] && options[0].id || '').trim().toLowerCase();
+    categoryVoteLocalChoice = String(selectEl.value || '').trim().toLowerCase();
+  }
+
   castBtn.disabled = !isInRoom;
   const updateCountdown = () => {
     const endsAtMs = Number(vote && vote.endsAtMs) || 0;
@@ -7522,6 +7531,7 @@ function renderCategoryVoteFullscreen(voteState = null) {
 
   listEl.innerHTML = '';
   if (!active) {
+    listEl.innerHTML = '<div class="category-vote-empty">Waiting for host to open a vote.</div>';
     statusEl.textContent = 'Waiting for category vote...';
     metaEl.textContent = 'The host can start a category vote when mode is Group Vote.';
     return;
@@ -7535,16 +7545,34 @@ function renderCategoryVoteFullscreen(voteState = null) {
     ? `Started by ${startedBy}. Choose one category to continue.`
     : 'Started by system. Choose one category to continue.';
 
+  const maxVotes = Math.max(1, ...options.map((entry) => Number(entry && entry.votes) || 0));
   options.forEach((entry) => {
     const id = String(entry && entry.id || '').trim().toLowerCase();
     if (!id) return;
     const displayName = String(entry && entry.displayName || id);
     const votes = Number(entry && entry.votes) || 0;
+    const family = String(entry && entry.family || 'mixed');
+    const riskLevel = String(entry && entry.riskLevel || 'med');
+    const votePct = Math.max(0, Math.min(100, Math.round((votes / maxVotes) * 100)));
+    const selected = categoryVoteLocalChoice && categoryVoteLocalChoice === id;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'btn btn-secondary';
+    btn.className = `category-vote-option ${selected ? 'is-selected' : ''}`;
     btn.dataset.categoryVoteId = id;
-    btn.textContent = `${displayName} (${votes})`;
+    btn.setAttribute('aria-label', `${displayName} (${votes} votes), family ${family}, risk ${riskLevel}`);
+    btn.innerHTML = `
+      <div class="category-vote-option-head">
+        <strong>${escapeHtml(displayName)}</strong>
+        <span class="category-vote-votes">${votes} vote${votes === 1 ? '' : 's'}</span>
+      </div>
+      <div class="category-vote-option-meta">
+        <span>${escapeHtml(family)}</span>
+        <span>Risk ${escapeHtml(riskLevel.toUpperCase())}</span>
+      </div>
+      <div class="category-vote-meter">
+        <i style="width:${votePct}%"></i>
+      </div>
+    `;
     listEl.appendChild(btn);
   });
 }
@@ -7812,11 +7840,17 @@ socket.on('roomData', (data) => {
     const customScenarioInput = document.getElementById('customScenario');
     const contentPackInput = document.getElementById('contentPack');
     const plotTwistsInput = document.getElementById('plotTwists');
+    const noPlotTwistsInput = document.getElementById('noPlotTwists');
+    const noFinalScenarioTwistInput = document.getElementById('noFinalScenarioTwist');
     if (difficultyInput && data.settings.difficulty) difficultyInput.value = data.settings.difficulty;
     if (scenarioThemeInput && data.settings.scenarioTheme) scenarioThemeInput.value = data.settings.scenarioTheme;
     if (customScenarioInput && data.settings.customScenario !== undefined) customScenarioInput.value = data.settings.customScenario;
     if (contentPackInput && data.settings.contentPackId) contentPackInput.value = data.settings.contentPackId;
     if (plotTwistsInput && data.settings.plotTwists !== undefined) plotTwistsInput.checked = data.settings.plotTwists;
+    if (noPlotTwistsInput && data.settings.plotTwists !== undefined) noPlotTwistsInput.checked = !Boolean(data.settings.plotTwists);
+    if (noFinalScenarioTwistInput && data.settings.noFinalScenarioTwist !== undefined) {
+      noFinalScenarioTwistInput.checked = Boolean(data.settings.noFinalScenarioTwist);
+    }
     updateContentPackDescription(data.settings.contentPackId);
     applyCategorySettingsInputs(data.settings);
   }
@@ -7948,11 +7982,17 @@ socket.on('settingsUpdated', (settings) => {
   const customScenario = document.getElementById('customScenario');
   const contentPack = document.getElementById('contentPack');
   const plotTwists = document.getElementById('plotTwists');
+  const noPlotTwists = document.getElementById('noPlotTwists');
+  const noFinalScenarioTwist = document.getElementById('noFinalScenarioTwist');
   if (difficulty && settings.difficulty) difficulty.value = settings.difficulty;
   if (scenarioTheme && settings.scenarioTheme) scenarioTheme.value = settings.scenarioTheme;
   if (customScenario && settings.customScenario !== undefined) customScenario.value = settings.customScenario;
   if (contentPack && settings.contentPackId) contentPack.value = settings.contentPackId;
   if (plotTwists && settings.plotTwists !== undefined) plotTwists.checked = settings.plotTwists;
+  if (noPlotTwists && settings.plotTwists !== undefined) noPlotTwists.checked = !Boolean(settings.plotTwists);
+  if (noFinalScenarioTwist && settings.noFinalScenarioTwist !== undefined) {
+    noFinalScenarioTwist.checked = Boolean(settings.noFinalScenarioTwist);
+  }
   updateContentPackDescription(settings && settings.contentPackId);
   applyCategorySettingsInputs(settings || {});
   if (settings && settings.categoryId) {
@@ -7971,6 +8011,7 @@ const SETTINGS_CHANGED_LABELS = {
   scenarioTheme: 'theme',
   contentPackId: 'content pack',
   plotTwists: 'plot twists',
+  noFinalScenarioTwist: 'final scenario/twist mode',
   customScenario: 'custom scenario',
   categoriesMode: 'categories mode',
   categoryId: 'category',
@@ -8016,6 +8057,7 @@ socket.on('settingsChangePing', (payload) => {
 });
 
 socket.on('categoryVoteStart', (payload) => {
+  categoryVoteLocalChoice = '';
   roomState.categoryVote = payload && typeof payload === 'object' ? payload : null;
   renderCategoryVotePanel(roomState.categoryVote);
   if (document.getElementById('categoryVoteScreen')) {
@@ -8033,6 +8075,7 @@ socket.on('categoryVoteUpdate', (payload) => {
 });
 
 socket.on('categoryVoteLocked', (payload) => {
+  categoryVoteLocalChoice = '';
   roomState.categoryVote = null;
   renderCategoryVotePanel(null);
   const winner = payload && payload.winner && typeof payload.winner === 'object' ? payload.winner : null;
@@ -8176,6 +8219,9 @@ function castCategoryVote(explicitCategoryId = '') {
     showToast('Select a category option first.', 'warning', 1800);
     return;
   }
+  categoryVoteLocalChoice = categoryId;
+  if (select) select.value = categoryId;
+  renderCategoryVoteFullscreen(roomState.categoryVote);
   socket.emit('castCategoryVote', { categoryId });
   showToast('Vote submitted.', 'info', 1400);
 }
@@ -9183,32 +9229,33 @@ socket.on('votingPhaseStart', (data) => {
       return;
     }
 
-    const card = document.createElement('div');
+    const card = document.createElement('button');
+    card.type = 'button';
     card.className = 'vote-card';
+    card.dataset.teamName = String(team.name || '');
     card.style.animationDelay = `${idx * 0.1}s`;
     card.onclick = () => castVote(team.name);
 
+    const cardHead = document.createElement('div');
+    cardHead.className = 'vote-card-head';
     const title = document.createElement('h3');
-    title.textContent = `👤 ${team.name}`;
-    card.appendChild(title);
+    title.textContent = `${team.name}`;
+    cardHead.appendChild(title);
+
+    const voteBadge = document.createElement('span');
+    voteBadge.className = 'vote-badge';
+    voteBadge.textContent = String(team.votes || 0);
+    cardHead.appendChild(voteBadge);
+    card.appendChild(cardHead);
 
     const teamList = document.createElement('ul');
     teamList.className = 'team-display';
     team.team.forEach((member) => {
       const li = document.createElement('li');
-      li.textContent = `• ${member}`;
+      li.textContent = member;
       teamList.appendChild(li);
     });
     card.appendChild(teamList);
-
-    const voteP = document.createElement('p');
-    voteP.className = 'vote-count';
-    const voteBadge = document.createElement('span');
-    voteBadge.className = 'vote-badge';
-    voteBadge.textContent = String(team.votes || 0);
-    voteP.appendChild(voteBadge);
-    appendText(voteP, ' votes');
-    card.appendChild(voteP);
 
     if (grid) grid.appendChild(card);
   });
@@ -9324,7 +9371,7 @@ function castVote(playerName) {
   gameState.currentVoteChoice = playerName;
 
   document.querySelectorAll('.vote-card').forEach(card => {
-    const cardName = card.querySelector('h3').textContent.replace('👤 ', '');
+    const cardName = String(card.dataset.teamName || '').trim();
     if (cardName === playerName) {
       card.classList.add('selected');
     } else {
@@ -9368,7 +9415,7 @@ function lockVote() {
 
 socket.on('voteUpdate', (voteCount) => {
   document.querySelectorAll('.vote-card').forEach(card => {
-    const playerName = card.querySelector('h3').textContent.replace('👤 ', '');
+    const playerName = String(card.dataset.teamName || '').trim();
     const badge = card.querySelector('.vote-badge');
     if (badge) badge.textContent = voteCount[playerName] || 0;
   });
@@ -10094,6 +10141,7 @@ socket.on('gameEnded', (data) => {
     const eliteShowcaseCharacters = Array.isArray(data.eliteFinalSix) && data.eliteFinalSix.length
       ? data.eliteFinalSix
       : championCharacters;
+    const finalCategoryActive = Boolean(resolveLockedCategoryForUi());
     const eliteMeta = data && data.eliteFinalSixMeta && typeof data.eliteFinalSixMeta === 'object'
       ? data.eliteFinalSixMeta
       : {};
@@ -10249,6 +10297,22 @@ socket.on('gameEnded', (data) => {
         const evalTrustPct = Math.max(0, Math.min(100, Number(entry && entry.evalTrustPct) || 0));
         const evalStatusLabel = escapeHtml(entry && entry.evalStatusLabel ? entry.evalStatusLabel : (entry && entry.evalStatus ? entry.evalStatus : 'n/a'));
         const evalEngineMode = escapeHtml(entry && entry.evalEngineMode ? entry.evalEngineMode : 'legacy');
+        const categoryStatusRaw = String(entry && entry.categoryStatus ? entry.categoryStatus : '').trim().toLowerCase();
+        const categoryStatusLabelRaw = String(entry && entry.categoryStatusLabel ? entry.categoryStatusLabel : '').trim();
+        const normalizedCategoryStatus = categoryStatusRaw.replace(/[\s-]+/g, '_');
+        const categoryMeta = normalizedCategoryStatus === 'in_category'
+          ? { label: 'IN CATEGORY', icon: '[+]', tone: 'pos' }
+          : normalizedCategoryStatus === 'borderline' || normalizedCategoryStatus === 'borderline_entry'
+            ? { label: 'BORDERLINE ENTRY', icon: '[~]', tone: 'neutral' }
+            : normalizedCategoryStatus === 'not_in_category' || normalizedCategoryStatus === 'out_of_category'
+              ? { label: 'NOT IN CATEGORY', icon: '[-]', tone: 'neg' }
+              : { label: categoryStatusLabelRaw || 'CATEGORY N/A', icon: '-', tone: 'neutral' };
+        const submetaRight = finalCategoryActive
+          ? `<span class="winner-char-trace winner-char-category ${categoryMeta.tone}">${escapeHtml(`${categoryMeta.label} ${categoryMeta.icon}`)}</span>`
+          : `<span class="winner-char-trace">${evalEngineMode.toUpperCase()} ${evalTrustPct}%</span>`;
+        const backGridTraceOrCategory = finalCategoryActive
+          ? `<div><span>Category</span><strong>${escapeHtml(`${categoryMeta.label} ${categoryMeta.icon}`)}</strong></div>`
+          : `<div><span>Trace</span><strong>${evalEngineMode.toUpperCase()} ${evalTrustPct}%</strong></div>`;
         return `
           <article class="winner-char-card winner-flip-card ${rarityClass} tier-${ovrToneClass} ${rawImage ? '' : 'missing'} ${isChampionMember ? 'champion-member' : ''}" data-slot="${index + 1}" role="button" tabindex="0" aria-label="Flip ${safeName} card">
             <div class="winner-flip-inner">
@@ -10272,7 +10336,7 @@ socket.on('gameEnded', (data) => {
                   <span class="winner-char-source ${sourceClass}">${source}</span>
                   <span class="winner-char-type">${characterType}</span>
                   <span class="winner-char-owner ${isChampionMember ? 'champion' : ''}">${ownerName}</span>
-                  <span class="winner-char-trace">${evalEngineMode.toUpperCase()} ${evalTrustPct}%</span>
+                  ${submetaRight}
                 </div>
                 <div class="winner-char-elite-badges">
                   <span class="winner-char-badge elite-rank">Elite #${eliteRank}</span>
@@ -10290,7 +10354,7 @@ socket.on('gameEnded', (data) => {
                   <div><span>Type</span><strong>${characterType}</strong></div>
                   <div><span>Source</span><strong>${source}</strong></div>
                   <div><span>Draft</span><strong>R${draftRound} · Pick ${draftPick}</strong></div>
-                  <div><span>Trace</span><strong>${evalEngineMode.toUpperCase()} ${evalTrustPct}%</strong></div>
+                  ${backGridTraceOrCategory}
                   <div><span>Status</span><strong>${evalStatusLabel}</strong></div>
                   <div><span>Global Slot</span><strong>${draftOrderLabel}</strong></div>
                   <div><span>Locked At</span><strong>${draftedAtLabel}</strong></div>

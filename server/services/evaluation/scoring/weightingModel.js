@@ -188,23 +188,37 @@ function computeWeightedOverall(scores = {}, profile = {}, controls = {}) {
   if (categoryWeight > 0 && normalized.categoryFit <= 42) synergyBonus -= 5;
   if (scenarioWeightActive && twistWeightActive && blendedScenarioFit < 45 && blendedTwistFit < 45) synergyBonus -= 4;
   if (normalized.baseAbility < 45 && overallPct < 50) synergyBonus -= 3;
-  let ovr99 = clamp(Math.round(baseCurve + fitDelta + synergyBonus), 0, 99);
+  const categoryActive = controls.categoryActive === true && categoryWeight > 0;
+  const categoryStatus = String(controls.categoryStatus || '').trim().toLowerCase();
+  let categoryMomentum = 0;
+  if (categoryActive) {
+    if (categoryStatus === 'in_category') {
+      if (normalized.categoryFit >= 78) categoryMomentum += 7;
+      else if (normalized.categoryFit >= 68) categoryMomentum += 5;
+      else if (normalized.categoryFit >= 58) categoryMomentum += 3;
+      else categoryMomentum += 1;
+    } else if (categoryStatus === 'borderline') {
+      if (normalized.categoryFit >= 60) categoryMomentum += 1;
+    } else if (categoryStatus === 'not_in_category') {
+      if (normalized.categoryFit < 35) categoryMomentum -= 5;
+      else categoryMomentum -= 2;
+    }
+  }
+  let ovr99 = clamp(Math.round(baseCurve + fitDelta + synergyBonus + categoryMomentum), 0, 99);
 
   const confidenceName = toPercent(controls.confidenceName, 1);
   const confidenceOverall = toPercent(controls.confidenceOverall, 1);
   const riskFlags = new Set((Array.isArray(controls.riskFlags) ? controls.riskFlags : []).map((v) => String(v || '').toLowerCase()));
-  const categoryActive = controls.categoryActive === true && categoryWeight > 0;
-  const categoryStatus = String(controls.categoryStatus || '').trim().toLowerCase();
   let dynamicCap = 99;
   if (categoryActive) {
     if (categoryStatus === 'not_in_category') {
-      if (normalized.categoryFit < 30) dynamicCap = 64;
-      else if (normalized.categoryFit < 42) dynamicCap = 68;
-      else dynamicCap = 72;
+      if (normalized.categoryFit < 30) dynamicCap = 54;
+      else if (normalized.categoryFit < 42) dynamicCap = 58;
+      else dynamicCap = 62;
     } else if (categoryStatus === 'borderline') {
-      if (normalized.categoryFit < 45) dynamicCap = 78;
-      else if (normalized.categoryFit < 60) dynamicCap = 84;
-      else dynamicCap = 88;
+      if (normalized.categoryFit < 45) dynamicCap = 72;
+      else if (normalized.categoryFit < 60) dynamicCap = 78;
+      else dynamicCap = 84;
     } else if (categoryStatus === 'in_category') {
       if (normalized.categoryFit < 45) dynamicCap = 86;
       else if (normalized.categoryFit < 60) dynamicCap = 92;
@@ -226,8 +240,15 @@ function computeWeightedOverall(scores = {}, profile = {}, controls = {}) {
   if (riskFlags.has('generic_name_ambiguity')) dynamicCap = Math.min(dynamicCap, 80);
   if (riskFlags.has('low_signal_ambiguity')) dynamicCap = Math.min(dynamicCap, 78);
   if (riskFlags.has('high_candidate_ambiguity')) dynamicCap = Math.min(dynamicCap, 88);
+  if (riskFlags.has('title_differs_from_input') && confidenceName < 0.8) dynamicCap = Math.min(dynamicCap, 86);
+  if (riskFlags.has('title_differs_from_input') && riskFlags.has('synthetic_image')) dynamicCap = Math.min(dynamicCap, 78);
   if (riskFlags.has('dangerous_title_diff_suspected')) dynamicCap = Math.min(dynamicCap, 82);
+  if (riskFlags.has('dangerous_title_diff_suspected') && riskFlags.has('synthetic_image')) dynamicCap = Math.min(dynamicCap, 74);
+  if (riskFlags.has('dangerous_title_diff_suspected') && riskFlags.has('fast_round_timeout_fallback')) dynamicCap = Math.min(dynamicCap, 72);
   if (riskFlags.has('fast_round_timeout_fallback')) dynamicCap = Math.min(dynamicCap, 84);
+  if (riskFlags.has('high_candidate_ambiguity') && riskFlags.has('title_differs_from_input') && confidenceName < 0.72) {
+    dynamicCap = Math.min(dynamicCap, 76);
+  }
   if (riskFlags.has('synthetic_image') && confidenceName < 0.78) dynamicCap = Math.min(dynamicCap, 86);
   ovr99 = Math.min(ovr99, dynamicCap);
 
@@ -242,6 +263,7 @@ function computeWeightedOverall(scores = {}, profile = {}, controls = {}) {
       baseCurve: Number(baseCurve.toFixed(2)),
       fitDelta: Number(fitDelta.toFixed(2)),
       synergyBonus,
+      categoryMomentum,
       scenarioWeightScale: Number(scenarioWeightScale.toFixed(2)),
       twistWeightScale: Number(twistWeightScale.toFixed(2)),
       categoryWeightScale: Number(categoryWeightScale.toFixed(2)),

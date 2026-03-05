@@ -3,6 +3,15 @@ const path = require('path');
 
 const REGISTRY_FILE = path.join(__dirname, '..', 'content', 'categories', 'registry.v1.json');
 const CATEGORY_MODES = new Set(['off', 'host_select', 'smart_random', 'group_vote']);
+const CATEGORY_MODE_ALIASES = Object.freeze({
+  off: 'off',
+  host_select: 'host_select',
+  hostselect: 'host_select',
+  smart_random: 'smart_random',
+  smartrandom: 'smart_random',
+  group_vote: 'group_vote',
+  groupvote: 'group_vote'
+});
 const DEFAULT_CATEGORY_SETTINGS = Object.freeze({
   categoriesMode: 'smart_random',
   categoryId: null,
@@ -12,6 +21,7 @@ const DEFAULT_CATEGORY_SETTINGS = Object.freeze({
 
 let REGISTRY_CACHE = null;
 const RULE_MATCHER_CACHE = new Map();
+const TOKEN_EDIT_DISTANCE_CACHE = new Map();
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -71,10 +81,108 @@ function countRuleHits(corpusNormalized = '', rules = [], options = {}) {
   return hits;
 }
 
+function tokenizeLooseText(value = '') {
+  return normalizeLooseText(value)
+    .split(' ')
+    .map((token) => String(token || '').trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function tokenEditDistance(left = '', right = '') {
+  const a = String(left || '').trim().toLowerCase();
+  const b = String(right || '').trim().toLowerCase();
+  if (!a || !b) return 99;
+  if (a === b) return 0;
+  const cacheKey = a < b ? `${a}|${b}` : `${b}|${a}`;
+  if (TOKEN_EDIT_DISTANCE_CACHE.has(cacheKey)) return TOKEN_EDIT_DISTANCE_CACHE.get(cacheKey);
+
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const matrix = Array.from({ length: rows }, () => Array(cols).fill(0));
+  for (let i = 0; i < rows; i += 1) matrix[i][0] = i;
+  for (let j = 0; j < cols; j += 1) matrix[0][j] = j;
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  const distance = matrix[rows - 1][cols - 1];
+  TOKEN_EDIT_DISTANCE_CACHE.set(cacheKey, distance);
+  return distance;
+}
+
+function tokensAreNearMatch(left = '', right = '') {
+  const a = String(left || '').trim().toLowerCase();
+  const b = String(right || '').trim().toLowerCase();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 2) return false;
+  if (a.charAt(0) !== b.charAt(0)) return false;
+  const maxLen = Math.max(a.length, b.length);
+  const distance = tokenEditDistance(a, b);
+  if (maxLen <= 5) return distance <= 1;
+  if (maxLen <= 8) return distance <= 2;
+  return distance <= 3;
+}
+
+function phraseTokensNearMatch(ruleTokens = [], candidateTokens = []) {
+  if (!Array.isArray(ruleTokens) || !Array.isArray(candidateTokens)) return false;
+  if (!ruleTokens.length || ruleTokens.length !== candidateTokens.length) return false;
+  let fuzzyDistanceTotal = 0;
+  for (let i = 0; i < ruleTokens.length; i += 1) {
+    const ruleToken = String(ruleTokens[i] || '').trim().toLowerCase();
+    const candidateToken = String(candidateTokens[i] || '').trim().toLowerCase();
+    if (!ruleToken || !candidateToken) return false;
+    if (ruleToken === candidateToken) continue;
+    if (!tokensAreNearMatch(ruleToken, candidateToken)) return false;
+    fuzzyDistanceTotal += tokenEditDistance(ruleToken, candidateToken);
+  }
+  return fuzzyDistanceTotal <= Math.max(2, ruleTokens.length + 1);
+}
+
+function countApproximateNameHits(valueNormalized = '', rules = []) {
+  const corpusTokens = tokenizeLooseText(valueNormalized);
+  if (!corpusTokens.length) return 0;
+  const seen = new Set();
+  let hits = 0;
+  (Array.isArray(rules) ? rules : []).forEach((rule) => {
+    const normalizedRule = normalizeLooseText(rule);
+    if (!normalizedRule || seen.has(normalizedRule)) return;
+    const ruleTokens = tokenizeLooseText(normalizedRule);
+    if (!ruleTokens.length || ruleTokens.length > 4) return;
+    if (ruleTokens.length > corpusTokens.length) return;
+    if (ruleTokens.length <= 1) return;
+
+    for (let start = 0; start <= (corpusTokens.length - ruleTokens.length); start += 1) {
+      const windowTokens = corpusTokens.slice(start, start + ruleTokens.length);
+      if (!phraseTokensNearMatch(ruleTokens, windowTokens)) continue;
+      hits += 1;
+      seen.add(normalizedRule);
+      break;
+    }
+  });
+  return hits;
+}
+
 function asSlug(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return '';
   return /^[a-z0-9-]{2,80}$/.test(normalized) ? normalized : '';
+}
+
+function normalizeCategoryModeValue(value = '') {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  return CATEGORY_MODE_ALIASES[normalized] || '';
 }
 
 const SIGNAL_STOP_WORDS = new Set([
@@ -295,10 +403,138 @@ const CATEGORY_SIGNAL_OVERRIDES = Object.freeze({
     related: ['hospital device', 'patient monitor', 'clinical instrumentation'],
     support: ['biomedical technician', 'clinical engineer']
   }),
+  'magic-users': Object.freeze({
+    strictCore: [
+      'doctor strange',
+      'scarlet witch',
+      'wanda maximoff',
+      'gandalf',
+      'merlin',
+      'hermione granger',
+      'frieren',
+      'raven',
+      'zatanna',
+      'doctor fate',
+      'john constantine'
+    ],
+    core: [
+      'wizard',
+      'sorcerer',
+      'mage',
+      'spellcaster',
+      'warlock',
+      'witch',
+      'arcane',
+      'mystic',
+      'magic user',
+      'sorcery',
+      'spellcraft',
+      'ritual magic'
+    ],
+    related: [
+      'enchanter',
+      'necromancer',
+      'illusion magic',
+      'telekinesis',
+      'psychic power',
+      'esper',
+      'elemental bending',
+      'arcane arts'
+    ],
+    support: [
+      'illusionist',
+      'magician',
+      'stage magician',
+      'occult',
+      'mysticism',
+      'energy manipulation'
+    ],
+    primaryName: [
+      'doctor strange',
+      'dr strange',
+      'scarlet witch',
+      'wanda maximoff',
+      'gandalf',
+      'merlin',
+      'frieren',
+      'raven',
+      'zatanna',
+      'doctor fate',
+      'john constantine',
+      'aang'
+    ],
+    supportName: [
+      'wizard',
+      'sorcerer',
+      'mage',
+      'witch',
+      'warlock',
+      'spellcaster',
+      'magician',
+      'illusionist',
+      'psychic',
+      'esper',
+      'telekinetic'
+    ],
+    negative: ['kryptonian', 'athlete', 'footballer', 'boxer', 'chef', 'politician', 'business executive']
+  }),
   athletes: Object.freeze({
-    core: ['professional athlete', 'olympian', 'champion athlete', 'sports star'],
-    related: ['competition performance', 'athletic training', 'season stats'],
-    support: ['coach', 'trainer', 'sports staff']
+    core: [
+      'professional athlete',
+      'olympian',
+      'champion athlete',
+      'sports star',
+      'pro athlete',
+      'hall of famer',
+      'all star athlete'
+    ],
+    related: [
+      'competition performance',
+      'athletic training',
+      'season stats',
+      'league mvp',
+      'olympic medal',
+      'all star selection',
+      'title defense'
+    ],
+    support: [
+      'coach',
+      'trainer',
+      'sports staff',
+      'sports federation',
+      'athletic association'
+    ],
+    primaryName: [
+      'michael jordan',
+      'lebron james',
+      'le bron james',
+      'shohei ohtani',
+      'mike tyson',
+      'bo jackson',
+      'jon jones',
+      'jesse owens',
+      'jessie owens',
+      'usain bolt',
+      'aaron donald',
+      'serena williams',
+      'lionel messi',
+      'tiger woods'
+    ],
+    supportName: [
+      'athlete',
+      'olympian',
+      'player',
+      'boxer',
+      'fighter',
+      'sprinter',
+      'pitcher',
+      'striker',
+      'quarterback',
+      'running back',
+      'linebacker',
+      'mvp'
+    ],
+    negative: ['superhero', 'mythological god', 'fictional vigilante']
   }),
   'combat-sports': Object.freeze({
     core: ['boxing', 'mma', 'kickboxing', 'muay thai', 'grappling', 'fight sport'],
@@ -370,7 +606,8 @@ const CATEGORY_DOMAIN_NAME_SIGNALS = Object.freeze({
   ]),
   sports: Object.freeze([
     'Michael Jordan', 'Lionel Messi', 'LeBron James', 'Serena Williams', 'Tom Brady', 'Tiger Woods',
-    'Shohei Ohtani', 'Usain Bolt', 'Roger Federer', 'Simone Biles', 'Mookie Betts', 'George Kittle'
+    'Shohei Ohtani', 'Usain Bolt', 'Roger Federer', 'Simone Biles', 'Mookie Betts', 'George Kittle',
+    'Mike Tyson', 'Bo Jackson', 'Jon Jones', 'Jesse Owens', 'Jessie Owens', 'Aaron Donald'
   ]),
   music: Object.freeze([
     'Taylor Swift', 'Beyonce', 'Freddie Mercury', 'Mozart', 'Beethoven', 'Eminem',
@@ -406,7 +643,8 @@ const CATEGORY_DOMAIN_NAME_SIGNALS = Object.freeze({
   ]),
   magic: Object.freeze([
     'Merlin', 'Gandalf', 'Doctor Strange', 'Hermione Granger', 'Harry Potter', 'Scarlet Witch',
-    'Zatanna', 'Morgana', 'Dumbledore', 'Circe', 'Raven', 'Loki'
+    'Zatanna', 'Morgana', 'Dumbledore', 'Circe', 'Raven', 'Loki',
+    'Frieren', 'Doctor Fate', 'John Constantine', 'Wanda Maximoff', 'Aang', 'Shigeo Kageyama'
   ]),
   mecha_pilots: Object.freeze([
     'Amuro Ray', 'Shinji Ikari', 'Char Aznable', 'Kira Yamato', 'Heero Yuy', 'gundam pilot',
@@ -492,6 +730,14 @@ const CATEGORY_DOMAIN_NAME_SIGNALS = Object.freeze({
     'Nelson Mandela', 'Winston Churchill', 'Abraham Lincoln', 'Angela Merkel', 'Jacinda Ardern', 'Theodore Roosevelt',
     'Margaret Thatcher', 'Barack Obama', 'Lee Kuan Yew', 'Volodymyr Zelenskyy', 'Mahatma Gandhi', 'Franklin D. Roosevelt'
   ]),
+  diplomacy: Object.freeze([
+    'Kofi Annan', 'Ban Ki-moon', 'Dag Hammarskjold', 'Henry Kissinger', 'Madeleine Albright', 'Richard Holbrooke',
+    'Foreign Minister', 'UN Envoy', 'Peace Envoy', 'Treaty Negotiator', 'Diplomatic Summit', 'Ceasefire Accord'
+  ]),
+  revolution_conflict: Object.freeze([
+    'Napoleon Bonaparte', 'George Washington', 'Joan of Arc', 'Simon Bolivar', 'Toussaint Louverture', 'Sun Tzu',
+    'Campaign General', 'War Strategist', 'Revolutionary Leader', 'Uprising Commander', 'Conflict Historian', 'Battlefront Commander'
+  ]),
   deities: Object.freeze([
     'Zeus', 'Athena', 'Odin', 'Thor', 'Ra', 'Anubis',
     'Shiva', 'Vishnu', 'Poseidon', 'Ares', 'Hera', 'Loki'
@@ -560,7 +806,22 @@ function inferCategorySignalDomain(category = {}) {
   if (id.includes('aerospace')) return 'aerospace';
   if (id.includes('biotech') || id.includes('genetic')) return 'biotech';
   if (id.includes('quantum')) return 'quantum';
-  if (id.includes('revolution') || id.includes('conflict') || id.includes('diplomacy') || id.includes('treaty')) return 'leaders';
+  if (
+    id.includes('diplomacy')
+    || id.includes('treaty')
+    || id.includes('negotiation')
+    || id.includes('peace-talk')
+    || displayName.includes('diplomacy')
+    || displayName.includes('treaties')
+  ) return 'diplomacy';
+  if (
+    id.includes('revolution')
+    || id.includes('conflict')
+    || id.includes('war-history')
+    || id.includes('uprising')
+    || displayName.includes('revolution')
+    || displayName.includes('conflict')
+  ) return 'revolution_conflict';
   if (id.includes('deities') || id.includes('pantheon')) return 'deities';
   if (id.includes('mythic')) return 'mythic';
   if (id.includes('global-cuisines')) return 'cuisine';
@@ -848,7 +1109,7 @@ function toCategorySummary(category) {
 
 function normalizeCategorySettings(settings = {}) {
   const safe = settings && typeof settings === 'object' ? settings : {};
-  const modeRaw = String(safe.categoriesMode || DEFAULT_CATEGORY_SETTINGS.categoriesMode).trim().toLowerCase();
+  const modeRaw = normalizeCategoryModeValue(safe.categoriesMode || DEFAULT_CATEGORY_SETTINGS.categoriesMode);
   const categoriesMode = CATEGORY_MODES.has(modeRaw) ? modeRaw : DEFAULT_CATEGORY_SETTINGS.categoriesMode;
   const categoryId = asSlug(safe.categoryId);
   const categoryVersion = String(safe.categoryVersion || loadRegistry().version || 'v1').trim().slice(0, 24) || 'v1';
@@ -1038,7 +1299,18 @@ function resolveCategoryFit({
 
   const inclusionHits = countRuleHits(corpusNormalized, category.inclusionRules);
   const exclusionHits = countRuleHits(corpusNormalized, category.exclusionRules);
-  const aliasHits = countRuleHits(corpusNormalized, category.aliases, { allowLooseStem: false });
+  const aliasHitsCorpus = countRuleHits(corpusNormalized, category.aliases, { allowLooseStem: false });
+  const aliasHitsNameExact = Math.max(
+    countRuleHits(rawNameNormalized, category.aliases, { allowLooseStem: false }),
+    countRuleHits(resolvedNameNormalized, category.aliases, { allowLooseStem: false }),
+    countRuleHits(aliasNameNormalized, category.aliases, { allowLooseStem: false })
+  );
+  const aliasHitsNameApprox = Math.max(
+    countApproximateNameHits(rawNameNormalized, category.aliases),
+    countApproximateNameHits(resolvedNameNormalized, category.aliases),
+    countApproximateNameHits(aliasNameNormalized, category.aliases)
+  );
+  const aliasHits = Math.max(aliasHitsCorpus, aliasHitsNameExact, aliasHitsNameApprox);
   const strongExampleHits = countRuleHits(corpusNormalized, category.exampleEntriesStrong || [], { allowLooseStem: false });
   const weakExampleHits = countRuleHits(corpusNormalized, category.exampleEntriesWeak || [], { allowLooseStem: false });
   const strictCoreHits = countRuleHits(corpusNormalized, signalPack.strictCoreSignals || [], { allowLooseStem: false });
@@ -1050,23 +1322,49 @@ function resolveCategoryFit({
   const supportHitsTitle = countRuleHits(resolvedNameNormalized, signalPack.supportSignals || []);
   const supportHitsAlias = countRuleHits(aliasNameNormalized, signalPack.supportSignals || []);
   const supportHits = Math.max(supportHitsCorpus, supportHitsName, supportHitsTitle, supportHitsAlias);
-  const primaryNameHits = Math.max(
+  const primaryNameHitsExact = Math.max(
     countRuleHits(rawNameNormalized, signalPack.primaryNameSignals || [], { allowLooseStem: false }),
     countRuleHits(resolvedNameNormalized, signalPack.primaryNameSignals || [], { allowLooseStem: false }),
     countRuleHits(aliasNameNormalized, signalPack.primaryNameSignals || [], { allowLooseStem: false })
   );
-  const supportNameHits = Math.max(
+  const primaryNameHitsApprox = Math.max(
+    countApproximateNameHits(rawNameNormalized, signalPack.primaryNameSignals || []),
+    countApproximateNameHits(resolvedNameNormalized, signalPack.primaryNameSignals || []),
+    countApproximateNameHits(aliasNameNormalized, signalPack.primaryNameSignals || [])
+  );
+  const primaryNameHits = Math.max(primaryNameHitsExact, primaryNameHitsApprox);
+  const supportNameHitsExact = Math.max(
     countRuleHits(rawNameNormalized, signalPack.supportNameSignals || [], { allowLooseStem: false }),
     countRuleHits(resolvedNameNormalized, signalPack.supportNameSignals || [], { allowLooseStem: false }),
     countRuleHits(aliasNameNormalized, signalPack.supportNameSignals || [], { allowLooseStem: false })
   );
+  const supportNameHitsApprox = Math.max(
+    countApproximateNameHits(rawNameNormalized, signalPack.supportNameSignals || []),
+    countApproximateNameHits(resolvedNameNormalized, signalPack.supportNameSignals || []),
+    countApproximateNameHits(aliasNameNormalized, signalPack.supportNameSignals || [])
+  );
+  const supportNameHits = Math.max(supportNameHitsExact, supportNameHitsApprox);
+  const sportsAdjacentHits = countRuleHits(corpusNormalized, [
+    'speedster',
+    'sprinter',
+    'runner',
+    'track and field',
+    'track athlete',
+    'marathon',
+    'racer'
+  ]);
+  const sportsAdjacentEvidence =
+    String(category && category.family || '').toLowerCase() === 'sports/competition'
+    && sportsAdjacentHits >= 1;
   const derivedCoreHits = Math.max(0, coreHits - strictCoreHits);
   const positiveEvidenceHits = strictCoreHits + derivedCoreHits + relatedHits;
   const conflictHits = exclusionHits + weakExampleHits + negativeSignalHits;
+  const sportsAdjacentStrongEvidence = sportsAdjacentEvidence && sportsAdjacentHits >= 2 && conflictHits <= 2;
   const strongMembershipEvidence =
     strictCoreHits >= 1
     || derivedCoreHits >= 2
     || (primaryNameHits >= 1 && (supportNameHits >= 1 || relatedHits >= 1));
+  const strongAnchorIdentity = strictCoreHits >= 1 && primaryNameHits >= 1 && conflictHits <= 1;
   const inferredAnchorEvidence =
     (derivedCoreHits >= 4 && conflictHits === 0)
     || (derivedCoreHits >= 3 && relatedHits >= 1 && conflictHits <= 1)
@@ -1089,6 +1387,16 @@ function resolveCategoryFit({
   const safeConfidenceName = clamp(Number(confidenceName) || 0, 0, 1);
   const safeConfidenceOverall = clamp(Number(confidenceOverall) || 0, 0, 1);
   const riskSet = new Set((Array.isArray(riskFlags) ? riskFlags : []).map((entry) => String(entry || '').toLowerCase()));
+  const riskyTitleMismatch =
+    riskSet.has('dangerous_title_diff_suspected')
+    || (
+      riskSet.has('title_differs_from_input')
+      && (riskSet.has('synthetic_image') || safeConfidenceName < 0.68)
+    );
+  const lowTrustIdentity =
+    safeConfidenceName < 0.6
+    && (riskSet.has('high_candidate_ambiguity') || riskSet.has('low_signal_ambiguity'));
+  const reliabilityRisk = riskyTitleMismatch || lowTrustIdentity;
 
   let membershipConfidence =
     20 +
@@ -1104,18 +1412,31 @@ function resolveCategoryFit({
   if (inclusionHits > 0 && aliasHits > 0) membershipConfidence += 6;
   if (strongExampleHits > 0) membershipConfidence += 4;
   if (strongMembershipEvidence && relatedHits > 0) membershipConfidence += 4;
+  if (strongMembershipEvidence && conflictHits === 0) membershipConfidence += 4;
+  if (primaryNameHits > 0 && relatedHits > 0 && conflictHits <= 1) membershipConfidence += 4;
+  if (derivedCoreHits >= 2 && relatedHits >= 2 && conflictHits <= 1) membershipConfidence += 5;
+  if (sportsAdjacentEvidence && supportNameHits >= 1 && conflictHits <= 2) membershipConfidence += 4;
+  if (sportsAdjacentStrongEvidence && supportNameHits <= 0) membershipConfidence += 2;
+  if (strongAnchorIdentity) membershipConfidence += 6;
   if (primaryNameHits > 0) membershipConfidence += 6;
   if (supportNameHits > 0) membershipConfidence += 4;
   if (!strongMembershipEvidence && relatedHits > 0) membershipConfidence -= 2;
-  if (supportOnlyEvidence) membershipConfidence -= 6;
+  if (supportOnlyEvidence) membershipConfidence -= 9;
+  if (sportsAdjacentEvidence && !strongMembershipEvidence && supportNameHits <= 0) membershipConfidence -= 2;
   if (positiveEvidenceHits <= 0) membershipConfidence -= 12;
   else if (positiveEvidenceHits === 1) membershipConfidence -= 6;
   if (lowEvidence) membershipConfidence -= positiveEvidenceHits >= 2 ? 2 : 5;
+  if (riskSet.has('title_differs_from_input') && safeConfidenceName < 0.78) membershipConfidence -= strongMembershipEvidence ? 2 : 6;
+  if (riskSet.has('synthetic_image') && safeConfidenceName < 0.78) membershipConfidence -= strongMembershipEvidence ? 1 : 4;
   if (safeConfidenceName < 0.72) membershipConfidence -= strongMembershipEvidence ? 3 : 8;
   if (riskSet.has('high_candidate_ambiguity')) membershipConfidence -= strongMembershipEvidence ? 4 : 10;
   if (riskSet.has('dangerous_title_diff_suspected')) membershipConfidence -= strongMembershipEvidence ? 8 : 16;
   if (riskSet.has('fast_round_timeout_fallback') && !strongMembershipEvidence) membershipConfidence -= 4;
+  if (reliabilityRisk) membershipConfidence -= strongAnchorIdentity ? 2 : (strongMembershipEvidence ? 6 : 14);
+  if (strongAnchorIdentity && membershipConfidence < 58) membershipConfidence = 58;
   if (explicitNameAnchored && !supportOnlyEvidence) membershipConfidence = Math.max(membershipConfidence, 52);
+  if (supportOnlyEvidence && membershipConfidence > 54) membershipConfidence = 54;
+  if (!anchorMembershipEvidence && !strongMembershipEvidence && membershipConfidence > 48) membershipConfidence = 48;
   membershipConfidence = clamp(Math.round(membershipConfidence), 0, 100);
 
   const baseAbility = clamp(Number(subscores && subscores.baseAbility) || 55, 0, 100);
@@ -1149,33 +1470,40 @@ function resolveCategoryFit({
   if (conflictHits >= 4) eligibilityPenalty -= 4;
 
   let inCategoryBonus = 0;
-  if (membershipConfidence >= 72 && withinCategoryPowerRank >= 40) inCategoryBonus = 14;
-  else if (membershipConfidence >= 58 && withinCategoryPowerRank >= 34) inCategoryBonus = 8;
-  else if (membershipConfidence >= 48 && withinCategoryPowerRank >= 30) inCategoryBonus = 4;
+  if (membershipConfidence >= 80 && withinCategoryPowerRank >= 44) inCategoryBonus = 20;
+  else if (membershipConfidence >= 68 && withinCategoryPowerRank >= 38) inCategoryBonus = 14;
+  else if (membershipConfidence >= 56 && withinCategoryPowerRank >= 32) inCategoryBonus = 9;
+  else if (membershipConfidence >= 46 && withinCategoryPowerRank >= 28) inCategoryBonus = 5;
   if (!strongMembershipEvidence) {
-    inCategoryBonus = Math.min(inCategoryBonus, relatedHits >= 2 ? 2 : 0);
+    inCategoryBonus = Math.min(inCategoryBonus, relatedHits >= 2 ? 3 : 0);
   }
   if (supportOnlyEvidence) {
     inCategoryBonus = Math.min(inCategoryBonus, 1);
     if (eligibilityPenalty > -2) eligibilityPenalty = -2;
   }
   if (primaryNameHits > 0 && !supportOnlyEvidence) {
-    inCategoryBonus = Math.max(inCategoryBonus, 4);
+    inCategoryBonus = Math.max(inCategoryBonus, 6);
   }
   if (explicitNameAnchored && !supportOnlyEvidence) {
-    inCategoryBonus = Math.max(inCategoryBonus, 6);
+    inCategoryBonus = Math.max(inCategoryBonus, 9);
   }
   if (derivedCoreHits >= 3 && conflictHits === 0 && !supportOnlyEvidence) {
-    inCategoryBonus = Math.max(inCategoryBonus, 6);
+    inCategoryBonus = Math.max(inCategoryBonus, 9);
+  }
+  if (strictCoreHits >= 1 && relatedHits >= 1 && conflictHits <= 1 && !supportOnlyEvidence) {
+    inCategoryBonus = Math.max(inCategoryBonus, 8);
+  }
+  if (sportsAdjacentEvidence && supportNameHits >= 1 && conflictHits <= 2 && !supportOnlyEvidence) {
+    inCategoryBonus = Math.max(inCategoryBonus, 5);
   }
 
-  let netImpact = clamp(inCategoryBonus + eligibilityPenalty, -30, 20);
+  let netImpact = clamp(inCategoryBonus + eligibilityPenalty, -30, 24);
   let categoryFit = clamp(rawCategoryFit + netImpact, 0, 100);
   if (!strongMembershipEvidence) {
     categoryFit = Math.min(categoryFit, relatedHits >= 2 ? 68 : 40);
   }
   if (supportOnlyEvidence) {
-    categoryFit = Math.min(categoryFit, 62);
+    categoryFit = Math.min(categoryFit, 56);
   }
   if (primaryNameHits > 0 && !supportOnlyEvidence) {
     categoryFit = Math.max(categoryFit, 60);
@@ -1184,52 +1512,88 @@ function resolveCategoryFit({
     categoryFit = Math.max(categoryFit, 68);
   }
   if (supportNameHits > 0 && !strongMembershipEvidence) {
-    categoryFit = Math.max(categoryFit, 45);
+    categoryFit = Math.max(categoryFit, relatedHits >= 1 ? 40 : 34);
   }
   if (strictCoreHits >= 2 && primaryNameHits >= 1 && conflictHits === 0 && !supportOnlyEvidence) {
     categoryFit = Math.max(categoryFit, 70);
   } else if (strictCoreHits >= 1 && primaryNameHits >= 1 && conflictHits === 0 && !supportOnlyEvidence) {
     categoryFit = Math.max(categoryFit, 66);
   }
+  if (strongAnchorIdentity && !supportOnlyEvidence) {
+    categoryFit = Math.max(categoryFit, reliabilityRisk ? 58 : 64);
+  }
+  if (strongMembershipEvidence && anchorMembershipEvidence && conflictHits <= 1 && !supportOnlyEvidence) {
+    categoryFit = Math.max(categoryFit, membershipConfidence >= 62 ? 64 : 58);
+  }
+  if (sportsAdjacentEvidence && conflictHits <= 2) {
+    if (supportNameHits >= 1 && categoryFit < 52) categoryFit = 52;
+    else if (sportsAdjacentHits >= 1 && categoryFit < 46) categoryFit = 46;
+  }
+  if (reliabilityRisk && !explicitNameAnchored && !strongAnchorIdentity) {
+    categoryFit = Math.min(categoryFit, supportOnlyEvidence ? 36 : 50);
+  } else if (reliabilityRisk && strongAnchorIdentity) {
+    categoryFit = Math.min(categoryFit, 66);
+  }
+  if (safeConfidenceName < 0.58 && !strongMembershipEvidence) {
+    categoryFit = Math.min(categoryFit, 44);
+  }
 
   let categoryStatus = 'not_in_category';
   let categoryStatusLabel = 'NOT IN CATEGORY';
   let categoryStatusTone = 'negative';
   let categoryStatusIcon = 'thumbs_down';
-  const primaryNameQualified = primaryNameHits > 0 && categoryFit >= 60 && membershipConfidence >= 50;
-  const derivedCoreQualified = derivedCoreHits >= 3 && conflictHits === 0 && categoryFit >= 66 && membershipConfidence >= 50;
-  const strictCoreQualified = strictCoreHits >= 2 && conflictHits <= 1 && categoryFit >= 58 && membershipConfidence >= 46;
+  const anchoredIdentityUnderRisk =
+    reliabilityRisk
+    && strongAnchorIdentity
+    && categoryFit >= 58
+    && membershipConfidence >= 50;
+  const explicitAnchorForInCategory = strictCoreHits >= 1 || primaryNameHits >= 1 || aliasHits >= 1;
+  const primaryNameQualified = primaryNameHits > 0 && categoryFit >= 58 && membershipConfidence >= 46;
+  const derivedCoreQualified = derivedCoreHits >= 2 && conflictHits <= 1 && categoryFit >= 60 && membershipConfidence >= 44;
+  const strictCoreQualified = strictCoreHits >= 1 && conflictHits <= 1 && categoryFit >= 56 && membershipConfidence >= 42;
   if (
     (
-      (categoryFit >= 67 && membershipConfidence >= 58 && netImpact >= 0)
+      (categoryFit >= 64 && membershipConfidence >= 54 && netImpact >= -1)
       || primaryNameQualified
       || derivedCoreQualified
       || strictCoreQualified
     )
     && strongMembershipEvidence
     && anchorMembershipEvidence
-    && conflictHits <= 2
+    && explicitAnchorForInCategory
+    && membershipConfidence >= 50
+    && conflictHits <= 1
     && !supportOnlyEvidence
     && !supportNameOnly
+    && (!reliabilityRisk || anchoredIdentityUnderRisk)
   ) {
     categoryStatus = 'in_category';
     categoryStatusLabel = 'IN CATEGORY';
     categoryStatusTone = 'positive';
     categoryStatusIcon = 'thumbs_up';
-  } else if (
-    (categoryFit >= 50 && membershipConfidence >= 36)
-    || (strongMembershipEvidence && categoryFit >= 44 && membershipConfidence >= 30)
-    || (primaryNameHits >= 1 && membershipConfidence >= 34)
-    || supportNameHits >= 1
-    || (supportNameHits >= 1 && relatedHits >= 1 && membershipConfidence >= 28)
-    || (derivedCoreHits >= 2 && supportHits >= 1 && conflictHits <= 2)
-    || (supportOnlyEvidence && categoryFit >= 55)
-    || relatedHits >= 3
-  ) {
+  } else {
+    const borderlineAnchorEvidence =
+      strongMembershipEvidence
+      || strictCoreHits >= 1
+      || primaryNameHits >= 1
+      || (supportNameHits >= 1 && (relatedHits >= 1 || sportsAdjacentEvidence))
+      || (derivedCoreHits >= 1 && relatedHits >= 1)
+      || (relatedHits >= 2 && conflictHits <= 2);
+    const borderlineFitEvidence =
+      (categoryFit >= 42 && membershipConfidence >= 26 && conflictHits <= 3)
+      || (supportOnlyEvidence && categoryFit >= 46 && membershipConfidence >= 30 && conflictHits <= 2)
+      || (sportsAdjacentEvidence && categoryFit >= 44 && membershipConfidence >= 24 && conflictHits <= 2)
+      || (strictCoreHits >= 1 && categoryFit >= 38 && membershipConfidence >= 24 && conflictHits <= 2);
+    if (
+      borderlineAnchorEvidence
+      && borderlineFitEvidence
+      && (!reliabilityRisk || strictCoreHits >= 1 || primaryNameHits >= 1)
+    ) {
     categoryStatus = 'borderline';
     categoryStatusLabel = 'BORDERLINE ENTRY';
     categoryStatusTone = 'neutral';
     categoryStatusIcon = 'meh';
+    }
   }
 
   return {
@@ -1255,9 +1619,10 @@ function resolveCategoryFit({
     supportSignalHits: supportHits,
     primaryNameHits,
     supportNameHits,
+    sportsAdjacentHits,
     anchorInclusionHits,
     anchorAliasHits,
-    explain: `Category ${category.displayName}: ${categoryStatusLabel} | fit ${categoryFit}/100, membership ${membershipConfidence}, rank ${withinCategoryPowerRank}, ambiguity ${ambiguityHandling}, impact ${netImpact >= 0 ? '+' : ''}${netImpact} (hits: strict ${strictCoreHits}, core ${coreHits}, related ${relatedHits}, support ${supportHits}, nameCore ${primaryNameHits}, nameSupport ${supportNameHits}, negSig ${negativeSignalHits}, inc ${anchorInclusionHits}, alias ${anchorAliasHits}, strong ${strongExampleHits}, weak ${weakExampleHits}, exc ${exclusionHits}).`
+    explain: `Category ${category.displayName}: ${categoryStatusLabel} | fit ${categoryFit}/100, membership ${membershipConfidence}, rank ${withinCategoryPowerRank}, ambiguity ${ambiguityHandling}, impact ${netImpact >= 0 ? '+' : ''}${netImpact} (hits: strict ${strictCoreHits}, core ${coreHits}, related ${relatedHits}, support ${supportHits}, nameCore ${primaryNameHits}, nameSupport ${supportNameHits}, sportsAdj ${sportsAdjacentHits}, negSig ${negativeSignalHits}, inc ${anchorInclusionHits}, alias ${anchorAliasHits}, strong ${strongExampleHits}, weak ${weakExampleHits}, exc ${exclusionHits}).`
   };
 }
 

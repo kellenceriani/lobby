@@ -249,11 +249,17 @@ async function runContextEngine(character, scenario, twist, options = {}) {
 }
 
 function buildWarmupKey(character, scenario, twist, options = {}) {
+  const categoryContext = options && options.categoryContext && typeof options.categoryContext === 'object'
+    ? options.categoryContext
+    : null;
   return JSON.stringify({
     c: String(character || '').trim().toLowerCase(),
     s: String(scenario || '').trim().toLowerCase(),
     t: String(twist || '').trim().toLowerCase(),
-    m: String(options && options.evaluationMode || 'round').trim().toLowerCase()
+    m: String(options && options.evaluationMode || 'round').trim().toLowerCase(),
+    pcx: options && options.precomputeContext === true ? 1 : 0,
+    cid: String(categoryContext && categoryContext.id || '').trim().toLowerCase(),
+    cv: String(categoryContext && categoryContext.version || '').trim().toLowerCase()
   });
 }
 
@@ -313,6 +319,7 @@ async function warmCharacterEvaluationCaches(character, scenario, twist, options
       );
       let contextPreseeded = false;
       let contextPreseedError = null;
+      let preseedCategoryContext = null;
       if (shouldPreseedContext) {
         try {
           const contextOptions = { ...warmupOptions };
@@ -321,7 +328,33 @@ async function warmCharacterEvaluationCaches(character, scenario, twist, options
             ...contextOptions,
             resolutionSeed: resolverSeed || contextOptions.resolutionSeed
           });
-          await runContextEngine(safeCharacter, scenario, twist, seededContextOptions);
+          const preseedOutcome = await runContextEngine(safeCharacter, scenario, twist, seededContextOptions);
+          const publicResult = preseedOutcome && preseedOutcome.ok && preseedOutcome.publicResult
+            ? preseedOutcome.publicResult
+            : null;
+          const categoryContext = publicResult
+            && publicResult.scoreMeta
+            && publicResult.scoreMeta.categoryContext
+            && typeof publicResult.scoreMeta.categoryContext === 'object'
+            ? publicResult.scoreMeta.categoryContext
+            : null;
+          if (categoryContext || publicResult) {
+            preseedCategoryContext = {
+              categoryFit: Number((categoryContext && categoryContext.categoryFit) || (publicResult && publicResult.categoryFit)) || 0,
+              membershipConfidence: Number((categoryContext && categoryContext.membershipConfidence) || (publicResult && publicResult.categoryMembershipConfidence)) || 0,
+              netImpact: Number((categoryContext && categoryContext.netImpact) || (publicResult && publicResult.categoryNetImpact)) || 0,
+              categoryStatus: String(
+                (categoryContext && categoryContext.categoryStatus)
+                || (publicResult && publicResult.categoryStatus)
+                || ''
+              ).trim().toLowerCase(),
+              categoryStatusLabel: String(
+                (categoryContext && categoryContext.categoryStatusLabel)
+                || (publicResult && publicResult.categoryStatusLabel)
+                || ''
+              ).trim()
+            };
+          }
           contextPreseeded = true;
         } catch (contextError) {
           contextPreseedError = contextError && contextError.message ? contextError.message : 'context preseed failed';
@@ -338,7 +371,12 @@ async function warmCharacterEvaluationCaches(character, scenario, twist, options
         imageSynthetic: Boolean(resolution && resolution.scoringInfo && resolution.scoringInfo.imageSynthetic),
         resolverSeedReady: Boolean(resolverSeed),
         contextPreseeded,
-        contextPreseedError
+        contextPreseedError,
+        categoryFit: Number(preseedCategoryContext && preseedCategoryContext.categoryFit) || 0,
+        categoryMembershipConfidence: Number(preseedCategoryContext && preseedCategoryContext.membershipConfidence) || 0,
+        categoryNetImpact: Number(preseedCategoryContext && preseedCategoryContext.netImpact) || 0,
+        categoryStatus: String(preseedCategoryContext && preseedCategoryContext.categoryStatus || '').trim().toLowerCase() || null,
+        categoryStatusLabel: String(preseedCategoryContext && preseedCategoryContext.categoryStatusLabel || '').trim() || null
       };
       WARMUP_CACHE.set(key, result);
       return result;

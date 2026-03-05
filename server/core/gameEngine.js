@@ -1654,6 +1654,12 @@ function buildRoundIntelSnapshot(game, roundIndex) {
           : []
       ]))
       : {},
+    lockedCategory: game && game.lockedCategory && typeof game.lockedCategory === 'object'
+      ? { ...game.lockedCategory }
+      : null,
+    settings: game && game.settings && typeof game.settings === 'object'
+      ? { ...game.settings }
+      : {},
     __snapshotMeta: {
       type: 'round_intel',
       roundIndex,
@@ -1686,6 +1692,12 @@ function buildRound4Snapshot(game) {
           : {}
       }))
       : [],
+    lockedCategory: game && game.lockedCategory && typeof game.lockedCategory === 'object'
+      ? { ...game.lockedCategory }
+      : null,
+    settings: game && game.settings && typeof game.settings === 'object'
+      ? { ...game.settings }
+      : {},
     __snapshotMeta: {
       type: 'round4_eval',
       gameId: game.id,

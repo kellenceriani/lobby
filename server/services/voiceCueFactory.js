@@ -198,7 +198,7 @@ function buildScenarioVoiceCues({ roundNumber, scenario } = {}) {
 
 function buildCategoryRevealVoiceCues({ roundNumber, category } = {}) {
   const round = Number(roundNumber) || 0;
-  const safeCategory = cleanScenarioOrTwist(category, 120);
+  const safeCategory = cleanScenarioOrTwist(category, 200);
   if (!safeCategory) return [];
   return compactList([
     makeCue({

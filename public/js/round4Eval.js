@@ -62,6 +62,7 @@ const round4State = {
 };
 
 const IMAGE_PRELOAD_CACHE = new Map();
+const IMAGE_PRELOAD_CACHE_MAX_ENTRIES = 220;
 const ROUND4_AUTO_START_MS = Math.max(1200, Number((typeof window !== 'undefined' && window.__ROUND4_AUTO_START_MS) || 6000));
 const ROUND4_EVAL_RETRY_BASE_MS = Math.max(1200, Number((typeof window !== 'undefined' && window.__ROUND4_EVAL_RETRY_BASE_MS) || 3500));
 const ROUND4_EVAL_RETRY_MAX_MS = Math.max(ROUND4_EVAL_RETRY_BASE_MS, Number((typeof window !== 'undefined' && window.__ROUND4_EVAL_RETRY_MAX_MS) || 9000));
@@ -124,6 +125,40 @@ function normalizeImageUrl(url) {
 
 function resolveCharacterImage(url, fallbackLabel = 'No Image') {
   return normalizeImageUrl(url) || buildMissingCharacterImage(fallbackLabel);
+}
+
+function trimImagePreloadCache(limit = IMAGE_PRELOAD_CACHE_MAX_ENTRIES) {
+  const max = Math.max(40, Number(limit) || IMAGE_PRELOAD_CACHE_MAX_ENTRIES);
+  while (IMAGE_PRELOAD_CACHE.size > max) {
+    const oldestKey = IMAGE_PRELOAD_CACHE.keys().next().value;
+    if (!oldestKey) break;
+    IMAGE_PRELOAD_CACHE.delete(oldestKey);
+  }
+}
+
+function isLikelySafariBrowser() {
+  const ua = String(navigator && navigator.userAgent || '').toLowerCase();
+  if (!ua.includes('safari')) return false;
+  if (ua.includes('chrome') || ua.includes('crios') || ua.includes('android')) return false;
+  if (ua.includes('edg') || ua.includes('opr') || ua.includes('firefox') || ua.includes('fxios')) return false;
+  return true;
+}
+
+function isRound4LowResourceDevice() {
+  const reducedMotion = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const connection = (navigator && (navigator.connection || navigator.mozConnection || navigator.webkitConnection)) || null;
+  const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
+  const saveDataEnabled = Boolean(connection && connection.saveData === true);
+  const slowNetwork = saveDataEnabled || /(^|[^a-z])(slow-2g|2g|3g)($|[^a-z])/i.test(effectiveType);
+  const cores = Math.max(0, Number(navigator && navigator.hardwareConcurrency) || 0);
+  const memory = Math.max(0, Number(navigator && navigator.deviceMemory) || 0);
+  const lowCpu = cores > 0 && cores <= 4;
+  const lowMemory = memory > 0 && memory <= 4;
+  return reducedMotion || slowNetwork || lowCpu || lowMemory || isLikelySafariBrowser();
+}
+
+function shouldUseAggressiveRound4Prefetch() {
+  return !isRound4LowResourceDevice() && getRevealPerfMode() !== 'lite';
 }
 
 function getScenarioDelta(evalData) {
@@ -1011,6 +1046,12 @@ function resetCinematicState() {
   round4State.evaluationWatchdogAttempts = 0;
   round4State.evaluationWatchdogStartedAtMs = 0;
 
+  if (isRound4LowResourceDevice()) {
+    IMAGE_PRELOAD_CACHE.clear();
+  } else {
+    trimImagePreloadCache(160);
+  }
+
   const boards = document.getElementById('evalTeamBoards');
   if (boards) boards.classList.remove('is-elite-crash');
 
@@ -1456,6 +1497,7 @@ function loadImageAsset(url) {
   });
 
   IMAGE_PRELOAD_CACHE.set(normalized, preloadTask);
+  trimImagePreloadCache();
   return preloadTask;
 }
 
@@ -1535,20 +1577,28 @@ function preloadCinematicAssets() {
       .map((assignment) => assignment && assignment.evalData ? normalizeImageUrl(assignment.evalData.imageUrl) : null)
       .filter(Boolean)
   ));
+  const aggressivePrefetch = shouldUseAggressiveRound4Prefetch();
+  const selectedUrls = aggressivePrefetch
+    ? urls
+    : urls.slice(0, Math.max(4, Math.min(8, urls.length)));
 
-  const totalAssets = urls.length;
+  const totalAssets = selectedUrls.length;
   let completedAssets = 0;
 
   updateLoadingDockProgress(0, totalAssets || 1, 'Preloading character assets');
 
-  const settlePromise = runWithConcurrency(urls, 4, async (url) => {
+  const settlePromise = runWithConcurrency(selectedUrls, aggressivePrefetch ? 4 : 2, async (url) => {
     await loadImageAsset(url).catch(() => null);
     completedAssets += 1;
-    updateLoadingDockProgress(completedAssets, totalAssets || 1, 'Preloading character assets');
+    updateLoadingDockProgress(
+      completedAssets,
+      totalAssets || 1,
+      aggressivePrefetch ? 'Preloading character assets' : 'Preloading essential assets'
+    );
   })
     .then(() => {
       round4State.preloadDone = true;
-      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, 'Assets ready');
+      updateLoadingDockProgress(totalAssets || 1, totalAssets || 1, aggressivePrefetch ? 'Assets ready' : 'Essential assets ready');
       return true;
     })
     .catch(() => {
@@ -1571,9 +1621,10 @@ function preloadCinematicAssets() {
 
 function prepareRevealAnnouncerVoiceWarmup() {
   if (round4State.revealAnnouncerWarmPromise) return round4State.revealAnnouncerWarmPromise;
+  const aggressivePrefetch = shouldUseAggressiveRound4Prefetch();
 
   const cues = (Array.isArray(round4State.queue) ? round4State.queue : [])
-    .slice(0, 24)
+    .slice(0, aggressivePrefetch ? 24 : 8)
     .map((assignment) => buildRevealTierAnnouncerCue(assignment, null))
     .filter(Boolean);
 
@@ -1583,12 +1634,25 @@ function prepareRevealAnnouncerVoiceWarmup() {
     return round4State.revealAnnouncerWarmPromise;
   }
 
+  if (!aggressivePrefetch) {
+    round4State.revealAnnouncerWarmDone = true;
+    setRevealCeremonyProgress(78, 'Announcer callouts queued');
+    setLoadingBotContext(null, null, 'Announcer callouts queued. Finishing reveal setup...');
+    prefetchSharedVoiceCues(cues.slice(0, 6), { source: 'round4-reveal-announcer-lite', delayMs: 120 });
+    round4State.revealAnnouncerWarmPromise = Promise.resolve({
+      ok: true,
+      deferred: true,
+      reason: 'lite_prefetch_only',
+      queued: Math.min(6, cues.length)
+    });
+    return round4State.revealAnnouncerWarmPromise;
+  }
+
   round4State.revealAnnouncerWarmDone = false;
   round4State.revealAnnouncerWarmPromise = Promise.race([
     Promise.resolve().then(async () => {
-    const perfMode = getRevealPerfMode();
     const warmLimit = Math.max(4, Math.min(cues.length, 24));
-    const warmConcurrency = perfMode === 'lite' ? 3 : 5;
+    const warmConcurrency = 5;
     setRevealCeremonyProgress(62, 'Warming announcer callouts');
     setLoadingBotContext(null, null, `Warming announcer callouts (${warmLimit}/${cues.length})...`);
 
@@ -1730,6 +1794,19 @@ function animateDockTransition(assignment, onDone) {
   const target = document.querySelector(`.eval-slot[data-team-index='${assignment.teamIndex}'][data-slot-index='${assignment.slotIndex}']`);
   if (!active || !target) {
     onDone();
+    return;
+  }
+  const lightweightRevealMode = isRound4LowResourceDevice() || getRevealPerfMode() === 'lite';
+  if (lightweightRevealMode) {
+    active.classList.remove('is-reveal-showcasing', 'is-reveal-anticipating');
+    if (host) host.classList.remove('is-showcase-hold');
+    triggerSlotImpact(target, {
+      ...profile,
+      revealTier: profile && profile.revealTier ? profile.revealTier : getRevealTierFromEval(assignment && assignment.evalData ? assignment.evalData : null),
+      crashLanding: false,
+      settleMs: Math.min(220, Number(profile && profile.settleMs) || 220)
+    });
+    setAnimTimer(() => onDone(), 120);
     return;
   }
 
@@ -3714,12 +3791,13 @@ if (typeof window !== 'undefined' && !window.__round4SocketBound) {
           Array.isArray(team && team.evaluations) ? team.evaluations : []
         ));
         if (prefetchEntries.length) {
+          const aggressivePrefetch = shouldUseAggressiveRound4Prefetch();
           prefetchSharedCharacterCardBlurbs(prefetchEntries, {
             context: 'round4-evaluated',
-            maxEntries: 24,
-            warmTop: 12,
-            voiceWarmTop: 18,
-            immediate: true
+            maxEntries: aggressivePrefetch ? 18 : 8,
+            warmTop: aggressivePrefetch ? 6 : 1,
+            voiceWarmTop: aggressivePrefetch ? 8 : 0,
+            immediate: false
           });
         }
       } catch (prefetchError) {

@@ -421,10 +421,27 @@ function detectRevealPerfMode() {
 
   try {
     const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const ua = String(navigator && navigator.userAgent || '').toLowerCase();
+    const isLikelyMobile = /android|iphone|ipad|ipod|mobile|windows phone/i.test(ua)
+      || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+      || Number(navigator && navigator.maxTouchPoints) > 0;
+    const isLikelySafari = ua.includes('safari')
+      && !ua.includes('chrome')
+      && !ua.includes('crios')
+      && !ua.includes('android')
+      && !ua.includes('edg')
+      && !ua.includes('opr')
+      && !ua.includes('firefox')
+      && !ua.includes('fxios');
+    const connection = (navigator && (navigator.connection || navigator.mozConnection || navigator.webkitConnection)) || null;
+    const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
+    const saveDataEnabled = Boolean(connection && connection.saveData === true);
+    const slowNetwork = saveDataEnabled || /(^|[^a-z])(slow-2g|2g|3g)($|[^a-z])/i.test(effectiveType);
     const cores = Number(navigator.hardwareConcurrency) || 0;
     const memory = Number(navigator.deviceMemory) || 0;
     const isLikelyLowEnd = (cores > 0 && cores <= 4) || (memory > 0 && memory <= 4);
-    if (reducedMotion || isLikelyLowEnd) return 'lite';
+    const unknownHardware = cores <= 0 && memory <= 0;
+    if (reducedMotion || isLikelyLowEnd || slowNetwork || isLikelySafari || (isLikelyMobile && unknownHardware)) return 'lite';
   } catch (error) {
   }
 

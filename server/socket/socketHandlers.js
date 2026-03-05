@@ -925,7 +925,8 @@ async function buildDraftWaitPreviewForPlayer(game, playerName) {
   const scenario = String(game.currentScenario || '').trim();
   const twist = getDraftWarmupTwist(game);
   if (!scenario) return null;
-
+  // Keep preview requests cheap/non-blocking: only read already-warmed cache.
+  // Heavy warmups in a request loop can stall the event loop and hurt socket reliability.
   const warmups = await Promise.all(roster.map((character) => (
     peekCharacterEvaluationWarmup(character, scenario, twist, { evaluationMode: 'round' })
       .catch(() => null)
@@ -934,6 +935,41 @@ async function buildDraftWaitPreviewForPlayer(game, playerName) {
   const evaluations = roster.map((character, index) => {
     const warm = warmups[index];
     const hasWarm = Boolean(warm && typeof warm === 'object');
+    const categoryFit = hasWarm ? (Number(warm.categoryFit) || 0) : 0;
+    const categoryMembershipConfidence = hasWarm ? (Number(warm.categoryMembershipConfidence) || 0) : 0;
+    const categoryNetImpact = hasWarm ? (Number(warm.categoryNetImpact) || 0) : 0;
+    const statusRaw = hasWarm && warm.categoryStatus
+      ? String(warm.categoryStatus)
+      : '';
+    const hasCategoryNumbers = categoryFit > 0 || categoryMembershipConfidence > 0 || categoryNetImpact !== 0;
+    let categoryStatus = statusRaw;
+    if (!categoryStatus && hasWarm && warm.ok === true) {
+      if (hasCategoryNumbers) {
+        if (categoryFit >= 66 && categoryMembershipConfidence >= 54 && categoryNetImpact >= 0) {
+          categoryStatus = 'in_category';
+        } else if (categoryFit >= 42 || categoryMembershipConfidence >= 28 || categoryNetImpact >= -4) {
+          categoryStatus = 'borderline';
+        } else {
+          categoryStatus = 'not_in_category';
+        }
+      } else {
+        categoryStatus = 'still_determining';
+      }
+    }
+    const statusLabelRaw = hasWarm && warm.categoryStatusLabel
+      ? String(warm.categoryStatusLabel)
+      : '';
+    const normalizedStatus = String(categoryStatus || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const categoryStatusLabel = statusLabelRaw
+      || (
+        normalizedStatus === 'in_category'
+          ? 'IN CATEGORY'
+          : normalizedStatus === 'borderline' || normalizedStatus === 'borderline_entry'
+            ? 'BORDERLINE ENTRY'
+            : normalizedStatus === 'not_in_category' || normalizedStatus === 'out_of_category'
+              ? 'NOT IN CATEGORY'
+              : (hasWarm && warm.ok === true ? 'Still determining...' : null)
+      );
     return {
       character: String(character || `Pick ${index + 1}`),
       ready: Boolean(hasWarm && warm.ok === true),
@@ -943,7 +979,12 @@ async function buildDraftWaitPreviewForPlayer(game, playerName) {
       imageSynthetic: Boolean(hasWarm && warm.imageSynthetic),
       resolverSeedReady: Boolean(hasWarm && warm.resolverSeedReady),
       contextPreseeded: Boolean(hasWarm && warm.contextPreseeded),
-      fetchDurationMs: hasWarm ? (Number(warm.fetchDurationMs) || 0) : 0
+      fetchDurationMs: hasWarm ? (Number(warm.fetchDurationMs) || 0) : 0,
+      categoryFit,
+      categoryMembershipConfidence,
+      categoryNetImpact,
+      categoryStatus: categoryStatus || null,
+      categoryStatusLabel
     };
   });
 
@@ -952,6 +993,17 @@ async function buildDraftWaitPreviewForPlayer(game, playerName) {
   const averageConfidence = readyEntries.length
     ? (readyEntries.reduce((sum, entry) => sum + (Number(entry.confidence) || 0), 0) / readyEntries.length)
     : 0;
+  const inCategoryCount = readyEntries.filter((entry) => String(entry && entry.categoryStatus || '').toLowerCase() === 'in_category').length;
+  const borderlineCount = readyEntries.filter((entry) => String(entry && entry.categoryStatus || '').toLowerCase() === 'borderline').length;
+  const notInCategoryCount = readyEntries.filter((entry) => {
+    const status = String(entry && entry.categoryStatus || '').toLowerCase();
+    return status === 'not_in_category' || status === 'out_of_category';
+  }).length;
+  const pendingCategoryCount = evaluations.filter((entry) => {
+    if (!entry || entry.ready !== true) return true;
+    const status = String(entry.categoryStatus || '').trim().toLowerCase();
+    return !status || status === 'still_determining' || status === 'pending';
+  }).length;
 
   return {
     roundNumber: (Number(game.currentRound) || 0) + 1,
@@ -962,7 +1014,11 @@ async function buildDraftWaitPreviewForPlayer(game, playerName) {
       readyCount: readyEntries.length,
       totalCount: evaluations.length,
       trustedCount,
-      averageConfidence
+      averageConfidence,
+      inCategoryCount,
+      borderlineCount,
+      notInCategoryCount,
+      pendingCategoryCount
     },
     evaluations
   };
@@ -1646,7 +1702,7 @@ function registerSocketHandlers(io) {
         const joined = getJoinedRoom(socket);
         if (!joined) return;
 
-        if (!allowRequest(`${socket.id}:requestDraftWaitPreview`, 400, 20)) {
+        if (!allowRequest(`${socket.id}:requestDraftWaitPreview`, 1000, 6)) {
           return;
         }
 

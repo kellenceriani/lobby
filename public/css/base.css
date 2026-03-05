@@ -1087,6 +1087,16 @@ kbd {
   accent-color: var(--primary);
 }
 
+#round4EvalScreen.active ~ #audioQuickFab {
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  right: auto;
+}
+
+#round4EvalScreen.active ~ #audioQuickPanel {
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  right: auto;
+}
+
 .install-prompt {
   position: fixed;
   left: 50%;

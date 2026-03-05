@@ -1,5 +1,22 @@
 const NAME_RE = /^[A-Za-z0-9 _'\-.]{2,20}$/;
 const ROOM_RE = /^[A-Z0-9]{2,10}$/;
+const CATEGORY_MODE_ALIASES = Object.freeze({
+  off: 'off',
+  host_select: 'host_select',
+  hostselect: 'host_select',
+  smart_random: 'smart_random',
+  smartrandom: 'smart_random',
+  group_vote: 'group_vote',
+  groupvote: 'group_vote'
+});
+
+function normalizeCategoryMode(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  return CATEGORY_MODE_ALIASES[normalized] || '';
+}
 
 function sanitizeName(raw) {
   const name = String(raw || '').trim().replace(/\s+/g, ' ');
@@ -62,7 +79,7 @@ function sanitizeSettings(input) {
   }
 
   if (typeof settings.categoriesMode === 'string') {
-    const mode = settings.categoriesMode.trim().toLowerCase();
+    const mode = normalizeCategoryMode(settings.categoriesMode);
     if (categoryModes.has(mode)) {
       cleaned.categoriesMode = mode;
     }

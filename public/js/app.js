@@ -58,7 +58,12 @@ import {
 
 const socket = io(window.location.origin, {
   path: '/socket.io',
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 800,
+  reconnectionDelayMax: 5000,
+  timeout: 20000
 });
 window.socket = socket; // Expose to window for round4Eval.js
 
@@ -209,6 +214,14 @@ function isLikelyMobileDevice() {
   return /android|iphone|ipad|ipod|mobile|windows phone/i.test(ua) || coarsePointer || hasTouch;
 }
 
+function isLikelySafariBrowser() {
+  const ua = String(navigator && navigator.userAgent || '').toLowerCase();
+  if (!ua.includes('safari')) return false;
+  if (ua.includes('chrome') || ua.includes('crios') || ua.includes('android')) return false;
+  if (ua.includes('edg') || ua.includes('opr') || ua.includes('firefox') || ua.includes('fxios')) return false;
+  return true;
+}
+
 function isConstrainedMobileStartupDevice() {
   const connection = (navigator && (navigator.connection || navigator.mozConnection || navigator.webkitConnection)) || null;
   const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
@@ -219,6 +232,22 @@ function isConstrainedMobileStartupDevice() {
   const constrainedCpu = hardwareConcurrency > 0 && hardwareConcurrency <= 4;
   const constrainedMemory = deviceMemory > 0 && deviceMemory <= 2;
   return isLikelyMobileDevice() && (constrainedNetwork || constrainedCpu || constrainedMemory);
+}
+
+function shouldUseAggressiveRealtimePrefetch() {
+  const reducedMotion = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const connection = (navigator && (navigator.connection || navigator.mozConnection || navigator.webkitConnection)) || null;
+  const effectiveType = String(connection && connection.effectiveType || '').toLowerCase();
+  const saveDataEnabled = Boolean(connection && connection.saveData === true);
+  const slowNetwork = saveDataEnabled || /(^|[^a-z])(slow-2g|2g|3g)($|[^a-z])/i.test(effectiveType);
+  const hardwareConcurrency = Math.max(0, Number(navigator && navigator.hardwareConcurrency) || 0);
+  const deviceMemory = Math.max(0, Number(navigator && navigator.deviceMemory) || 0);
+  const lowCpu = hardwareConcurrency > 0 && hardwareConcurrency <= 4;
+  const lowMemory = deviceMemory > 0 && deviceMemory <= 4;
+  if (reducedMotion || slowNetwork || lowCpu || lowMemory) return false;
+  if (isLikelySafariBrowser()) return false;
+  if (isConstrainedMobileStartupDevice()) return false;
+  return true;
 }
 
 function setMobileAppHeightVar() {
@@ -3636,6 +3665,7 @@ async function probeManagedMediaUrl(url = '') {
   })();
 
   audioState.mediaUrlProbeCache.set(key, pending);
+  trimMapToSize(audioState.mediaUrlProbeCache, MEDIA_PROBE_CACHE_MAX_ENTRIES);
   return pending;
 }
 
@@ -4270,6 +4300,18 @@ const startupBootstrapState = {
   taskIndex: new Map(),
   tasks: []
 };
+const CARD_SNIPPET_CACHE_MAX_ENTRIES = 320;
+const MEDIA_PROBE_CACHE_MAX_ENTRIES = 96;
+
+function trimMapToSize(mapRef, maxEntries) {
+  if (!mapRef || typeof mapRef.size !== 'number') return;
+  const limit = Math.max(1, Number(maxEntries) || 1);
+  while (mapRef.size > limit) {
+    const firstKey = mapRef.keys().next();
+    if (!firstKey || firstKey.done) break;
+    mapRef.delete(firstKey.value);
+  }
+}
 
 function dismissInitialStartupOverlay() {
   const overlay = document.getElementById('loadingOverlay');
@@ -4520,7 +4562,7 @@ async function runStartupBootstrapPreflight() {
   }
   startupBootstrapState.forceReleaseTimerId = window.setTimeout(() => {
     forceReleaseStartupInteractivity('watchdog-timeout');
-  }, 12000);
+  }, 9000);
 
   const runWithSoftTimeout = (promiseFactory, {
     timeoutMs = 2500,
@@ -4549,7 +4591,8 @@ async function runStartupBootstrapPreflight() {
   });
 
   const constrainedMobileStartup = isConstrainedMobileStartupDevice();
-  const blockVoiceWarmups = true;
+  // Reliability-first startup: keep heavy voice warmups out of the critical path.
+  const blockVoiceWarmups = false;
 
   const blockingTaskList = [
     {
@@ -4672,7 +4715,7 @@ async function runStartupBootstrapPreflight() {
         return { cast, preview };
       }
     },
-    {
+    ...(constrainedMobileStartup ? [] : [{
       key: 'kokoro-preview-topoff',
       label: 'Lobby preview cache top-off',
       run: async () => {
@@ -4689,7 +4732,7 @@ async function runStartupBootstrapPreflight() {
         }
         return { warmed: cues.length };
       }
-    },
+    }]),
     {
       key: 'pack-catalog',
       label: 'Pack catalog',
@@ -5645,6 +5688,8 @@ function cacheCardSnippetMatchResult(meta = {}, resolvedRow = null, options = {}
     updatedAt: Date.now(),
     purpose: String(options && options.purpose || 'entry-callout')
   });
+  trimMapToSize(audioState.cardSnippetMatchCache, CARD_SNIPPET_CACHE_MAX_ENTRIES);
+  trimMapToSize(audioState.cardSnippetBatchMetaCache, CARD_SNIPPET_CACHE_MAX_ENTRIES);
   return payload;
 }
 
@@ -5762,6 +5807,7 @@ async function resolveCharacterCardSnippetSpec(meta, options = {}) {
   })();
 
   audioState.cardSnippetMatchCache.set(signatureKey, pending);
+  trimMapToSize(audioState.cardSnippetMatchCache, CARD_SNIPPET_CACHE_MAX_ENTRIES);
   return pending;
 }
 
@@ -5988,7 +6034,10 @@ function playCardSpeechQuote(speechSpec = {}, meta = {}, options = {}) {
 }
 
 async function prefetchCharacterCardBlurbsNow(metaList = [], options = {}) {
-  scheduleKokoroFullCastWarmup({ source: 'blurb-prefetch', delayMs: 120 });
+  const aggressivePrefetch = shouldUseAggressiveRealtimePrefetch();
+  if (aggressivePrefetch) {
+    scheduleKokoroFullCastWarmup({ source: 'blurb-prefetch', delayMs: 120 });
+  }
   const metas = (Array.isArray(metaList) ? metaList : [])
     .map((meta) => normalizeCharacterAudioMeta(meta))
     .filter((meta) => meta && (meta.character || meta.resolvedTitle));
@@ -6005,7 +6054,7 @@ async function prefetchCharacterCardBlurbsNow(metaList = [], options = {}) {
 
   deduped.sort((a, b) => scoreCardClipPrefetchPriority(b, options) - scoreCardClipPrefetchPriority(a, options));
 
-  const maxEntries = Math.max(1, Math.min(48, Number(options && options.maxEntries) || 18));
+  const maxEntries = Math.max(1, Math.min(aggressivePrefetch ? 48 : 12, Number(options && options.maxEntries) || 18));
   const selected = deduped.slice(0, maxEntries);
 
   // Avoid re-requesting entries that already have a resolved cache promise.
@@ -6017,8 +6066,11 @@ async function prefetchCharacterCardBlurbsNow(metaList = [], options = {}) {
   let speechQueued = 0;
   let speechWarmed = 0;
   const contextKey = String(options && options.context || '').toLowerCase();
-  const voiceWarmCap = contextKey.includes('round4') || contextKey.includes('final') || contextKey.includes('ovr') ? 18 : 10;
-  const voiceWarmLimit = Math.max(0, Math.min(voiceWarmCap, Number(options && options.voiceWarmTop) || Math.min(6, selected.length)));
+  const voiceWarmCap = aggressivePrefetch
+    ? (contextKey.includes('round4') || contextKey.includes('final') || contextKey.includes('ovr') ? 18 : 10)
+    : (contextKey.includes('round4') || contextKey.includes('final') || contextKey.includes('ovr') ? 2 : 1);
+  const defaultVoiceWarm = aggressivePrefetch ? Math.min(6, selected.length) : Math.min(1, selected.length);
+  const voiceWarmLimit = Math.max(0, Math.min(voiceWarmCap, Number(options && options.voiceWarmTop) || defaultVoiceWarm));
   const speechPrefetchCues = [];
   for (let i = 0; i < selected.length; i += 1) {
     const meta = selected[i];
@@ -6064,11 +6116,17 @@ async function prefetchCharacterCardBlurbsNow(metaList = [], options = {}) {
 function scheduleCharacterCardBlurbPrefetch(entries = [], options = {}) {
   const list = Array.isArray(entries) ? entries.slice() : [];
   if (!list.length) return false;
+  const aggressivePrefetch = shouldUseAggressiveRealtimePrefetch();
   const context = String(options && options.context || 'generic');
-  const maxEntries = Number(options && options.maxEntries) || 18;
-  const warmTop = Number(options && options.warmTop) || 0;
-  const voiceWarmTop = Number(options && options.voiceWarmTop) || 0;
-  const immediate = options && options.immediate === true;
+  const maxEntries = Math.max(1, Math.min(aggressivePrefetch ? 24 : 8, Number(options && options.maxEntries) || 18));
+  const warmTop = Math.max(0, Math.min(aggressivePrefetch ? 10 : 3, Number(options && options.warmTop) || 0));
+  const voiceWarmTop = Math.max(0, Math.min(aggressivePrefetch ? 12 : 2, Number(options && options.voiceWarmTop) || 0));
+  const immediate = Boolean(options && options.immediate === true && aggressivePrefetch);
+  const queueHardCap = aggressivePrefetch ? 96 : 40;
+
+  if (audioState.cardClipPrefetchQueue.length >= queueHardCap) {
+    return false;
+  }
 
   list.forEach((entry) => {
     const meta = normalizeCharacterAudioMeta(entry);
@@ -6078,6 +6136,11 @@ function scheduleCharacterCardBlurbPrefetch(entries = [], options = {}) {
     if (audioState.cardSnippetMatchCache.has(key)) return;
     audioState.cardClipPrefetchQueuedKeys.add(key);
     audioState.cardClipPrefetchQueue.push({ meta, context, maxEntries, warmTop, voiceWarmTop, immediate, enqueuedAt: Date.now() });
+    if (audioState.cardClipPrefetchQueue.length > queueHardCap) {
+      const dropped = audioState.cardClipPrefetchQueue.shift();
+      const droppedKey = dropped && dropped.meta ? getCardSnippetCacheKey(dropped.meta) : '';
+      if (droppedKey) audioState.cardClipPrefetchQueuedKeys.delete(droppedKey);
+    }
   });
 
   if (audioState.cardClipPrefetchDrainTimer) {
@@ -6097,9 +6160,9 @@ function scheduleCharacterCardBlurbPrefetch(entries = [], options = {}) {
     void drainCharacterCardBlurbPrefetchQueue();
   };
   if (!immediate && typeof window.requestIdleCallback === 'function') {
-    audioState.cardClipPrefetchDrainTimer = window.requestIdleCallback(drain, { timeout: 450 });
+    audioState.cardClipPrefetchDrainTimer = window.requestIdleCallback(drain, { timeout: aggressivePrefetch ? 450 : 900 });
   } else {
-    audioState.cardClipPrefetchDrainTimer = window.setTimeout(drain, immediate ? 0 : 60);
+    audioState.cardClipPrefetchDrainTimer = window.setTimeout(drain, immediate ? 0 : (aggressivePrefetch ? 60 : 140));
   }
   return true;
 }
@@ -6968,12 +7031,22 @@ function renderDraftWaitIntelPreview(preview) {
   const trustedCount = Number(summary.trustedCount) || 0;
   const totalEvalCount = Number(summary.totalCount) || entries.length;
   const readyCount = Number(summary.readyCount) || entries.filter((entry) => entry && entry.ready === true).length;
+  const inCategoryCount = Number(summary.inCategoryCount) || 0;
+  const borderlineCount = Number(summary.borderlineCount) || 0;
+  const notInCategoryCount = Number(summary.notInCategoryCount) || 0;
+  const pendingCategoryCount = Number(summary.pendingCategoryCount)
+    || entries.filter((entry) => {
+      if (!entry || entry.ready !== true) return true;
+      const status = String(entry.categoryStatus || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+      return !status || status === 'still_determining' || status === 'pending';
+    }).length;
 
   body.innerHTML = `
     <div class="draft-wait-intel-preview-summary">
       <span><small>Ready</small><b>${readyCount}/${totalEvalCount}</b></span>
       <span><small>Trusted</small><b>${trustedCount}/${totalEvalCount}</b></span>
       <span><small>Confidence</small><b>${avgConfidencePct == null ? 'n/a' : `${avgConfidencePct}%`}</b></span>
+      <span><small>Category</small><b>In ${inCategoryCount} | Border ${borderlineCount} | Out ${notInCategoryCount} | Pending ${pendingCategoryCount}</b></span>
     </div>
     <div class="draft-wait-intel-preview-list">
       ${entries.map((entry, idx) => {
@@ -6984,6 +7057,18 @@ function renderDraftWaitIntelPreview(preview) {
         const note = entry.ready === true
           ? `${entry.contextPreseeded ? 'Context ready' : 'Resolver ready'}${entry.imageUrl ? ' + portrait' : ''}${entry.imageSynthetic ? ' (synthetic)' : ''}`
           : 'Cached prep still warming. Twist has not been revealed yet.';
+        const categoryStatusRaw = String(entry && entry.categoryStatus ? entry.categoryStatus : '').trim().toLowerCase();
+        const categoryStatusLabelRaw = String(entry && entry.categoryStatusLabel ? entry.categoryStatusLabel : '').trim();
+        const normalizedCategoryStatus = categoryStatusRaw.replace(/[\s-]+/g, '_');
+        const categoryStatusLabel = normalizedCategoryStatus === 'in_category'
+          ? 'IN CATEGORY'
+          : normalizedCategoryStatus === 'borderline' || normalizedCategoryStatus === 'borderline_entry'
+            ? 'BORDERLINE'
+            : normalizedCategoryStatus === 'not_in_category' || normalizedCategoryStatus === 'out_of_category'
+              ? 'NOT IN CATEGORY'
+              : (entry.ready === true ? (categoryStatusLabelRaw || 'STILL DETERMINING...') : 'STILL DETERMINING...');
+        const categoryFit = Number(entry && entry.categoryFit) || 0;
+        const categoryMembership = Number(entry && entry.categoryMembershipConfidence) || 0;
         const mood = getEarlyIntelEmotionEmoji(entry);
         return `
           <article class="draft-wait-intel-card" style="--draft-wait-intel-index:${idx};">
@@ -6995,6 +7080,8 @@ function renderDraftWaitIntelPreview(preview) {
               <span>${entry.ready === true ? 'Ready' : 'Status'} <b>${entry.ready === true ? 'Yes' : 'Warming'}</b></span>
               <span>Source <b>${escapeHtml(source)}</b></span>
               <span>${confidencePct == null ? 'Confidence n/a' : `Confidence ${confidencePct}%`}</span>
+              <span>Category <b>${escapeHtml(categoryStatusLabel)}</b></span>
+              ${entry.ready === true ? `<span>Fit <b>${categoryFit}</b> | Membership <b>${categoryMembership}</b></span>` : ''}
             </div>
             <p>${escapeHtml(note)}</p>
           </article>
@@ -7023,12 +7110,14 @@ function startDraftWaitIntelPreviewPolling() {
   }
 
   resetDraftWaitIntelPreview({ hide: false, statusText: 'Checking cached evaluator prep...' });
-  draftWaitIntelPreviewState.pollStopAtMs = Date.now() + 3400;
+  draftWaitIntelPreviewState.pollStopAtMs = Date.now() + 2600;
   draftWaitIntelPreviewState.receivedRound = null;
   draftWaitIntelPreviewState.requestRound = currentRound;
 
   const requestPreview = () => {
     if (!socket || typeof socket.emit !== 'function') return;
+    if (!socket.connected) return;
+    if (document.hidden) return;
     if (!document.getElementById('scenarioScreen')?.classList.contains('active')) return;
     if (!gameState.draftLocked) return;
     if (Date.now() > draftWaitIntelPreviewState.pollStopAtMs) {
@@ -7043,7 +7132,7 @@ function startDraftWaitIntelPreviewPolling() {
   };
 
   requestPreview();
-  draftWaitIntelPreviewState.pollTimer = setInterval(requestPreview, 450);
+  draftWaitIntelPreviewState.pollTimer = setInterval(requestPreview, 900);
   addTimer(draftWaitIntelPreviewState.pollTimer);
 }
 
@@ -7369,10 +7458,21 @@ function clearCategoryVoteCountdownTimer() {
   categoryVoteCountdownTimer = null;
 }
 
+function normalizeCategoryMode(modeRaw) {
+  const normalized = String(modeRaw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  if (normalized === 'groupvote') return 'group_vote';
+  if (normalized === 'hostselect') return 'host_select';
+  if (normalized === 'smartrandom') return 'smart_random';
+  return normalized;
+}
+
 function updateCategoryDescription(categoryId) {
   const descriptionEl = document.getElementById('categoryDescription');
   if (!descriptionEl) return;
-  const mode = String(roomState && roomState.settings && roomState.settings.categoriesMode || 'smart_random').trim().toLowerCase();
+  const mode = normalizeCategoryMode(roomState && roomState.settings && roomState.settings.categoriesMode || 'smart_random');
   if (mode === 'off') {
     descriptionEl.textContent = 'Categories disabled for this lobby.';
     return;
@@ -7418,7 +7518,7 @@ function renderCategoryOptions() {
 function applyCategorySettingsInputs(settings = {}) {
   const categoryModeInput = document.getElementById('categoriesMode');
   const categoryIdInput = document.getElementById('categoryId');
-  const mode = String(settings && settings.categoriesMode || 'smart_random').trim().toLowerCase();
+  const mode = normalizeCategoryMode(settings && settings.categoriesMode || 'smart_random');
   const categoryId = String(settings && settings.categoryId || '').trim().toLowerCase();
   if (categoryModeInput) categoryModeInput.value = mode || 'smart_random';
   if (categoryIdInput) {
@@ -7459,7 +7559,11 @@ function renderCategoryVotePanel(voteState = null) {
   const selectEl = document.getElementById('categoryVoteChoice');
   const castBtn = document.getElementById('castCategoryVoteBtn');
   const metaEl = document.getElementById('categoryVoteMeta');
-  if (!statusEl || !selectEl || !castBtn) return;
+  if (!statusEl || !selectEl || !castBtn) {
+    // Keep group vote functional even when compact settings controls are removed/hidden.
+    renderCategoryVoteFullscreen(voteState);
+    return;
+  }
 
   const vote = voteState && typeof voteState === 'object' ? voteState : null;
   const options = vote && Array.isArray(vote.options) ? vote.options : [];
@@ -7763,7 +7867,14 @@ socket.on('gameError', (msg) => {
 });
 
 socket.on('roomData', (data) => {
-  console.log('📍 Received roomData:', data);
+  if (connectionDebugState.enabled) {
+    const playerCount = Array.isArray(data && data.players) ? data.players.length : 0;
+    const hasGame = Boolean(data && data.gameState);
+    const phase = hasGame && data.gameState && data.gameState.activePhase
+      ? String(data.gameState.activePhase)
+      : 'n/a';
+    console.log(`[ConnDebug roomData] players=${playerCount} game=${hasGame ? 'yes' : 'no'} phase=${phase}`);
+  }
   Object.assign(roomState, data);
   if (data && data.voiceConfig && typeof data.voiceConfig === 'object') {
     const narratorVoiceId = normalizeKokoroVoiceId(data.voiceConfig.narratorVoiceId || DEFAULT_NARRATOR_VOICE_ID) || DEFAULT_NARRATOR_VOICE_ID;
@@ -9318,6 +9429,8 @@ socket.on('draftWaitIntelPreview', (data) => {
   if (incomingRound && activeRound && incomingRound !== activeRound) return;
   draftWaitIntelPreviewState.receivedRound = incomingRound || activeRound || null;
   renderDraftWaitIntelPreview(data);
+  // One response is enough for this cache-only sneak peek; stop polling to reduce load.
+  stopDraftWaitIntelPreviewPolling();
   const summary = data && data.summary && typeof data.summary === 'object' ? data.summary : {};
   const readyCount = Number(summary.readyCount) || 0;
   const totalCount = Number(summary.totalCount) || 0;
@@ -9338,18 +9451,25 @@ socket.on('round4Start', (data) => {
   playPhaseShiftSound();
   try {
     const finalTeams = data && data.finalTeams && typeof data.finalTeams === 'object' ? data.finalTeams : {};
-    const prefetchEntries = Object.entries(finalTeams).flatMap(([ownerName, roster]) => (
+    const allPrefetchEntries = Object.entries(finalTeams).flatMap(([ownerName, roster]) => (
       Array.isArray(roster)
         ? roster.map((character) => ({ character, ownerName }))
         : []
     ));
+    const localPlayerName = String(player && player.name || '').trim();
+    const localRoster = localPlayerName && Array.isArray(finalTeams[localPlayerName])
+      ? finalTeams[localPlayerName].map((character) => ({ character, ownerName: localPlayerName }))
+      : [];
+    const isHostClient = String(roomState && roomState.host || '') === localPlayerName;
+    const prefetchEntries = isHostClient ? allPrefetchEntries : localRoster;
     if (prefetchEntries.length) {
+      const aggressivePrefetch = shouldUseAggressiveRealtimePrefetch();
       scheduleCharacterCardBlurbPrefetch(prefetchEntries, {
         context: 'round4-start',
-        maxEntries: 18,
-        warmTop: 10,
-        voiceWarmTop: 12,
-        immediate: true
+        maxEntries: aggressivePrefetch ? 12 : 6,
+        warmTop: aggressivePrefetch ? 4 : 1,
+        voiceWarmTop: aggressivePrefetch ? 4 : 0,
+        immediate: false
       });
     }
   } catch (prefetchError) {
@@ -10151,12 +10271,16 @@ socket.on('gameEnded', (data) => {
         .concat(Array.isArray(eliteShowcaseCharacters) ? eliteShowcaseCharacters : [])
         .concat(Array.isArray(championCharacters) ? championCharacters : []);
       if (prefetchPool.length) {
-        scheduleCharacterCardBlurbPrefetch(prefetchPool, {
+        const localPlayerName = String(player && player.name || '').trim();
+        const isHostClient = String(roomState && roomState.host || '') === localPlayerName;
+        const targetedPool = isHostClient ? prefetchPool : prefetchPool.slice(0, 4);
+        const aggressivePrefetch = shouldUseAggressiveRealtimePrefetch();
+        scheduleCharacterCardBlurbPrefetch(targetedPool, {
           context: 'final-screen',
-          maxEntries: 18,
-          warmTop: 10,
-          voiceWarmTop: 12,
-          immediate: true
+          maxEntries: aggressivePrefetch ? 12 : 6,
+          warmTop: aggressivePrefetch ? 4 : 1,
+          voiceWarmTop: aggressivePrefetch ? 4 : 0,
+          immediate: false
         });
       }
     } catch (prefetchError) {
@@ -10306,7 +10430,9 @@ socket.on('gameEnded', (data) => {
             ? { label: 'BORDERLINE ENTRY', icon: '[~]', tone: 'neutral' }
             : normalizedCategoryStatus === 'not_in_category' || normalizedCategoryStatus === 'out_of_category'
               ? { label: 'NOT IN CATEGORY', icon: '[-]', tone: 'neg' }
-              : { label: categoryStatusLabelRaw || 'CATEGORY N/A', icon: '-', tone: 'neutral' };
+              : normalizedCategoryStatus === 'still_determining' || normalizedCategoryStatus === 'pending' || !normalizedCategoryStatus
+                ? { label: 'STILL DETERMINING...', icon: '[?]', tone: 'neutral' }
+                : { label: categoryStatusLabelRaw || 'CATEGORY N/A', icon: '-', tone: 'neutral' };
         const submetaRight = finalCategoryActive
           ? `<span class="winner-char-trace winner-char-category ${categoryMeta.tone}">${escapeHtml(`${categoryMeta.label} ${categoryMeta.icon}`)}</span>`
           : `<span class="winner-char-trace">${evalEngineMode.toUpperCase()} ${evalTrustPct}%</span>`;

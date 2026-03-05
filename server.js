@@ -16,11 +16,22 @@ const {
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  cors: { origin: '*' },
+  transports: ['websocket', 'polling'],
+  pingInterval: 25000,
+  pingTimeout: 60000,
+  connectTimeout: 45000,
+  maxHttpBufferSize: 1e6,
+  allowEIO3: true
+});
 const ttsNoProviderLogState = {
   lastAt: 0,
   suppressed: 0
 };
+const AUDIO_CALLOUT_MAX_BATCH_ENTRIES = Math.max(1, Math.min(64, Number(process.env.AUDIO_CALLOUT_MAX_BATCH_ENTRIES) || 24));
+const AUDIO_CALLOUT_BATCH_DEDUPE_TTL_MS = Math.max(300, Number(process.env.AUDIO_CALLOUT_BATCH_DEDUPE_TTL_MS) || 2200);
+const audioCalloutBatchInflight = new Map();
 
 async function runAdaptiveTtsStartupPreflight() {
   const startedAt = Date.now();
@@ -98,12 +109,77 @@ app.get('/api/categories', (_req, res) => {
   res.json(getCategoryRegistrySnapshot());
 });
 
+function normalizeAudioCalloutEntry(entry = {}) {
+  const safe = entry && typeof entry === 'object' ? entry : {};
+  return {
+    character: String(safe.character || '').trim().slice(0, 120),
+    resolvedTitle: String(safe.resolvedTitle || '').trim().slice(0, 160),
+    aliases: (Array.isArray(safe.aliases) ? safe.aliases : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .slice(0, 16),
+    description: String(safe.description || '').trim().slice(0, 700),
+    resolvedSource: String(safe.resolvedSource || '').trim().slice(0, 80),
+    riskFlags: (Array.isArray(safe.riskFlags) ? safe.riskFlags : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .slice(0, 16),
+    imageSynthetic: Boolean(safe.imageSynthetic),
+    infoConfidence: Number(safe.infoConfidence) || 0,
+    resolverConfidence: Number(safe.resolverConfidence) || 0,
+    ovr: Number(safe.ovr) || 0
+  };
+}
+
+function buildAudioCalloutBatchDedupeKey(entries = [], purpose = 'entry-callout') {
+  const fingerprintRows = (Array.isArray(entries) ? entries : [])
+    .slice(0, AUDIO_CALLOUT_MAX_BATCH_ENTRIES)
+    .map((entry) => {
+      const safe = normalizeAudioCalloutEntry(entry);
+      return [
+        safe.character.toLowerCase(),
+        safe.resolvedTitle.toLowerCase(),
+        safe.aliases.join('|').toLowerCase(),
+        safe.description.slice(0, 180).toLowerCase(),
+        safe.resolvedSource.toLowerCase(),
+        safe.riskFlags.join('|').toLowerCase(),
+        safe.imageSynthetic ? 1 : 0
+      ];
+    });
+  return `${String(purpose || 'entry-callout').toLowerCase()}::${JSON.stringify(fingerprintRows)}`;
+}
+
+function pruneAudioCalloutBatchInflight() {
+  const now = Date.now();
+  for (const [key, state] of audioCalloutBatchInflight.entries()) {
+    if (!state || Number(state.expiresAt) <= now) {
+      audioCalloutBatchInflight.delete(key);
+    }
+  }
+}
+
 async function handleAudioCalloutResolveBatch(req, res) {
   const body = req && req.body && typeof req.body === 'object' ? req.body : {};
   const entries = Array.isArray(body.entries) ? body.entries : [];
+  const normalizedEntries = entries
+    .slice(0, AUDIO_CALLOUT_MAX_BATCH_ENTRIES)
+    .map((entry) => normalizeAudioCalloutEntry(entry));
   const purpose = String(body.purpose || body.mode || 'entry-callout').trim().toLowerCase() || 'entry-callout';
+  pruneAudioCalloutBatchInflight();
+  const dedupeKey = buildAudioCalloutBatchDedupeKey(normalizedEntries, purpose);
+  const now = Date.now();
+  const existing = audioCalloutBatchInflight.get(dedupeKey);
   try {
-    const payload = await resolveAudioCalloutBatch(null, entries, { purpose });
+    const payloadPromise = existing && existing.promise && Number(existing.expiresAt) > now
+      ? existing.promise
+      : resolveAudioCalloutBatch(null, normalizedEntries, { purpose });
+    if (!(existing && existing.promise && Number(existing.expiresAt) > now)) {
+      audioCalloutBatchInflight.set(dedupeKey, {
+        promise: payloadPromise,
+        expiresAt: now + AUDIO_CALLOUT_BATCH_DEDUPE_TTL_MS
+      });
+    }
+    const payload = await payloadPromise;
     const stats = payload && payload.stats && typeof payload.stats === 'object' ? payload.stats : {};
     const speechSourceCounts = {};
     const rows = Array.isArray(payload && payload.results) ? payload.results : [];
@@ -126,7 +202,7 @@ async function handleAudioCalloutResolveBatch(req, res) {
       .map(([classId, count]) => `${classId}:${count}`)
       .join('|');
     console.log(
-      `[Audio callouts] resolve-batch req=${entries.length}` +
+      `[Audio callouts] resolve-batch req=${normalizedEntries.length}` +
       ` purpose=${purpose}` +
       ` assoc=${Number(stats.speechAssociation || stats.speechFact) || 0}` +
       ` speechQ=${Number(stats.speechQuote) || 0}` +
@@ -138,8 +214,9 @@ async function handleAudioCalloutResolveBatch(req, res) {
     );
     res.json(payload);
   } catch (error) {
+    audioCalloutBatchInflight.delete(dedupeKey);
     console.warn(
-      `[Audio callouts] resolve-batch failed req=${entries.length} purpose=${purpose} error=${String(error && error.message || 'unknown')}`
+      `[Audio callouts] resolve-batch failed req=${normalizedEntries.length} purpose=${purpose} error=${String(error && error.message || 'unknown')}`
     );
     res.status(500).json({
       error: 'audio_callout_resolve_failed',

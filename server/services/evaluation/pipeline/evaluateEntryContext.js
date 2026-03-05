@@ -42,6 +42,11 @@ function hasUsableTwist(twist) {
   return normalized && normalized !== 'NO PLOT TWIST' && normalized !== 'NONE' && normalized !== 'N/A';
 }
 
+function hasUsableScenario(scenario) {
+  const normalized = String(scenario || '').trim().toUpperCase();
+  return normalized && normalized !== 'NO FINAL SCENARIO' && normalized !== 'NONE' && normalized !== 'N/A';
+}
+
 function textIncludesAny(text, patterns) {
   const raw = String(text || '').toLowerCase();
   return (Array.isArray(patterns) ? patterns : []).some((pattern) => {
@@ -711,10 +716,26 @@ function computeBaseAbilityScore(relevance, resolution, scoringInfo) {
   else if (entityKind === 'organization') raw = 44;
   else if (entityKind === 'person') raw = 52;
   else if (entityKind === 'fictional_character') raw = 58;
+  const hasMythicPowerSignals = textIncludesAny(description, ['god', 'deity', 'demigod', 'cosmic', 'omnipotent']);
+  const hasSuperPowerSignals = textIncludesAny(description, [
+    'superhuman', 'kryptonian', 'mutant', 'meta-human', 'superhero', 'demi-god', 'demigod'
+  ]);
+  const hasMysticPowerSignals = textIncludesAny(description, [
+    'wizard', 'sorcerer', 'witch', 'mage', 'spellcaster', 'arcane', 'mystic', 'magic',
+    'telekinesis', 'psychic', 'esper', 'chakra', 'bender', 'elemental bending', 'ninja'
+  ]);
+  const broadEntertainmentHuman =
+    entityKind === 'person'
+    && textIncludesAny(description, ['actor', 'actress', 'model', 'musician', 'singer', 'performer', 'comedian', 'entertainer', 'television personality'])
+    && !hasSuperPowerSignals
+    && !hasMysticPowerSignals
+    && !textIncludesAny(description, ['athlete', 'fighter', 'olympic', 'scientist', 'inventor', 'engineer', 'commander', 'leader']);
 
-  if (!isBruceBannerIdentity && textIncludesAny(description, ['god', 'deity', 'demigod', 'cosmic', 'omnipotent'])) raw += 18;
-  else if (!isBruceBannerIdentity && textIncludesAny(description, ['superhuman', 'kryptonian', 'mutant', 'meta-human', 'wizard', 'sorcerer', 'superhero'])) raw += 12;
+  if (!isBruceBannerIdentity && hasMythicPowerSignals) raw += 18;
+  else if (!isBruceBannerIdentity && (hasSuperPowerSignals || hasMysticPowerSignals)) raw += 12;
   else if (textIncludesAny(description, ['inventor', 'engineer', 'scientist', 'detective', 'strategist', 'commander'])) raw += 6;
+  if (hasMysticPowerSignals && entityKind === 'fictional_character') raw += 4;
+  if (entityKind === 'person' && textIncludesAny(description, ['illusionist', 'magician', 'escapologist'])) raw += 3;
   if (textIncludesAny(description, ['bugs bunny', 'looney tunes', 'toon force', 'cartoon character'])) raw += 8;
   if (entityKind === 'fictional_character' && textIncludesAny(description, [
     'alien', 'dragon', 'assassin', 'warrior', 'monster', 'experiment', 'enhanced', 'augmented'
@@ -726,6 +747,7 @@ function computeBaseAbilityScore(relevance, resolution, scoringInfo) {
   if (textIncludesAny(description, ['athlete', 'quarterback', 'running back', 'boxer', 'fighter', 'olympic', 'champion'])) raw += 5;
   if (textIncludesAny(description, ['genius', 'brilliant', 'master detective', 'billionaire'])) raw += 4;
   if (textIncludesAny(description, ['child', 'schoolboy', 'student']) && !textIncludesAny(description, ['superhuman', 'wizard', 'genius'])) raw -= 3;
+  if (broadEntertainmentHuman) raw -= 8;
 
   raw += Math.min(12, topTraitCount * 2.2);
   if (profileType !== 'balanced') raw += 3;
@@ -1043,7 +1065,9 @@ function buildContextRiskFlags({
   const flags = new Set(Array.isArray(resolution && resolution.riskFlags) ? resolution.riskFlags : []);
 
   const scenarioMatchCount = Number(relevance && relevance.scenario && relevance.scenario.matchCount) || 0;
-  if (scenarioMatchCount === 0) flags.add('no_scenario_keyword_overlap');
+  if (hasUsableScenario(parsedContext && parsedContext.scenario) && scenarioMatchCount === 0) {
+    flags.add('no_scenario_keyword_overlap');
+  }
   if (hasUsableTwist(parsedContext && parsedContext.twist)) {
     const twistMatchCount = Number(relevance && relevance.twist && relevance.twist.matchCount) || 0;
     if (twistMatchCount === 0) flags.add('no_twist_keyword_overlap');
@@ -1479,6 +1503,9 @@ function computeContextOvrModel({
   const categoryMembership = clamp(Number(categoryContext && categoryContext.membershipConfidence) || 50, 0, 100);
   const categoryImpact = Number(categoryContext && categoryContext.netImpact) || 0;
   const categoryStatus = String(categoryContext && categoryContext.categoryStatus || '').trim().toLowerCase();
+  const categoryFamily = String(categoryContext && categoryContext.categoryFamily || '').trim().toLowerCase();
+  const categoryStrictCoreHits = Number(categoryContext && categoryContext.strictCoreHits) || 0;
+  const categoryPrimaryNameHits = Number(categoryContext && categoryContext.primaryNameHits) || 0;
 
   const traits = Array.isArray(relevance && relevance.profile && relevance.profile.topTraits)
     ? relevance.profile.topTraits.map((t) => String(t || '').toLowerCase()).filter(Boolean)
@@ -1515,7 +1542,9 @@ function computeContextOvrModel({
       'actor', 'actress', 'portrayed', 'role in', 'film', 'television', 'known for playing'
     ]);
     const hasLiteralPowerSignals = textIncludesAny(desc, [
-      'superhuman', 'kryptonian', 'mutant', 'meta-human', 'supernatural', 'wizard', 'sorcerer', 'magic'
+      'superhuman', 'kryptonian', 'mutant', 'meta-human', 'supernatural',
+      'wizard', 'sorcerer', 'witch', 'mage', 'spellcaster', 'magic', 'arcane', 'mystic',
+      'telekinesis', 'psychic', 'esper', 'chakra', 'bender', 'elemental bending', 'ninja'
     ]);
     const hasFranchiseSuperSignals = textIncludesAny(desc, ['superhero', 'comic book']);
     const hasSuper = hasLiteralPowerSignals || (hasFranchiseSuperSignals && !hasPortrayalBioSignals);
@@ -1546,7 +1575,7 @@ function computeContextOvrModel({
       return { ceilingClass: 'elite_athlete_human', baseFloor: 24, baseCeiling: 74, neutralCap: 82, attributeCap: 10 };
     }
     if (entityKind === 'person' && hasEntertainmentSignals && !hasSuper && !hasMythic) {
-      return { ceilingClass: 'entertainment_human', baseFloor: 18, baseCeiling: 62, neutralCap: 72, attributeCap: 8 };
+      return { ceilingClass: 'entertainment_human', baseFloor: 16, baseCeiling: 58, neutralCap: 70, attributeCap: 8 };
     }
     if (entityKind === 'person' && hasGeniusSignals && isOperatorProfile) {
       return { ceilingClass: 'elite_operator_human', baseFloor: 24, baseCeiling: 76, neutralCap: 84, attributeCap: 11 };
@@ -1737,6 +1766,10 @@ function computeContextOvrModel({
   const serviceOpsSignals = textIncludesAny(desc, [
     'chef', 'restaurant', 'kitchen', 'host', 'manager', 'coordinator', 'planner', 'operator', 'dispatcher', 'coach', 'mentor', 'teacher'
   ]);
+  const broadEntertainmentPerson =
+    entityKind === 'person'
+    && !superPowerSignals
+    && textIncludesAny(desc, ['actor', 'actress', 'model', 'musician', 'singer', 'performer', 'comedian', 'entertainer']);
   const toonForceSignals = textIncludesAny(desc, ['bugs bunny', 'looney tunes', 'toon force', 'cartoon']);
   const hulkLikePrecisionRisk = /(^| )hulk( |$)/i.test(titleText) && !isBruceBannerIdentity;
   const starkLikeTechIdentity = textIncludesAny(`${titleText} ${desc}`, ['tony stark', 'iron man']);
@@ -1912,6 +1945,10 @@ function computeContextOvrModel({
   const lowTrustRiskStack =
     confidenceName < 0.72
     && (severeRiskCount >= 2 || (severeRiskCount >= 1 && moderateRiskCount >= 2));
+  const highIdentityRisk =
+    resolutionRiskFlags.has('dangerous_title_diff_suspected')
+    || riskySearchMismatch
+    || lowTrustRiskStack;
   if (confidenceOverall < 0.45) fitDelta -= 3;
   if (confidenceOverall < 0.3) fitDelta -= 4;
   if (confidenceName < 0.72 && resolutionRiskFlags.has('title_differs_from_input')) fitDelta -= 5;
@@ -1924,14 +1961,33 @@ function computeContextOvrModel({
   if (riskySearchMismatch) fitDelta -= 6;
   if (riskySearchMismatch && moderateRiskCount >= 2) fitDelta -= 4;
   if (categoryActive) {
-    let categoryPenalty = 0;
-    if (categoryStatus === 'not_in_category') categoryPenalty -= 14;
-    if (categoryFit < 30 || categoryMembership < 20) categoryPenalty -= 14;
-    else if (categoryFit < 40 || categoryMembership < 30) categoryPenalty -= 10;
-    else if (categoryFit < 50 || categoryMembership < 40) categoryPenalty -= 4;
-    if (categoryImpact <= -20) categoryPenalty -= 4;
-    else if (categoryImpact <= -12) categoryPenalty -= 2;
-    fitDelta += categoryPenalty;
+    let categoryAdjustment = 0;
+    if (categoryStatus === 'in_category') {
+      if (categoryFit >= 82 && categoryMembership >= 72) categoryAdjustment += 24;
+      else if (categoryFit >= 72 && categoryMembership >= 60) categoryAdjustment += 18;
+      else if (categoryFit >= 60 && categoryMembership >= 48) categoryAdjustment += 12;
+      else categoryAdjustment += 8;
+      if (categoryImpact >= 10) categoryAdjustment += 5;
+      else if (categoryImpact >= 4) categoryAdjustment += 3;
+      if (categoryStrictCoreHits >= 1 || categoryPrimaryNameHits >= 1) categoryAdjustment += 3;
+      if (highIdentityRisk) categoryAdjustment = Math.max(3, Math.round(categoryAdjustment * 0.55));
+    } else if (categoryStatus === 'borderline') {
+      if (categoryFit >= 64 && categoryMembership >= 46) categoryAdjustment += 1;
+      else if (categoryFit < 52 || categoryMembership < 34) categoryAdjustment -= 3;
+      if (categoryImpact <= -16) categoryAdjustment -= 3;
+      else if (categoryImpact <= -10) categoryAdjustment -= 2;
+    } else {
+      if (categoryStatus === 'not_in_category') categoryAdjustment -= 20;
+      if (categoryFit < 30 || categoryMembership < 20) categoryAdjustment -= 16;
+      else if (categoryFit < 40 || categoryMembership < 30) categoryAdjustment -= 11;
+      else if (categoryFit < 50 || categoryMembership < 40) categoryAdjustment -= 6;
+      if (categoryImpact <= -20) categoryAdjustment -= 5;
+      else if (categoryImpact <= -12) categoryAdjustment -= 3;
+    }
+    fitDelta += categoryAdjustment;
+  }
+  if (broadEntertainmentPerson && opsTraitCount <= 2 && powerTraitCount <= 1 && fitMean < 72) {
+    fitDelta -= 4;
   }
 
   let finalOVR = neutralBaseOVR + fitDelta + restraintDelta;
@@ -1975,6 +2031,16 @@ function computeContextOvrModel({
       confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 80);
     }
   }
+  const entertainmentFamilyCategory =
+    categoryFamily.includes('entertainment')
+    || categoryFamily.includes('media')
+    || categoryFamily.includes('arts')
+    || categoryFamily.includes('pop culture');
+  if (broadEntertainmentPerson && categoryActive && !entertainmentFamilyCategory) {
+    if (categoryStatus === 'not_in_category') confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 68);
+    else if (categoryStatus === 'borderline') confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 74);
+    else confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 76);
+  }
   if (confidenceName < 0.65 && resolutionRiskFlags.has('title_differs_from_input')) confidenceCappedFinalCap -= 6;
   if (resolutionRiskFlags.has('fast_round_timeout_fallback')) confidenceCappedFinalCap -= 10;
   if (resolutionRiskFlags.has('high_candidate_ambiguity') && confidenceName < 0.75) confidenceCappedFinalCap -= 5;
@@ -1984,15 +2050,27 @@ function computeContextOvrModel({
   if (lowTrustRiskStack) confidenceCappedFinalCap -= 6;
   if (riskySearchMismatch) confidenceCappedFinalCap -= 6;
   if (categoryActive) {
-    if (categoryStatus === 'not_in_category' || categoryFit < 30 || categoryMembership < 20) {
-      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 68);
+    if (
+      categoryStatus === 'in_category'
+      && !highIdentityRisk
+      && categoryFit >= 58
+      && categoryMembership >= 46
+    ) {
+      if (categoryFit >= 82 && categoryMembership >= 72) confidenceCappedFinalCap = Math.max(confidenceCappedFinalCap, 96);
+      else if (categoryFit >= 72 && categoryMembership >= 60) confidenceCappedFinalCap = Math.max(confidenceCappedFinalCap, 94);
+      else confidenceCappedFinalCap = Math.max(confidenceCappedFinalCap, 90);
+    } else if (categoryStatus === 'not_in_category' || categoryFit < 30 || categoryMembership < 20) {
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 60);
     } else if (categoryFit < 40 || categoryMembership < 30) {
-      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 74);
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 66);
     } else if (categoryFit < 50 || categoryMembership < 40) {
-      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 80);
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 72);
     } else if (categoryStatus === 'borderline' || categoryFit < 60) {
-      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 88);
+      confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 80);
     }
+  }
+  if (highIdentityRisk && categoryStrictCoreHits <= 0 && categoryPrimaryNameHits <= 0) {
+    confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, 74);
   }
   confidenceCappedFinalCap = clamp(confidenceCappedFinalCap, 0, 99);
   const finalFloorByClass = {
@@ -2012,7 +2090,7 @@ function computeContextOvrModel({
     media_work: 0,
     unknown: 4
   };
-  const contextualFloor = Math.min(
+  let contextualFloor = Math.min(
     confidenceCappedFinalCap,
     Math.max(
       finalFloorByClass[powerBand.ceilingClass] ?? 4,
@@ -2025,6 +2103,24 @@ function computeContextOvrModel({
       ))
     )
   );
+  if (categoryActive && categoryStatus === 'in_category' && !highIdentityRisk) {
+    let inCategoryFloor = 40;
+    if (categoryFit >= 82 && categoryMembership >= 72) inCategoryFloor = 58;
+    else if (categoryFit >= 72 && categoryMembership >= 60) inCategoryFloor = 52;
+    else if (categoryFit >= 62 && categoryMembership >= 50) inCategoryFloor = 46;
+    if (categoryStrictCoreHits >= 1 || categoryPrimaryNameHits >= 1) inCategoryFloor += 2;
+    if (categoryImpact >= 8) inCategoryFloor += 2;
+    contextualFloor = Math.max(contextualFloor, Math.min(confidenceCappedFinalCap, inCategoryFloor));
+  }
+  if (categoryActive && categoryStatus === 'borderline') {
+    const borderlineCap = (categoryFit >= 60 && categoryMembership >= 42) ? 82 : (categoryFit >= 48 ? 76 : 70);
+    confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, borderlineCap);
+  } else if (categoryActive && categoryStatus === 'not_in_category') {
+    const outCap = (categoryFit >= 48 && categoryMembership >= 36) ? 64 : (categoryFit >= 36 ? 60 : 56);
+    confidenceCappedFinalCap = Math.min(confidenceCappedFinalCap, outCap);
+  }
+  confidenceCappedFinalCap = clamp(confidenceCappedFinalCap, 0, 99);
+  contextualFloor = Math.min(contextualFloor, confidenceCappedFinalCap);
   finalOVR = clamp(finalOVR, contextualFloor, confidenceCappedFinalCap);
 
   const finalScenarioDelta = finalOVR - neutralBaseOVR;

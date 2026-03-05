@@ -223,7 +223,22 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   po: ['Po (Kung Fu Panda)', 'Po (Kung Fu Panda character)', 'Kung Fu Panda'],
   michaelangelo: ['Michelangelo (Teenage Mutant Ninja Turtles)', 'Michelangelo', 'Teenage Mutant Ninja Turtles'],
   gojosatoru: ['Satoru Gojo', 'Gojo Satoru', 'Jujutsu Kaisen'],
-  naruto: ['Naruto Uzumaki', 'Naruto']
+  naruto: ['Naruto Uzumaki', 'Naruto'],
+  narutouzumaki: ['Naruto Uzumaki', 'Naruto'],
+  drstrange: ['Doctor Strange', 'Doctor Strange (character)', 'Stephen Strange'],
+  doctorstrange: ['Doctor Strange', 'Doctor Strange (character)', 'Stephen Strange'],
+  scarletwitch: ['Scarlet Witch', 'Wanda Maximoff', 'Scarlet Witch (Marvel Comics)'],
+  raventeentitans: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)'],
+  raven: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)'],
+  starfire: ['Starfire (Teen Titans)', 'Starfire', 'Koriand\'r'],
+  atomeve: ['Atom Eve', 'Samantha Eve Wilkins', 'Invincible (TV series)'],
+  frieren: ['Frieren (character)', 'Frieren', "Frieren: Beyond Journey's End"],
+  aang: ['Aang', 'Avatar: The Last Airbender'],
+  mob: ['Shigeo Kageyama', 'Mob Psycho 100', 'Mob (Mob Psycho 100)'],
+  mobpsycho: ['Shigeo Kageyama', 'Mob Psycho 100'],
+  mobmobphysco: ['Shigeo Kageyama', 'Mob Psycho 100'],
+  mobmobpsycho: ['Shigeo Kageyama', 'Mob Psycho 100'],
+  davidblaine: ['David Blaine']
   ,
   elon: ['Elon Musk'],
   magneto: ['Magneto', 'Magneto (Marvel Comics)'],
@@ -496,6 +511,76 @@ const RESOLUTION_ALIAS_OVERRIDES = {
   blackwidow: {
     queries: ['Black Widow (Natasha Romanova)', 'Black Widow (Marvel Comics)', 'Black Widow (2021 film)'],
     rejectTitles: ['black widow']
+  },
+  drstrange: {
+    queries: ['Doctor Strange (character)', 'Doctor Strange', 'Stephen Strange'],
+    rejectTitles: ['Doctor Strange in the Multiverse of Madness', 'Doctor Strange (disambiguation)'],
+    allowTitles: ['Doctor Strange (character)', 'Doctor Strange', 'Stephen Strange']
+  },
+  doctorstrange: {
+    queries: ['Doctor Strange (character)', 'Doctor Strange', 'Stephen Strange'],
+    rejectTitles: ['Doctor Strange in the Multiverse of Madness', 'Doctor Strange (disambiguation)'],
+    allowTitles: ['Doctor Strange (character)', 'Doctor Strange', 'Stephen Strange']
+  },
+  scarletwitch: {
+    queries: ['Scarlet Witch', 'Wanda Maximoff', 'Scarlet Witch (Marvel Comics)'],
+    rejectTitles: ['WandaVision', 'Scarlet Witch (disambiguation)'],
+    allowTitles: ['Scarlet Witch', 'Wanda Maximoff', 'Scarlet Witch (Marvel Comics)']
+  },
+  raven: {
+    queries: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)'],
+    rejectTitles: ['Raven (bird)', 'Common raven', 'Raven (disambiguation)'],
+    allowTitles: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)']
+  },
+  raventeentitans: {
+    queries: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)'],
+    rejectTitles: ['Raven (bird)', 'Common raven', 'Raven (disambiguation)'],
+    allowTitles: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)']
+  },
+  starfire: {
+    queries: ['Starfire (Teen Titans)', 'Starfire', "Koriand'r"],
+    rejectTitles: ['Starfire (disambiguation)', 'Starfire (band)'],
+    allowTitles: ['Starfire (Teen Titans)', 'Starfire', "Koriand'r"]
+  },
+  atomeve: {
+    queries: ['Atom Eve', 'Samantha Eve Wilkins', 'Invincible (TV series)'],
+    rejectTitles: ['Eve (disambiguation)', 'Atom Eve (disambiguation)'],
+    allowTitles: ['Atom Eve', 'Samantha Eve Wilkins']
+  },
+  frieren: {
+    queries: ['Frieren (character)', 'Frieren', "Frieren: Beyond Journey's End"],
+    rejectTitles: ['Frieren: Beyond Journey\'s End', 'Frieren (disambiguation)'],
+    allowTitles: ['Frieren (character)', 'Frieren']
+  },
+  aang: {
+    queries: ['Aang', 'Avatar: The Last Airbender'],
+    rejectTitles: ['Aang (disambiguation)'],
+    allowTitles: ['Aang']
+  },
+  mob: {
+    queries: ['Shigeo Kageyama', 'Mob (Mob Psycho 100)', 'Mob Psycho 100'],
+    rejectTitles: ['Mob (disambiguation)', 'Mob rule'],
+    allowTitles: ['Shigeo Kageyama', 'Mob (Mob Psycho 100)']
+  },
+  mobmobphysco: {
+    queries: ['Shigeo Kageyama', 'Mob (Mob Psycho 100)', 'Mob Psycho 100'],
+    rejectTitles: ['Mob (disambiguation)', 'Mob rule'],
+    allowTitles: ['Shigeo Kageyama', 'Mob (Mob Psycho 100)']
+  },
+  mobmobpsycho: {
+    queries: ['Shigeo Kageyama', 'Mob (Mob Psycho 100)', 'Mob Psycho 100'],
+    rejectTitles: ['Mob (disambiguation)', 'Mob rule'],
+    allowTitles: ['Shigeo Kageyama', 'Mob (Mob Psycho 100)']
+  },
+  narutouzumaki: {
+    queries: ['Naruto Uzumaki', 'Naruto'],
+    rejectTitles: ['Naruto (manga)', 'Naruto (franchise)', 'Naruto (disambiguation)'],
+    allowTitles: ['Naruto Uzumaki']
+  },
+  davidblaine: {
+    queries: ['David Blaine'],
+    rejectTitles: ['Blaine (disambiguation)'],
+    allowTitles: ['David Blaine']
   },
   peach: {
     queries: ['Princess Peach', 'Peach'],
@@ -2471,6 +2556,18 @@ function buildCategoryFetchHints(categoryContext = null) {
     push(contextHints, ['sports', 'competition', 'training', 'championship']);
     push(entityHints, ['athlete', 'person', 'team']);
   }
+  if (id.includes('magic') || id.includes('wizard') || id.includes('sorcer') || label.includes('magic') || label.includes('wizard') || label.includes('sorcer')) {
+    push(contextHints, ['magic', 'arcane', 'mystic', 'spellcaster', 'sorcery']);
+    push(entityHints, ['fictional character', 'wizard', 'sorcerer', 'witch', 'mage']);
+  }
+  if (id.includes('diplomacy') || id.includes('treaty') || id.includes('negotiation') || label.includes('diplomacy') || label.includes('treaty')) {
+    push(contextHints, ['diplomacy', 'treaty', 'statecraft', 'foreign policy', 'peace talks']);
+    push(entityHints, ['person', 'leader', 'diplomat', 'historical figure']);
+  }
+  if (id.includes('actor') || id.includes('entertainer') || id.includes('musician') || label.includes('entertainer')) {
+    push(contextHints, ['actor', 'performer', 'film', 'television', 'entertainment']);
+    push(entityHints, ['person', 'actor', 'entertainer']);
+  }
   if (id.includes('chef') || id.includes('culinary') || id.includes('cuisine')) {
     push(contextHints, ['food', 'dish', 'culinary', 'restaurant']);
     push(entityHints, ['food', 'dish', 'person']);
@@ -3205,6 +3302,8 @@ function buildDynamicAliasOverride(character, fetchOptions = {}) {
     .some((cue) => nearbyCanonicals.has(cue));
   const hasDcBatmanCues = ['batman', 'robin', 'nightwing', 'gotham', 'joker']
     .some((cue) => nearbyCanonicals.has(cue));
+  const hasTeenTitansCues = ['raven', 'starfire', 'beastboy', 'cyborg', 'nightwing', 'robin']
+    .some((cue) => nearbyCanonicals.has(cue));
 
   if (compact === 'peach' && hasMarioCues) {
     return {
@@ -3229,6 +3328,22 @@ function buildDynamicAliasOverride(character, fetchOptions = {}) {
         allowTitles: ['Robin (DC Comics)', 'Robin']
       };
     }
+  }
+
+  if (compact === 'raven' && hasTeenTitansCues) {
+    return {
+      queries: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)'],
+      rejectTitles: ['Raven (bird)', 'Common raven', 'Raven (disambiguation)'],
+      allowTitles: ['Raven (DC Comics)', 'Raven (Teen Titans)', 'Raven (character)']
+    };
+  }
+
+  if (compact === 'starfire' && hasTeenTitansCues) {
+    return {
+      queries: ['Starfire (Teen Titans)', 'Starfire', "Koriand'r"],
+      rejectTitles: ['Starfire (disambiguation)', 'Starfire (band)'],
+      allowTitles: ['Starfire (Teen Titans)', 'Starfire', "Koriand'r"]
+    };
   }
 
   if ((compact === 'cap' || compact === 'capshield' || compact === 'capamerica')) {
@@ -4036,6 +4151,72 @@ function applyKnownResolutionPatches(character, info) {
     return {
       ...safeInfo,
       description: `${String(safeInfo.description || '').replace(/\s+/g, ' ').trim()} Luffy is a pirate captain and elastic-bodied fighter known for creativity, leadership, resilience, and chaotic adaptability under pressure.`.trim()
+    };
+  }
+
+  if (compact === 'naruto' && /naruto \(manga\)|naruto franchise|media franchise|anime series/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Naruto Uzumaki',
+      description: 'Naruto Uzumaki is the central ninja protagonist of Naruto known for chakra-based combat, shadow-clone tactics, mobility, and resilience under pressure.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.78),
+      confidenceBand: 'medium'
+    };
+  }
+
+  if (compact === 'frieren' && /frieren: beyond journey'?s end|anime series|manga series|media franchise/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Frieren',
+      description: 'Frieren is an elven mage from Frieren: Beyond Journey\'s End known for high-level spellcasting, long-horizon strategy, and precise magical control.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.8),
+      confidenceBand: 'high'
+    };
+  }
+
+  if ((compact === 'mob' || compact === 'mobmobphysco' || compact === 'mobmobpsycho')
+    && /mob psycho 100|anime series|media franchise/i.test(`${title} ${String(safeInfo.description || '')}`)
+    && !/shigeo kageyama|mob \(mob psycho 100\)/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Shigeo Kageyama (Mob)',
+      description: 'Shigeo Kageyama (Mob) is a psychic esper from Mob Psycho 100 known for telekinesis, energy output control, and extreme power spikes under stress.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.76),
+      confidenceBand: 'medium'
+    };
+  }
+
+  if ((compact === 'raven' || compact === 'raventeentitans')
+    && !/raven \(dc comics\)|raven \(teen titans\)|raven \(character\)/i.test(`${title} ${String(safeInfo.description || '')}`)
+    && /raven|teen titans|dc/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Raven (DC Comics)',
+      description: 'Raven is a Teen Titans empath and sorceress from DC Comics known for dark-energy magic, teleportation, and mystical control.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.8),
+      confidenceBand: 'high'
+    };
+  }
+
+  if (compact === 'starfire'
+    && !/starfire \(teen titans\)|koriand'?r|starfire\b/i.test(`${title} ${String(safeInfo.description || '')}`)
+    && /teen titans|dc/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+    return {
+      ...safeInfo,
+      title: 'Starfire (Teen Titans)',
+      description: 'Starfire (Koriand\'r) is a Teen Titans hero with energy projection, flight, and high-durability combat capability.',
+      imageUrl: null,
+      imageSynthetic: true,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.78),
+      confidenceBand: 'medium'
     };
   }
 

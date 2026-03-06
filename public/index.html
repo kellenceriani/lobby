@@ -144,7 +144,7 @@
         <div class="hub-row">
           <div>
             <h2>Daily Run</h2>
-            <p id="soloStatusMessage">Start your daily run to load today's deterministic challenge.</p>
+            <p id="soloStatusMessage">Start your daily run to draft entries, get evaluated, and build your OVR lineup.</p>
           </div>
           <div class="hub-inline-actions">
             <button id="soloStartBtn" class="btn btn-primary" type="button">Start Daily</button>
@@ -167,14 +167,7 @@
           </div>
         </div>
 
-        <div class="solo-slot-grid" role="tablist" aria-label="Solo role slots">
-          <button class="solo-slot-btn is-active" type="button" data-solo-slot="lead">Lead <span id="soloPickLead">--</span></button>
-          <button class="solo-slot-btn" type="button" data-solo-slot="anchor">Anchor <span id="soloPickAnchor">--</span></button>
-          <button class="solo-slot-btn" type="button" data-solo-slot="wildcard">Wildcard <span id="soloPickWildcard">--</span></button>
-          <button class="solo-slot-btn" type="button" data-solo-slot="closer">Closer <span id="soloPickCloser">--</span></button>
-        </div>
-
-        <div id="soloCandidateGrid" class="solo-candidate-grid" aria-live="polite"></div>
+        <div id="soloPromptGrid" class="solo-prompt-grid" aria-live="polite"></div>
 
         <div class="hub-inline-actions">
           <button id="soloSubmitBtn" class="btn btn-primary" type="button" disabled>Submit Attempt</button>

@@ -37,11 +37,11 @@ Request body:
   "runId": "run_...",
   "idempotencyKey": "submit_001",
   "clientSubmittedAtMs": 1772827083401,
-  "picks": {
-    "lead": "cadet_iris",
-    "anchor": "marshal_onyx",
-    "wildcard": "cipher_vega",
-    "closer": "rook_halo"
+  "entries": {
+    "lead": "Batman",
+    "anchor": "Sherlock Holmes",
+    "wildcard": "Wonder Woman",
+    "closer": "Spider-Man"
   }
 }
 ```
@@ -53,7 +53,7 @@ Response:
 - `404` run not found
 - `409` run not active or already ready to finalize
 
-Returns slot feedback (`Perfect|Strong|Weak|Miss`), team synergy trend, clue line, and updated run state.
+Returns evaluated slot feedback (`Perfect|Strong|Weak|Miss`) with OVR values, team summary, trend/clue line, and updated run state.
 
 ### `POST /api/solo/runs/hint`
 

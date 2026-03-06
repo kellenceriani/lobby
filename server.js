@@ -380,7 +380,7 @@ app.post('/api/solo/runs/submit', (req, res) => {
     userId: validated.value.userId,
     runId: validated.value.runId,
     idempotencyKey: validated.value.idempotencyKey,
-    picksBySlot: validated.value.picksBySlot,
+    picksBySlot: validated.value.entriesBySlot,
     clientSubmittedAtMs: validated.value.clientSubmittedAtMs || Date.now(),
     nowMs: Date.now()
   });

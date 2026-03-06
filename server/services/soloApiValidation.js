@@ -27,11 +27,10 @@ function sanitizeIdempotencyKey(value) {
   return key;
 }
 
-function sanitizeCandidateId(value) {
-  const candidateId = sanitizeText(value, 80);
-  if (!candidateId) return '';
-  if (!/^[A-Za-z0-9_:-]{3,80}$/.test(candidateId)) return '';
-  return candidateId;
+function sanitizeEntryValue(value) {
+  const entry = sanitizeText(value, 80).replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!entry || entry.length < 2) return '';
+  return entry;
 }
 
 function sanitizeMs(value) {
@@ -49,16 +48,16 @@ function sanitizeBoolean(value) {
   return false;
 }
 
-function sanitizePicks(picks) {
-  const safe = picks && typeof picks === 'object' ? picks : null;
+function sanitizeEntries(entries) {
+  const safe = entries && typeof entries === 'object' ? entries : null;
   if (!safe) return null;
   const normalized = {};
   const slots = ['lead', 'anchor', 'wildcard', 'closer'];
   for (let i = 0; i < slots.length; i += 1) {
     const slotId = slots[i];
-    const candidateId = sanitizeCandidateId(safe[slotId]);
-    if (!candidateId) return null;
-    normalized[slotId] = candidateId;
+    const entry = sanitizeEntryValue(safe[slotId]);
+    if (!entry) return null;
+    normalized[slotId] = entry;
   }
   return normalized;
 }
@@ -84,8 +83,13 @@ function validateSoloSubmitAttempt(body = {}) {
   const userId = sanitizeUserId(payload.userId || '');
   const runId = sanitizeRunId(payload.runId || '');
   const idempotencyKey = sanitizeIdempotencyKey(payload.idempotencyKey || '');
-  const picksBySlot = sanitizePicks(payload.picks || payload.picksBySlot);
-  if (!userId || !runId || !idempotencyKey || !picksBySlot) {
+  const entriesBySlot = sanitizeEntries(
+    payload.entriesBySlot
+    || payload.entries
+    || payload.picks
+    || payload.picksBySlot
+  );
+  if (!userId || !runId || !idempotencyKey || !entriesBySlot) {
     return { ok: false, code: 'invalid_submit_payload' };
   }
   return {
@@ -94,7 +98,7 @@ function validateSoloSubmitAttempt(body = {}) {
       userId,
       runId,
       idempotencyKey,
-      picksBySlot,
+      entriesBySlot,
       clientSubmittedAtMs: sanitizeMs(payload.clientSubmittedAtMs)
     }
   };

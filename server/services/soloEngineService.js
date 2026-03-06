@@ -1,14 +1,14 @@
-const crypto = require('crypto');
+﻿const crypto = require('crypto');
 const { sanitizeText } = require('../storage/metaStoreAdapter');
 
 const DEFAULT_MODE_ID = 'daily_cipher_clash';
-const SOLO_SCHEMA_VERSION = 1;
+const SOLO_SCHEMA_VERSION = 2;
 
 const SLOT_DEFS = Object.freeze([
-  { slotId: 'lead', label: 'Lead', preferredArchetype: 'alpha' },
-  { slotId: 'anchor', label: 'Anchor', preferredArchetype: 'beta' },
-  { slotId: 'wildcard', label: 'Wildcard', preferredArchetype: 'gamma' },
-  { slotId: 'closer', label: 'Closer', preferredArchetype: 'delta' }
+  { slotId: 'lead', label: 'Lead', role: 'Open with pressure and tempo control.' },
+  { slotId: 'anchor', label: 'Anchor', role: 'Stabilize the core plan with consistency.' },
+  { slotId: 'wildcard', label: 'Wildcard', role: 'Counter the twist with a disruption pick.' },
+  { slotId: 'closer', label: 'Closer', role: 'Finish the mission under endgame pressure.' }
 ]);
 
 const SCENARIOS = Object.freeze([
@@ -22,39 +22,45 @@ const SCENARIOS = Object.freeze([
 ]);
 
 const TWISTS = Object.freeze([
-  'Noisy Transmission',
-  'Limited Intel',
-  'Crosswind Pressure',
-  'Hidden Counterplay',
-  'Compressed Timeline',
-  'Double Bluff'
+  'Distinct Roster Signals',
+  'Multi-Word Synergy',
+  'Precision Labels',
+  'Wildcard Pressure',
+  'Category Lock Hardening',
+  'Counterflow Late Close'
 ]);
 
-const CANDIDATE_LIBRARY = Object.freeze([
-  { id: 'cadet_iris', label: 'Cadet Iris', archetype: 'alpha', power: 82 },
-  { id: 'marshal_onyx', label: 'Marshal Onyx', archetype: 'beta', power: 79 },
-  { id: 'cipher_vega', label: 'Cipher Vega', archetype: 'gamma', power: 91 },
-  { id: 'rook_halo', label: 'Rook Halo', archetype: 'delta', power: 88 },
-  { id: 'nova_reed', label: 'Nova Reed', archetype: 'alpha', power: 84 },
-  { id: 'atlas_frost', label: 'Atlas Frost', archetype: 'beta', power: 81 },
-  { id: 'pix_sable', label: 'Pix Sable', archetype: 'gamma', power: 76 },
-  { id: 'vex_quill', label: 'Vex Quill', archetype: 'delta', power: 85 },
-  { id: 'echo_blade', label: 'Echo Blade', archetype: 'alpha', power: 77 },
-  { id: 'mako_flux', label: 'Mako Flux', archetype: 'beta', power: 74 },
-  { id: 'lyric_knox', label: 'Lyric Knox', archetype: 'gamma', power: 83 },
-  { id: 'rune_pulse', label: 'Rune Pulse', archetype: 'delta', power: 80 },
-  { id: 'ember_locke', label: 'Ember Locke', archetype: 'alpha', power: 86 },
-  { id: 'granite_flynn', label: 'Granite Flynn', archetype: 'beta', power: 78 },
-  { id: 'sable_night', label: 'Sable Night', archetype: 'gamma', power: 89 },
-  { id: 'crown_jet', label: 'Crown Jet', archetype: 'delta', power: 75 },
-  { id: 'zenith_brook', label: 'Zenith Brook', archetype: 'alpha', power: 73 },
-  { id: 'harbor_lynx', label: 'Harbor Lynx', archetype: 'beta', power: 87 },
-  { id: 'prism_juno', label: 'Prism Juno', archetype: 'gamma', power: 92 },
-  { id: 'drift_kane', label: 'Drift Kane', archetype: 'delta', power: 71 },
-  { id: 'astra_reign', label: 'Astra Reign', archetype: 'alpha', power: 90 },
-  { id: 'forge_arden', label: 'Forge Arden', archetype: 'beta', power: 82 },
-  { id: 'opal_stride', label: 'Opal Stride', archetype: 'gamma', power: 78 },
-  { id: 'thane_vault', label: 'Thane Vault', archetype: 'delta', power: 84 }
+const SOLO_CATEGORY_LOCKS = Object.freeze([
+  {
+    id: 'fictional-beings',
+    displayName: 'Fictional Beings',
+    family: 'fictional beings',
+    strongExamples: ['Batman', 'Wonder Woman', 'Gandalf', 'Spider-Man']
+  },
+  {
+    id: 'science-tech',
+    displayName: 'Science / Technology',
+    family: 'science/technology',
+    strongExamples: ['Ada Lovelace', 'Alan Turing', 'Marie Curie', 'Nikola Tesla']
+  },
+  {
+    id: 'sports-competition',
+    displayName: 'Sports / Competition',
+    family: 'sports/competition',
+    strongExamples: ['Michael Jordan', 'Serena Williams', 'Lionel Messi', 'Simone Biles']
+  },
+  {
+    id: 'history-politics',
+    displayName: 'History / Politics',
+    family: 'history/politics',
+    strongExamples: ['Abraham Lincoln', 'Nelson Mandela', 'Winston Churchill', 'Harriet Tubman']
+  },
+  {
+    id: 'mythology-religion',
+    displayName: 'Mythology / Religion',
+    family: 'mythology/religion',
+    strongExamples: ['Zeus', 'Athena', 'Odin', 'Anubis']
+  }
 ]);
 
 const DEFAULT_LIMITS = Object.freeze({
@@ -66,6 +72,11 @@ const DEFAULT_LIMITS = Object.freeze({
   nonMonotonicToleranceMs: 1000,
   fastSolveThresholdMs: 1500
 });
+
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into', 'over', 'under', 'while',
+  'line', 'lane', 'core', 'final', 'daily', 'slot', 'entry', 'entries', 'team'
+]);
 
 function boolEnv(name, fallback = false) {
   const raw = process.env[name];
@@ -131,6 +142,59 @@ function deterministicShuffle(values = [], rng = Math.random) {
   return next;
 }
 
+function tokenizeLoose(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((token) => String(token || '').trim())
+    .filter(Boolean);
+}
+
+function normalizeEntryKey(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function collectKeywordPool(values = [], maxCount = 24) {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    tokenizeLoose(value).forEach((token) => {
+      if (!token || token.length < 3) return;
+      if (STOP_WORDS.has(token)) return;
+      if (seen.has(token)) return;
+      seen.add(token);
+      out.push(token);
+    });
+  });
+  return out.slice(0, Math.max(1, Number(maxCount) || 24));
+}
+
+function countTokenHits(tokens = [], keywords = []) {
+  if (!Array.isArray(tokens) || !Array.isArray(keywords) || !tokens.length || !keywords.length) return 0;
+  const tokenSet = new Set(tokens.map((token) => String(token || '').toLowerCase()));
+  return keywords.reduce((hits, keyword) => {
+    const key = String(keyword || '').toLowerCase().trim();
+    if (!key) return hits;
+    return tokenSet.has(key) ? hits + 1 : hits;
+  }, 0);
+}
+
+function sanitizeEntryText(value = '') {
+  const text = sanitizeText(value, 80)
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.length < 2) return '';
+  return text;
+}
+
 function challengeKey(modeId = DEFAULT_MODE_ID, dateKey = toUtcDayKey()) {
   return `${String(modeId || DEFAULT_MODE_ID)}:${String(dateKey || toUtcDayKey())}`;
 }
@@ -166,26 +230,25 @@ function createDailyChallenge({
   const seedInput = `${String(modeId)}|${String(dateKey)}|${String(seedSalt || '')}`;
   const seedHash = hashHex(seedInput);
   const rng = createMulberry32(hashToSeed(seedInput));
-  const shuffled = deterministicShuffle(CANDIDATE_LIBRARY, rng);
-  const pool = shuffled.slice(0, 12).map((row, idx) => ({
-    id: row.id,
-    label: row.label,
-    archetype: row.archetype,
-    power: row.power,
-    ordinal: idx + 1
-  }));
   const scenarioId = SCENARIOS[Math.floor(rng() * SCENARIOS.length)];
   const twistId = TWISTS[Math.floor(rng() * TWISTS.length)];
-
-  const solutionBySlot = {};
-  const used = new Set();
-  SLOT_DEFS.forEach((slot) => {
-    const preferred = pool.find((candidate) => !used.has(candidate.id) && candidate.archetype === slot.preferredArchetype);
-    const fallback = pool.find((candidate) => !used.has(candidate.id));
-    const picked = preferred || fallback || null;
-    if (!picked) return;
-    used.add(picked.id);
-    solutionBySlot[slot.slotId] = picked.id;
+  const category = SOLO_CATEGORY_LOCKS[Math.floor(rng() * SOLO_CATEGORY_LOCKS.length)] || SOLO_CATEGORY_LOCKS[0];
+  const targetProfile = {
+    solveTeamOvr: 78 + Math.floor(rng() * 7), // 78..84
+    minInCategory: 2 + (rng() > 0.72 ? 1 : 0),
+    maxLowCards: rng() > 0.52 ? 1 : 2
+  };
+  const promptDeck = SLOT_DEFS.map((slot) => ({
+    slotId: slot.slotId,
+    label: slot.label,
+    role: slot.role,
+    prompt: `${slot.role} Category lock: ${category.displayName}. Scenario: ${scenarioId}. Twist: ${twistId}.`,
+    keywords: collectKeywordPool([slot.role, scenarioId, twistId, category.displayName], 16)
+  }));
+  const referenceEntries = deterministicShuffle(category.strongExamples || [], rng).slice(0, SLOT_DEFS.length);
+  const idealEntriesBySlot = {};
+  SLOT_DEFS.forEach((slot, idx) => {
+    idealEntriesBySlot[slot.slotId] = referenceEntries[idx] || (category.strongExamples && category.strongExamples[0]) || 'Batman';
   });
 
   return {
@@ -195,13 +258,15 @@ function createDailyChallenge({
     seedHash,
     scenarioId,
     twistId,
-    candidatePool: pool,
-    roleSlots: SLOT_DEFS.map((slot) => ({
-      slotId: slot.slotId,
-      label: slot.label,
-      preferredArchetype: slot.preferredArchetype
-    })),
-    solutionBySlot,
+    lockedCategory: {
+      id: category.id,
+      displayName: category.displayName,
+      family: category.family
+    },
+    entryPrompts: promptDeck,
+    targetProfile,
+    referenceEntries: category.strongExamples || [],
+    idealEntriesBySlot,
     createdAtMs: Date.now(),
     schemaVersion: SOLO_SCHEMA_VERSION
   };
@@ -212,9 +277,7 @@ function clone(value) {
 }
 
 function sanitizeCandidateId(value = '') {
-  const id = sanitizeText(value, 80);
-  if (!id || !/^[a-z0-9_:-]{3,80}$/i.test(id)) return '';
-  return id;
+  return sanitizeEntryText(value);
 }
 
 function getSlotDef(slotId = '') {
@@ -222,26 +285,19 @@ function getSlotDef(slotId = '') {
 }
 
 function verifyPicksAgainstChallenge(challenge = {}, picksBySlot = {}) {
-  const pool = Array.isArray(challenge.candidatePool) ? challenge.candidatePool : [];
-  const byId = new Map(pool.map((candidate) => [String(candidate.id), candidate]));
+  const safe = picksBySlot && typeof picksBySlot === 'object' ? picksBySlot : null;
+  if (!safe) return { ok: false, code: 'invalid_entry_payload' };
   const normalized = {};
 
   for (let i = 0; i < SLOT_DEFS.length; i += 1) {
     const slotId = SLOT_DEFS[i].slotId;
-    const candidateId = sanitizeCandidateId(picksBySlot[slotId]);
-    if (!candidateId || !byId.has(candidateId)) {
-      return { ok: false, code: 'invalid_candidate_pick' };
+    const entryText = sanitizeCandidateId(safe[slotId]);
+    if (!entryText) {
+      return { ok: false, code: 'invalid_entry_payload' };
     }
-    normalized[slotId] = candidateId;
+    normalized[slotId] = entryText;
   }
-
-  const pickedIds = Object.values(normalized);
-  const dedupe = new Set(pickedIds);
-  if (dedupe.size !== pickedIds.length) {
-    return { ok: false, code: 'duplicate_slot_candidate' };
-  }
-
-  return { ok: true, picksBySlot: normalized, poolById: byId };
+  return { ok: true, picksBySlot: normalized };
 }
 
 function computeAttemptFeedback({
@@ -249,51 +305,117 @@ function computeAttemptFeedback({
   picksBySlot,
   previousAttempt = null
 } = {}) {
-  const solution = challenge && challenge.solutionBySlot && typeof challenge.solutionBySlot === 'object'
-    ? challenge.solutionBySlot
-    : {};
-  const allSolutionIds = new Set(Object.values(solution));
+  const category = challenge && challenge.lockedCategory && typeof challenge.lockedCategory === 'object'
+    ? challenge.lockedCategory
+    : { displayName: 'Open Meta', family: 'general' };
+  const scenarioKeywords = collectKeywordPool([challenge && challenge.scenarioId, category.displayName], 16);
+  const twistKeywords = collectKeywordPool([challenge && challenge.twistId], 12);
+  const categoryKeywords = collectKeywordPool([
+    category.displayName,
+    category.family,
+    ...(Array.isArray(challenge && challenge.referenceEntries) ? challenge.referenceEntries : [])
+  ], 20);
+  const targetProfile = challenge && challenge.targetProfile && typeof challenge.targetProfile === 'object'
+    ? challenge.targetProfile
+    : { solveTeamOvr: 80, minInCategory: 2, maxLowCards: 1 };
+
+  const normalizedEntries = SLOT_DEFS.map((slot) => normalizeEntryKey(picksBySlot && picksBySlot[slot.slotId]));
+  const duplicateCounts = normalizedEntries.reduce((acc, key) => {
+    if (!key) return acc;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
   const slotFeedback = [];
   let perfect = 0;
   let strong = 0;
   let weak = 0;
   let miss = 0;
-  let points = 0;
+  let totalScore = 0;
+  let totalOvr = 0;
+  let inCategoryCount = 0;
+  let lowOvrCount = 0;
 
-  SLOT_DEFS.forEach((slot) => {
-    const picked = String(picksBySlot[slot.slotId] || '');
-    const expected = String(solution[slot.slotId] || '');
+  SLOT_DEFS.forEach((slot, index) => {
+    const entry = String(picksBySlot[slot.slotId] || '').trim();
+    const entryTokens = tokenizeLoose(entry);
+    const roleKeywords = collectKeywordPool([slot.role], 8);
+    const scenarioHits = countTokenHits(entryTokens, scenarioKeywords);
+    const twistHits = countTokenHits(entryTokens, twistKeywords);
+    const categoryHits = countTokenHits(entryTokens, categoryKeywords);
+    const roleHits = countTokenHits(entryTokens, roleKeywords);
+    const lexicalQuality = clampInt(28 + Math.min(20, entry.length) + (entryTokens.length * 6), 0, 100);
+    const duplicatePenalty = (duplicateCounts[normalizeEntryKey(entry)] || 0) > 1 ? 10 : 0;
+    const hashNoise = (hashToSeed(`${String(challenge && challenge.seedHash || '')}|${slot.slotId}|${entry}`) % 11) - 5;
+    const ovr = clampInt(
+      34
+      + Math.round(lexicalQuality * 0.24)
+      + (categoryHits * 12)
+      + (scenarioHits * 5)
+      + (twistHits * 4)
+      + (roleHits * 4)
+      + hashNoise
+      - duplicatePenalty,
+      28,
+      99
+    );
+    const slotScore = clampInt((ovr / 99) * 30, 0, 30);
+    const categoryStatus = categoryHits >= 2 ? 'in_category' : categoryHits === 1 ? 'borderline' : 'not_in_category';
+    if (categoryStatus === 'in_category') inCategoryCount += 1;
+    if (ovr < 60) lowOvrCount += 1;
+
     let grade = 'Miss';
-    let slotPoints = 0;
-    if (picked && expected && picked === expected) {
+    if (ovr >= 88) {
       grade = 'Perfect';
       perfect += 1;
-      slotPoints = 25;
-    } else if (picked && allSolutionIds.has(picked)) {
+    } else if (ovr >= 76) {
       grade = 'Strong';
       strong += 1;
-      slotPoints = 16;
+    } else if (ovr >= 63) {
+      grade = 'Weak';
+      weak += 1;
     } else {
-      const candidate = (challenge.candidatePool || []).find((row) => String(row.id) === picked) || null;
-      if (candidate && String(candidate.archetype) === String(slot.preferredArchetype)) {
-        grade = 'Weak';
-        weak += 1;
-        slotPoints = 8;
-      } else {
-        miss += 1;
-      }
+      miss += 1;
     }
-    points += slotPoints;
+    totalOvr += ovr;
+    totalScore += slotScore;
     slotFeedback.push({
       slotId: slot.slotId,
       label: slot.label,
-      pickedCandidateId: picked,
-      grade
+      pickedCandidateId: entry,
+      grade,
+      score: slotScore,
+      ovr,
+      categoryStatus,
+      notes: [
+        `Scenario fit hits: ${scenarioHits}`,
+        `Twist fit hits: ${twistHits}`,
+        `Category fit hits: ${categoryHits}`
+      ]
     });
   });
 
-  const quality = clampInt((points / 100) * 100, 0, 100);
-  const solved = perfect === SLOT_DEFS.length;
+  const averageOVR = SLOT_DEFS.length ? Math.round(totalOvr / SLOT_DEFS.length) : 0;
+  const debugIdeal = challenge && challenge.idealEntriesBySlot && typeof challenge.idealEntriesBySlot === 'object'
+    ? challenge.idealEntriesBySlot
+    : null;
+  const debugMatch = Boolean(debugIdeal && SLOT_DEFS.every((slot) => (
+    normalizeEntryKey(debugIdeal[slot.slotId]) === normalizeEntryKey(picksBySlot[slot.slotId])
+  )));
+
+  const solved = debugMatch || (
+    averageOVR >= Number(targetProfile.solveTeamOvr || 80)
+    && inCategoryCount >= Number(targetProfile.minInCategory || 2)
+    && lowOvrCount <= Number(targetProfile.maxLowCards || 1)
+  );
+  const points = clampInt((totalScore / (SLOT_DEFS.length * 30)) * 100, 0, 100);
+  const quality = clampInt(
+    (averageOVR * 0.62)
+    + ((inCategoryCount / SLOT_DEFS.length) * 25)
+    + (solved ? 10 : 0),
+    0,
+    100
+  );
   const previousQuality = previousAttempt && Number(previousAttempt.quality) >= 0
     ? Number(previousAttempt.quality)
     : null;
@@ -302,13 +424,29 @@ function computeAttemptFeedback({
     if (quality > (previousQuality + 2)) synergyTrend = 'Up';
     else if (quality < (previousQuality - 2)) synergyTrend = 'Down';
   }
-  let clueLine = 'Rotation required; too many misses.';
+  let clueLine = 'Roster is missing mission lock thresholds.';
   if (solved) {
-    clueLine = 'Cipher fully aligned.';
-  } else if ((perfect + strong) >= 3) {
-    clueLine = 'Alignment is close; watch slot precision.';
-  } else if (weak >= 2) {
-    clueLine = 'Traits match but slots are misaligned.';
+    clueLine = 'Roster locked. Mission target cleared.';
+  } else if (inCategoryCount < Number(targetProfile.minInCategory || 2)) {
+    clueLine = `Need ${Number(targetProfile.minInCategory || 2)} in-category slots (have ${inCategoryCount}).`;
+  } else if (averageOVR < Number(targetProfile.solveTeamOvr || 80)) {
+    clueLine = `Team OVR short by ${Math.max(1, Number(targetProfile.solveTeamOvr || 80) - averageOVR)}.`;
+  } else if (lowOvrCount > Number(targetProfile.maxLowCards || 1)) {
+    clueLine = 'Too many low-impact slots. Replace your weakest entry.';
+  }
+
+  const weakest = slotFeedback.slice().sort((a, b) => Number(a.ovr || 0) - Number(b.ovr || 0))[0] || null;
+
+  if (debugMatch) {
+    perfect = SLOT_DEFS.length;
+    strong = 0;
+    weak = 0;
+    miss = 0;
+    slotFeedback.forEach((slot) => {
+      slot.grade = 'Perfect';
+      slot.ovr = Math.max(92, Number(slot.ovr) || 0);
+      slot.score = Math.max(28, Number(slot.score) || 0);
+    });
   }
 
   return {
@@ -320,6 +458,22 @@ function computeAttemptFeedback({
     strong,
     weak,
     miss,
+    teamSummary: {
+      averageOVR,
+      totalScore,
+      inCategoryCount,
+      lowOvrCount,
+      targetOVR: Number(targetProfile.solveTeamOvr || 80),
+      minInCategory: Number(targetProfile.minInCategory || 2),
+      maxLowCards: Number(targetProfile.maxLowCards || 1)
+    },
+    weakSlot: weakest
+      ? {
+        slotId: weakest.slotId,
+        slotLabel: weakest.label,
+        ovr: weakest.ovr
+      }
+      : null,
     teamSynergyTrend: synergyTrend,
     clueLine
   };
@@ -351,21 +505,27 @@ function buildChallengeClientView(challenge = {}, { exposeSolution = false } = {
     seedHash: challenge.seedHash,
     scenarioId: challenge.scenarioId,
     twistId: challenge.twistId,
-    candidatePool: (challenge.candidatePool || []).map((candidate) => ({
-      id: candidate.id,
-      label: candidate.label,
-      archetype: candidate.archetype,
-      power: candidate.power
-    })),
-    roleSlots: SLOT_DEFS.map((slot) => ({
-      slotId: slot.slotId,
-      label: slot.label
-    })),
+    lockedCategory: clone(challenge.lockedCategory || {}),
+    entryPrompts: Array.isArray(challenge.entryPrompts)
+      ? challenge.entryPrompts.map((prompt) => ({
+        slotId: prompt.slotId,
+        label: prompt.label,
+        role: prompt.role,
+        prompt: prompt.prompt
+      }))
+      : SLOT_DEFS.map((slot) => ({
+        slotId: slot.slotId,
+        label: slot.label,
+        role: slot.role,
+        prompt: slot.role
+      })),
+    targetProfile: clone(challenge.targetProfile || {}),
     attemptLimit: DEFAULT_LIMITS.maxAttempts,
     hintLimit: DEFAULT_LIMITS.maxHints
   };
   if (exposeSolution) {
-    payload.debugSolutionBySlot = clone(challenge.solutionBySlot || {});
+    payload.debugIdealEntriesBySlot = clone(challenge.idealEntriesBySlot || {});
+    payload.debugSolutionBySlot = clone(challenge.idealEntriesBySlot || {});
   }
   return payload;
 }
@@ -425,12 +585,10 @@ function computeScoreBreakdown({
   streakForBonus = 1
 } = {}) {
   const quality = Math.max(0, Math.min(100, Number(bestAttempt && bestAttempt.quality) || 0));
-  let baseQuality = solved
-    ? clampInt(70 + ((Number(bestAttempt && bestAttempt.perfect) || 0) * 7) + ((Number(bestAttempt && bestAttempt.strong) || 0) * 3), 0, 100)
-    : clampInt(quality * 0.75, 0, 100);
-  if (!solved) {
-    baseQuality = Math.max(0, Math.min(80, baseQuality));
-  }
+  const averageOVR = Math.max(0, Math.min(99, Number(bestAttempt && bestAttempt.teamSummary && bestAttempt.teamSummary.averageOVR) || 0));
+  const baseQuality = solved
+    ? clampInt(52 + (quality * 0.36) + ((averageOVR - 60) * 0.28), 0, 100)
+    : clampInt((quality * 0.82) + ((averageOVR - 50) * 0.22), 0, 88);
   const safeMaxAttempts = Math.max(1, Number(maxAttempts) || DEFAULT_LIMITS.maxAttempts);
   const safeAttemptsUsed = Math.max(0, Number(attemptsUsed) || 0);
   const attemptEfficiencyBonus = solved
@@ -482,12 +640,14 @@ function recalcLeaderboardSnapshotInPlace(state, { modeId = DEFAULT_MODE_ID, dat
       outcome: run.finalSummary && run.finalSummary.outcome ? run.finalSummary.outcome : 'failed',
       attemptsUsed: Number(run.finalSummary && run.finalSummary.attemptsUsed) || 0,
       hintsUsed: Number(run.finalSummary && run.finalSummary.hintsUsed) || 0,
+      averageOVR: Number(run.finalSummary && run.finalSummary.team && run.finalSummary.team.averageOVR) || 0,
       completedAtMs: Number(run.completedAtMs) || 0
     };
   });
 
   entries.sort((a, b) => (
     (Number(b.finalScore) - Number(a.finalScore))
+    || (Number(b.averageOVR) - Number(a.averageOVR))
     || (Number(a.completedAtMs) - Number(b.completedAtMs))
     || String(a.runId).localeCompare(String(b.runId))
   ));
@@ -574,7 +734,14 @@ function buildSoloEngineService({
   function getOrCreateChallengeInPlace(state, { modeId = DEFAULT_MODE_ID, dateKey = toUtcDayKey() } = {}) {
     ensureSoloStateInPlace(state);
     const key = challengeKey(modeId, dateKey);
-    if (!state.dailyChallenges[key]) {
+    const existing = state.dailyChallenges[key] && typeof state.dailyChallenges[key] === 'object'
+      ? state.dailyChallenges[key]
+      : null;
+    const needsRefresh = !existing
+      || Number(existing.schemaVersion || 0) < SOLO_SCHEMA_VERSION
+      || !Array.isArray(existing.entryPrompts)
+      || !(existing.lockedCategory && existing.lockedCategory.id);
+    if (needsRefresh) {
       state.dailyChallenges[key] = createDailyChallenge({
         modeId,
         dateKey,
@@ -754,6 +921,9 @@ function buildSoloEngineService({
         attemptNumber,
         picksBySlot: pickValidation.picksBySlot,
         slotFeedback: feedback.slotFeedback,
+        cards: feedback.slotFeedback,
+        teamSummary: feedback.teamSummary,
+        weakSlot: feedback.weakSlot,
         teamSynergyTrend: feedback.teamSynergyTrend,
         clueLine: feedback.clueLine,
         solved: feedback.solved,
@@ -866,10 +1036,15 @@ function buildSoloEngineService({
 
       const challenge = state.dailyChallenges[run.challengeKey];
       if (!challenge) return { ok: false, code: 'challenge_missing' };
-      const revealedSlotIds = new Set((run.hints || []).map((row) => String(row.slotId || '')));
-      const nextSlot = SLOT_DEFS.find((slot) => !revealedSlotIds.has(slot.slotId)) || SLOT_DEFS[0];
-      const targetId = String(challenge.solutionBySlot[nextSlot.slotId] || '');
-      const targetCandidate = (challenge.candidatePool || []).find((candidate) => String(candidate.id) === targetId) || null;
+      const latestAttempt = run.attempts.length ? run.attempts[run.attempts.length - 1] : null;
+      const nextSlot = latestAttempt && latestAttempt.weakSlot && latestAttempt.weakSlot.slotId
+        ? (getSlotDef(latestAttempt.weakSlot.slotId) || SLOT_DEFS[0])
+        : SLOT_DEFS[(run.hints.length % SLOT_DEFS.length)];
+      const suggestions = Array.isArray(challenge.referenceEntries) ? challenge.referenceEntries : [];
+      const nextSuggestion = suggestions[run.hints.length % Math.max(1, suggestions.length)] || '';
+      const teamTarget = Number(challenge && challenge.targetProfile && challenge.targetProfile.solveTeamOvr) || 80;
+      const teamCurrent = Number(latestAttempt && latestAttempt.teamSummary && latestAttempt.teamSummary.averageOVR) || 0;
+      const teamDelta = Math.max(1, teamTarget - teamCurrent);
       const hintNumber = run.hints.length + 1;
       const hintId = `hnt_${run.runId}_${hintNumber}`;
       const hint = {
@@ -877,9 +1052,9 @@ function buildSoloEngineService({
         hintNumber,
         slotId: nextSlot.slotId,
         slotLabel: nextSlot.label,
-        message: targetCandidate
-          ? `${nextSlot.label} aligns with ${targetCandidate.archetype} archetype.`
-          : `${nextSlot.label} prefers tighter archetype alignment.`,
+        message: nextSuggestion
+          ? `${nextSlot.label} is under target. Stay in ${String(challenge.lockedCategory && challenge.lockedCategory.displayName || 'category')} lane and look for +${teamDelta} team OVR. Try an entry with confidence similar to "${nextSuggestion}".`
+          : `${nextSlot.label} is under target. Stay in ${String(challenge.lockedCategory && challenge.lockedCategory.displayName || 'category')} lane and look for +${teamDelta} team OVR.`,
         clientRequestedAtMs: tsGuard.clientTimestampMs,
         serverRequestedAtMs: nowMs
       };
@@ -1038,6 +1213,20 @@ function buildSoloEngineService({
         practice: run.practice === true,
         scoreBreakdown,
         finalScore: scoreBreakdown.finalScore,
+        team: bestAttempt && bestAttempt.teamSummary
+          ? clone(bestAttempt.teamSummary)
+          : {
+            averageOVR: 0,
+            totalScore: 0,
+            inCategoryCount: 0,
+            lowOvrCount: 0,
+            targetOVR: 0,
+            minInCategory: 0,
+            maxLowCards: 0
+          },
+        bestCards: bestAttempt && Array.isArray(bestAttempt.cards)
+          ? bestAttempt.cards.slice().sort((a, b) => (Number(b.ovr) || 0) - (Number(a.ovr) || 0)).slice(0, 4)
+          : [],
         streak: scoredResult ? streakData : {
           previousStreak: 0,
           currentStreak: 0,

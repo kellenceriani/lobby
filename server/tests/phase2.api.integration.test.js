@@ -67,20 +67,20 @@ function challengeSignature(challenge = {}) {
   });
 }
 
-function buildShiftedPicks(solutionBySlot = {}, shift = 1) {
-  const slots = ['lead', 'anchor', 'wildcard', 'closer'];
-  const ordered = slots.map((slotId) => String(solutionBySlot[slotId] || ''));
-  return slots.reduce((acc, slotId, idx) => {
-    acc[slotId] = ordered[(idx + shift) % slots.length];
-    return acc;
-  }, {});
+function buildWeakEntries(seed = 1) {
+  const n = Number(seed) || 1;
+  return {
+    lead: `Object ${n}`,
+    anchor: `Thing ${n}`,
+    wildcard: `Unknown ${n}`,
+    closer: `Placeholder ${n}`
+  };
 }
 
-async function runFailedAttemptSeries(baseUrl, { userId, runId, solutionBySlot, count = 6, keyPrefix = 'fail' }) {
+async function runFailedAttemptSeries(baseUrl, { userId, runId, count = 6, keyPrefix = 'fail' }) {
   let last = null;
   for (let i = 0; i < count; i += 1) {
-    const shift = (i % 3) + 1;
-    const picks = buildShiftedPicks(solutionBySlot, shift);
+    const entries = buildWeakEntries(i + 1);
     const submitted = await requestJson(`${baseUrl}/api/solo/runs/submit`, {
       method: 'POST',
       body: {
@@ -88,7 +88,7 @@ async function runFailedAttemptSeries(baseUrl, { userId, runId, solutionBySlot, 
         runId,
         idempotencyKey: `${keyPrefix}-submit-${i + 1}`,
         clientSubmittedAtMs: Date.now(),
-        picks
+        entries
       }
     });
     assert.strictEqual(submitted.status, 200, 'failed-attempt submit should succeed');
@@ -148,7 +148,6 @@ async function main() {
     const runAId = String(startA.body.run.runId || '');
     const runBId = String(startB.body.run.runId || '');
     const solutionA = startA.body.challenge.debugSolutionBySlot;
-    const solutionB = startB.body.challenge.debugSolutionBySlot;
     assert.strictEqual(Boolean(solutionA && solutionA.lead), true, 'debug solution should exist in test mode');
 
     await wait(1700);
@@ -219,11 +218,9 @@ async function main() {
     assert.strictEqual(startPractice.status, 201, 'practice run should create new run');
     assert.strictEqual(Boolean(startPractice.body.run.practice), true, 'second same-day run should be forced practice');
     const practiceRunId = String(startPractice.body.run.runId || '');
-    const practiceSolution = startPractice.body.challenge.debugSolutionBySlot;
     const practiceLastAttempt = await runFailedAttemptSeries(baseUrl, {
       userId: userA,
       runId: practiceRunId,
-      solutionBySlot: practiceSolution,
       count: 6,
       keyPrefix: 'practice-a'
     });
@@ -246,7 +243,6 @@ async function main() {
     const failedLastAttemptB = await runFailedAttemptSeries(baseUrl, {
       userId: userB,
       runId: runBId,
-      solutionBySlot: solutionB,
       count: 6,
       keyPrefix: 'fail-b'
     });

@@ -34,7 +34,7 @@ const state = {
   flags: {
     progressionEnabled: false,
     achievementsEnabled: false,
-    soloEngineEnabled: false,
+    soloEngineEnabled: true,
     dualHubUiEnabled: true
   },
   identity: {
@@ -55,13 +55,12 @@ const state = {
   solo: {
     run: null,
     challenge: null,
-    picks: {
+    entries: {
       lead: '',
       anchor: '',
       wildcard: '',
       closer: ''
     },
-    selectedSlot: 'lead',
     attempts: [],
     summary: null,
     leaderboard: null,
@@ -200,10 +199,18 @@ async function loadFlags() {
   try {
     const response = await requestJson('/api/meta/flags');
     if (!response.ok || !response.body) return;
-    state.flags.progressionEnabled = response.body.progressionEnabled === true;
-    state.flags.achievementsEnabled = response.body.achievementsEnabled === true;
-    state.flags.soloEngineEnabled = response.body.soloEngineEnabled === true;
-    state.flags.dualHubUiEnabled = response.body.dualHubUiEnabled !== false;
+    if (Object.prototype.hasOwnProperty.call(response.body, 'progressionEnabled')) {
+      state.flags.progressionEnabled = response.body.progressionEnabled === true;
+    }
+    if (Object.prototype.hasOwnProperty.call(response.body, 'achievementsEnabled')) {
+      state.flags.achievementsEnabled = response.body.achievementsEnabled === true;
+    }
+    if (Object.prototype.hasOwnProperty.call(response.body, 'soloEngineEnabled')) {
+      state.flags.soloEngineEnabled = response.body.soloEngineEnabled === true;
+    }
+    if (Object.prototype.hasOwnProperty.call(response.body, 'dualHubUiEnabled')) {
+      state.flags.dualHubUiEnabled = response.body.dualHubUiEnabled !== false;
+    }
   } catch (_error) {}
 }
 
@@ -543,48 +550,32 @@ function updateSoloCounterChips(run = null) {
   }
 }
 
-function renderSoloSlotButtons() {
-  const buttons = Array.from(document.querySelectorAll('.solo-slot-btn[data-solo-slot]'));
-  buttons.forEach((button) => {
-    const slotId = String(button.getAttribute('data-solo-slot') || '');
-    const selected = slotId === state.solo.selectedSlot;
-    button.classList.toggle('is-active', selected);
-  });
-  const map = {
-    lead: 'soloPickLead',
-    anchor: 'soloPickAnchor',
-    wildcard: 'soloPickWildcard',
-    closer: 'soloPickCloser'
-  };
-  Object.keys(map).forEach((slotId) => {
-    const node = document.getElementById(map[slotId]);
-    if (!node) return;
-    node.textContent = state.solo.picks[slotId] || '--';
-  });
-}
-
-function renderSoloCandidateGrid() {
-  const grid = document.getElementById('soloCandidateGrid');
+function renderSoloEntryPrompts() {
+  const grid = document.getElementById('soloPromptGrid');
   if (!grid) return;
   grid.innerHTML = '';
-  const challenge = state.solo.challenge;
-  if (!challenge || !Array.isArray(challenge.candidatePool)) return;
-
-  const selectedValues = new Set(Object.values(state.solo.picks || {}).filter(Boolean));
-  challenge.candidatePool.forEach((candidate) => {
-    const candidateId = String(candidate.id || '');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'solo-candidate-btn';
-    if (selectedValues.has(candidateId)) {
-      button.classList.add('selected');
-    }
-    button.setAttribute('data-candidate-id', candidateId);
-    button.innerHTML = `
-      <strong>${String(candidate.label || candidateId)}</strong>
-      <small>${String(candidate.archetype || 'unknown')} | Power ${formatNumber(candidate.power || 0)}</small>
+  const prompts = state.solo.challenge && Array.isArray(state.solo.challenge.entryPrompts)
+    ? state.solo.challenge.entryPrompts
+    : [];
+  prompts.forEach((prompt) => {
+    const slotId = String(prompt.slotId || '');
+    const card = document.createElement('article');
+    card.className = 'solo-entry-card';
+    card.innerHTML = `
+      <header>
+        <strong>${String(prompt.label || slotId)}</strong>
+        <small>${String(prompt.role || 'Draft slot')}</small>
+      </header>
+      <p>${String(prompt.prompt || '')}</p>
+      <input
+        type="text"
+        maxlength="80"
+        data-solo-entry-slot="${slotId}"
+        placeholder="Type an entry..."
+        value="${String(state.solo.entries[slotId] || '').replace(/\"/g, '&quot;')}"
+      />
     `;
-    grid.appendChild(button);
+    grid.appendChild(card);
   });
 }
 
@@ -602,11 +593,13 @@ function renderSoloAttempts() {
   state.solo.attempts.forEach((attempt) => {
     const row = document.createElement('li');
     const grades = Array.isArray(attempt.slotFeedback)
-      ? attempt.slotFeedback.map((slot) => `${slot.label}:${slot.grade}`).join(' | ')
+      ? attempt.slotFeedback.map((slot) => `${slot.label}:${slot.grade}${slot.ovr ? `(${formatNumber(slot.ovr)})` : ''}`).join(' | ')
       : 'No slot feedback';
+    const team = attempt.teamSummary && typeof attempt.teamSummary === 'object' ? attempt.teamSummary : null;
     row.innerHTML = `
       <strong>Attempt ${formatNumber(attempt.attemptNumber)}</strong>
       <div>${grades}</div>
+      <div>Team OVR ${formatNumber(team && team.averageOVR)} | In Category ${formatNumber(team && team.inCategoryCount)}</div>
       <small>Trend ${attempt.teamSynergyTrend || 'Flat'} | ${attempt.clueLine || ''}</small>
     `;
     list.appendChild(row);
@@ -623,14 +616,19 @@ function renderSoloSummary() {
     return;
   }
   const summary = state.solo.summary;
+  const team = summary.team && typeof summary.team === 'object' ? summary.team : null;
+  const bestCards = Array.isArray(summary.bestCards) ? summary.bestCards : [];
   card.hidden = false;
   content.innerHTML = `
     <div class="hub-field-row"><span>Outcome</span><strong>${String(summary.outcome || '--')}</strong></div>
     <div class="hub-field-row"><span>Final Score</span><strong>${formatNumber(summary.finalScore || 0)}</strong></div>
+    <div class="hub-field-row"><span>Team OVR</span><strong>${formatNumber(team && team.averageOVR)}</strong></div>
+    <div class="hub-field-row"><span>In Category</span><strong>${formatNumber(team && team.inCategoryCount)}</strong></div>
     <div class="hub-field-row"><span>Scored</span><strong>${summary.scored ? 'Yes' : 'No'}</strong></div>
     <div class="hub-field-row"><span>Practice</span><strong>${summary.practice ? 'Yes' : 'No'}</strong></div>
     <div class="hub-field-row"><span>Streak</span><strong>${formatNumber(summary.streak && summary.streak.currentStreak)}</strong></div>
     <div class="hub-field-row"><span>XP Granted</span><strong>${formatNumber(summary.xp && summary.xp.grantedXp)}</strong></div>
+    ${bestCards.length ? `<div class="hub-field-row"><span>Top Cards</span><strong>${bestCards.map((card) => `${String(card.character || '--')} (${formatNumber(card.ovr || 0)})`).join(', ')}</strong></div>` : ''}
   `;
 }
 
@@ -642,7 +640,7 @@ function updateSoloActionButtons() {
   const canSubmit = Boolean(
     run
     && run.status === 'active'
-    && SOLO_SLOT_IDS.every((slotId) => Boolean(state.solo.picks[slotId]))
+    && SOLO_SLOT_IDS.every((slotId) => Boolean(state.solo.entries[slotId]))
   );
   const canHint = Boolean(run && run.status === 'active');
   const canFinalize = Boolean(run && (run.status === 'solved_pending_finalize' || run.status === 'failed_pending_finalize'));
@@ -658,15 +656,13 @@ function setSoloStatusMessage(message = '') {
 }
 
 function resetSoloDraftState() {
-  state.solo.picks = {
+  state.solo.entries = {
     lead: '',
     anchor: '',
     wildcard: '',
     closer: ''
   };
-  state.solo.selectedSlot = 'lead';
-  renderSoloSlotButtons();
-  renderSoloCandidateGrid();
+  renderSoloEntryPrompts();
   updateSoloActionButtons();
 }
 
@@ -678,7 +674,12 @@ function applyRunAndChallenge(run = null, challenge = null) {
   const title = document.getElementById('soloChallengeTitle');
   if (title) title.textContent = challenge ? `${String(challenge.modeId || SOLO_MODE_ID)} | ${String(challenge.dateKey || '--')}` : 'Challenge';
   const scenario = document.getElementById('soloScenarioLine');
-  if (scenario) scenario.textContent = `Scenario: ${String(challenge && challenge.scenarioId || '--')}`;
+  if (scenario) {
+    const category = challenge && challenge.lockedCategory && challenge.lockedCategory.displayName
+      ? ` | Category: ${challenge.lockedCategory.displayName}`
+      : '';
+    scenario.textContent = `Scenario: ${String(challenge && challenge.scenarioId || '--')}${category}`;
+  }
   const twist = document.getElementById('soloTwistLine');
   if (twist) twist.textContent = `Twist: ${String(challenge && challenge.twistId || '--')}`;
   renderSoloRunMeta(run);
@@ -713,7 +714,7 @@ async function startSoloRun({ practice = false } = {}) {
   renderSoloSummary();
   updateSoloActionButtons();
   const practiceTag = response.body.run.practice ? 'Practice run active.' : 'Scored run active.';
-  setSoloStatusMessage(`${practiceTag} Fill slots and submit your attempt.`);
+  setSoloStatusMessage(`${practiceTag} Draft four entries and submit your attempt.`);
 }
 
 async function submitSoloAttempt() {
@@ -727,7 +728,7 @@ async function submitSoloAttempt() {
       runId: run.runId,
       idempotencyKey: makeIdempotencyKey('submit'),
       clientSubmittedAtMs: Date.now(),
-      picks: state.solo.picks
+      entries: state.solo.entries
     }
   });
   if (!response.ok || !response.body) {
@@ -863,26 +864,6 @@ async function refreshSoloLeaderboard() {
   setSoloStatusMessage(suffix);
 }
 
-function handleSoloSlotSelection(slotId = '') {
-  if (!SOLO_SLOT_IDS.includes(slotId)) return;
-  state.solo.selectedSlot = slotId;
-  renderSoloSlotButtons();
-}
-
-function handleSoloCandidatePick(candidateId = '') {
-  const safeId = String(candidateId || '').trim();
-  if (!safeId || !SOLO_SLOT_IDS.includes(state.solo.selectedSlot)) return;
-  SOLO_SLOT_IDS.forEach((slotId) => {
-    if (slotId !== state.solo.selectedSlot && state.solo.picks[slotId] === safeId) {
-      state.solo.picks[slotId] = '';
-    }
-  });
-  state.solo.picks[state.solo.selectedSlot] = safeId;
-  renderSoloSlotButtons();
-  renderSoloCandidateGrid();
-  updateSoloActionButtons();
-}
-
 function bindSoloUiEvents() {
   const startBtn = document.getElementById('soloStartBtn');
   const startPracticeBtn = document.getElementById('soloStartPracticeBtn');
@@ -890,8 +871,7 @@ function bindSoloUiEvents() {
   const hintBtn = document.getElementById('soloHintBtn');
   const finalizeBtn = document.getElementById('soloFinalizeBtn');
   const refreshBtn = document.getElementById('soloRefreshLeaderboardBtn');
-  const slotButtons = Array.from(document.querySelectorAll('.solo-slot-btn[data-solo-slot]'));
-  const candidateGrid = document.getElementById('soloCandidateGrid');
+  const promptGrid = document.getElementById('soloPromptGrid');
   if (startBtn) startBtn.addEventListener('click', () => { void startSoloRun({ practice: false }); });
   if (startPracticeBtn) startPracticeBtn.addEventListener('click', () => { void startSoloRun({ practice: true }); });
   if (submitBtn) submitBtn.addEventListener('click', () => { void submitSoloAttempt(); });
@@ -899,18 +879,15 @@ function bindSoloUiEvents() {
   if (finalizeBtn) finalizeBtn.addEventListener('click', () => { void finalizeSoloRun(); });
   if (refreshBtn) refreshBtn.addEventListener('click', () => { void refreshSoloLeaderboard(); });
 
-  slotButtons.forEach((button) => {
-    button.addEventListener('click', () => {
-      handleSoloSlotSelection(String(button.getAttribute('data-solo-slot') || ''));
-    });
-  });
-
-  if (candidateGrid) {
-    candidateGrid.addEventListener('click', (event) => {
+  if (promptGrid) {
+    promptGrid.addEventListener('input', (event) => {
       const target = event.target instanceof Element ? event.target : null;
-      const button = target ? target.closest('.solo-candidate-btn[data-candidate-id]') : null;
-      if (!button) return;
-      handleSoloCandidatePick(String(button.getAttribute('data-candidate-id') || ''));
+      const input = target ? target.closest('input[data-solo-entry-slot]') : null;
+      if (!input) return;
+      const slotId = String(input.getAttribute('data-solo-entry-slot') || '');
+      if (!SOLO_SLOT_IDS.includes(slotId)) return;
+      state.solo.entries[slotId] = String(input.value || '').trim().slice(0, 80);
+      updateSoloActionButtons();
     });
   }
 }

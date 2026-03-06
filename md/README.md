@@ -20,6 +20,7 @@ This folder contains active, maintained project documentation.
 
 - `FUTURE_IMPLEMENTATIONS_ROADMAP.md` - active roadmap only.
 - `CATEGORIES_MODE_VISION.md` - core design vision and rollout plan for Categories Mode.
+- `DUAL_MODE_OVERHAUL_MASTER_PLAN.md` - master vision and phased implementation plan for Solo + Party overhaul.
 
 ## Deployment Planning
 

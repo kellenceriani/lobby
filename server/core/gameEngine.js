@@ -67,6 +67,7 @@ const {
   normalizeCategorySettings,
   lockCategoryForMatch
 } = require('../services/categoryRegistryService');
+const { emitPartyTelemetryEvent } = require('../telemetry/partyTelemetry');
 
 const GAME_NARRATOR_VOICE_IDS = new Set(['af_heart', 'af_bella', 'am_michael', 'bm_george']);
 const EVAL_PRESEED_ENABLED = ['1', 'true', 'yes', 'on'].includes(
@@ -91,6 +92,46 @@ async function emitWithVoiceCuePrewarm(io, roomCode, eventName, payload, { timeo
       });
     })
     .catch(() => {});
+}
+
+function setGamePhase(game, roomCode, nextPhase, { force = false } = {}) {
+  if (!game) return;
+  const safeNextPhase = String(nextPhase || game.activePhase || '').trim();
+  if (!safeNextPhase) return;
+
+  const now = Date.now();
+  const fromPhase = String(game.activePhase || '').trim() || 'UNKNOWN';
+  const previousPhaseStartMs = Number(game.phaseStartTime) || 0;
+  const phaseDurationMs = previousPhaseStartMs > 0 ? Math.max(0, now - previousPhaseStartMs) : null;
+
+  game.activePhase = safeNextPhase;
+  game.phaseStartTime = now;
+
+  if (!force && fromPhase === safeNextPhase) return;
+  emitPartyTelemetryEvent('phase_transition', {
+    roomCode,
+    gameId: game.id || null,
+    fromPhase,
+    toPhase: safeNextPhase,
+    roundNumber: (Number(game.currentRound) || 0) + 1,
+    totalRounds: Number(game.totalRounds) || 0,
+    playerCount: Array.isArray(game.players) ? game.players.length : 0,
+    phaseDurationMs
+  });
+}
+
+function emitInitialGamePhaseTransition(roomCode, game) {
+  if (!game) return;
+  emitPartyTelemetryEvent('phase_transition', {
+    roomCode,
+    gameId: game.id || null,
+    fromPhase: 'LOBBY',
+    toPhase: String(game.activePhase || 'PRE_ROUND'),
+    roundNumber: (Number(game.currentRound) || 0) + 1,
+    totalRounds: Number(game.totalRounds) || 0,
+    playerCount: Array.isArray(game.players) ? game.players.length : 0,
+    phaseDurationMs: 0
+  });
 }
 
 function normalizeWordCandidate(value) {
@@ -1989,6 +2030,11 @@ function createRoom(roomCode) {
     messages: [],
     reactions: {}
   };
+  emitPartyTelemetryEvent('room_created', {
+    roomCode,
+    maxPlayers: Number(room.settings && room.settings.maxPlayers) || 6,
+    categoriesMode: room.settings && room.settings.categoriesMode ? room.settings.categoriesMode : null
+  });
   markRoomsDirty();
   return room;
 }
@@ -2028,6 +2074,7 @@ function createGameInstance(roomCode, players, settings, recentCategoryIds = [])
   return {
     id: `game_${Date.now()}_${roomCode}`,
     roomCode,
+    startedAtMs: Date.now(),
     players: players.map(p => ({
       id: p.id,
       name: p.name,
@@ -2376,6 +2423,7 @@ function startGame(io, roomCode) {
     room.categoryHistory = nextHistory.slice(-12);
   }
   recordPackMatchStart(room.settings.contentPackId);
+  emitInitialGamePhaseTransition(roomCode, room.gameState);
 
   io.to(roomCode).emit('gameStarting', {
     totalRounds: 3,
@@ -2397,8 +2445,7 @@ async function startRound(io, roomCode) {
     return;
   }
 
-  game.activePhase = 'PRE_ROUND';
-  game.phaseStartTime = Date.now();
+  setGamePhase(game, roomCode, 'PRE_ROUND');
 
   const categoryLabel = getLockedCategoryDisplayName(game.lockedCategory);
   if (categoryLabel) {
@@ -2448,8 +2495,7 @@ async function revealCategory(io, roomCode, { continueToRoundStart = false } = {
     return;
   }
 
-  game.activePhase = 'CATEGORY_REVEAL';
-  game.phaseStartTime = Date.now();
+  setGamePhase(game, roomCode, 'CATEGORY_REVEAL');
 
   const payload = {
     roundNumber: game.currentRound + 1,
@@ -2474,7 +2520,7 @@ async function revealScenario(io, roomCode) {
   const room = rooms[roomCode];
   if (!room || !room.gameState) return;
   const game = room.gameState;
-  game.activePhase = 'DRAFT';
+  setGamePhase(game, roomCode, 'DRAFT');
   game.roundStartTime = Date.now();
   game.draftEntries = {};
   game.votes = {};
@@ -2559,7 +2605,7 @@ async function revealPlotTwist(io, roomCode) {
     return;
   }
 
-  game.activePhase = 'TWIST';
+  setGamePhase(game, roomCode, 'TWIST');
 
   const twistPayload = {
     twist: game.currentTwist,
@@ -2593,8 +2639,7 @@ async function revealPlotTwist(io, roomCode) {
 function startVoting(io, roomCode) {
   if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
-  game.activePhase = 'VOTING';
-  game.phaseStartTime = Date.now();
+  setGamePhase(game, roomCode, 'VOTING');
   game.votes = {};
   game.voteLocks = {};
   game.voteTallyStarted = false;
@@ -2660,8 +2705,7 @@ async function startFinalRound(io, roomCode) {
   console.log(`🏁 Starting Round 4 for room ${roomCode}`);
   if (!rooms[roomCode] || !rooms[roomCode].gameState) return;
   const game = rooms[roomCode].gameState;
-  game.activePhase = 'AI_EVALUATION';
-  game.phaseStartTime = Date.now();
+  setGamePhase(game, roomCode, 'AI_EVALUATION');
   game.round4InProgress = false;
   game.round4Applied = false;
   game.round4Results = null;
@@ -2866,7 +2910,7 @@ async function tallyResults(io, roomCode) {
     });
   }
 
-  game.activePhase = 'RESULTS';
+  setGamePhase(game, roomCode, 'RESULTS');
 
   const leaderboardData = [...game.players].sort((a, b) => b.totalScore - a.totalScore).map(p => ({
     name: p.name,
@@ -2977,6 +3021,17 @@ async function tallyResults(io, roomCode) {
       }, {})
       : {},
     voiceCues: []
+  });
+
+  emitPartyTelemetryEvent('round_completed', {
+    roomCode,
+    gameId: game.id || null,
+    roundNumber: roundIndex + 1,
+    playerCount: Array.isArray(game.players) ? game.players.length : 0,
+    winner: winnerInfo.winner || null,
+    isTie: winnerInfo.isTie === true,
+    tiedCount: Array.isArray(winnerInfo.tiedPlayers) ? winnerInfo.tiedPlayers.length : 0,
+    roundDurationMs: Number(game.roundStartTime) > 0 ? Math.max(0, Date.now() - Number(game.roundStartTime)) : null
   });
 
   if (roundIndex === ((Number(game.totalRounds) || 3) - 1)) {
@@ -3289,6 +3344,18 @@ async function endGame(io, roomCode) {
     voiceCues: buildGameEndedVoiceCues({ winner })
   };
   await emitWithVoiceCuePrewarm(io, roomCode, 'gameEnded', gameEndedPayload, { timeoutMs: 2200 });
+
+  const isFinalTie = finalLeaderboard.length > 1
+    && Number(finalLeaderboard[0] && finalLeaderboard[0].score) === Number(finalLeaderboard[1] && finalLeaderboard[1].score);
+  emitPartyTelemetryEvent('final_completed', {
+    roomCode,
+    gameId: game.id || null,
+    playerCount: finalLeaderboard.length,
+    winner: winner && winner.name ? winner.name : null,
+    isTie: isFinalTie,
+    roundsCompleted: Array.isArray(game.results) ? game.results.filter(Boolean).length : 0,
+    matchDurationMs: Number(game.startedAtMs) > 0 ? Math.max(0, Date.now() - Number(game.startedAtMs)) : null
+  });
 
   room.isGameActive = false;
   const previousSettings = { ...(room.settings || {}) };

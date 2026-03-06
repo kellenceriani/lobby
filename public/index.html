@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="css/base.css?v=20260226-voice-router1">
   <link rel="stylesheet" href="css/lobby.css?v=20260301-chat-ios2">
   <link rel="stylesheet" href="css/settings.css?v=20260227-settings-os1">
+  <link rel="stylesheet" href="css/dual-hub.css?v=20260306-phase3-1">
   <link rel="stylesheet" href="css/game.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/results.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/joinEvalFallingPlaques.css?v=20260223-livefix1">
@@ -48,6 +49,227 @@
   </div>
 
   <button id="installPromptReopen" class="install-prompt-reopen" type="button" aria-label="Show install help" hidden>❗</button>
+
+  <nav id="hubNav" class="hub-nav" aria-label="Primary navigation" hidden>
+    <button id="hubNavHome" class="hub-nav-btn active" type="button" data-route="home">Home</button>
+    <button id="hubNavSolo" class="hub-nav-btn" type="button" data-route="solo">Solo</button>
+    <button id="hubNavParty" class="hub-nav-btn" type="button" data-route="party">Party</button>
+    <button id="hubNavProfile" class="hub-nav-btn" type="button" data-route="profile">Profile</button>
+    <button id="hubNavProgression" class="hub-nav-btn" type="button" data-route="progression">Progression</button>
+    <button id="hubNavAchievements" class="hub-nav-btn" type="button" data-route="achievements">Achievements</button>
+  </nav>
+
+  <!-- ==================== DUAL-HUB ONBOARDING ==================== -->
+  <div id="dualPathOnboarding" class="screen">
+    <section class="hub-shell hub-shell-onboarding" aria-label="Choose your path onboarding">
+      <header class="hub-hero">
+        <p class="hub-kicker">Choose Your Path</p>
+        <h1>LobbyWARS Dual Mode</h1>
+        <p>Daily Solo mastery or real-time Party chaos, both under one profile.</p>
+      </header>
+
+      <div class="hub-onboarding-grid">
+        <article class="hub-card hub-card-solo">
+          <h2>Solo Hub</h2>
+          <p>Daily Cipher Clash, one scored run per day, streaks, and leaderboard placement.</p>
+          <button id="onboardingSoloBtn" class="btn btn-primary hub-btn-wide" type="button">Start Solo</button>
+        </article>
+        <article class="hub-card hub-card-party">
+          <h2>Party Hub</h2>
+          <p>Create or join rooms instantly with the existing multiplayer flow and settings.</p>
+          <button id="onboardingPartyBtn" class="btn btn-secondary hub-btn-wide" type="button">Open Party</button>
+        </article>
+      </div>
+
+      <footer class="hub-onboarding-footer">
+        <p id="onboardingCountdown" class="hub-countdown-text">Auto-close in 8s</p>
+        <button id="onboardingSkipBtn" class="btn btn-secondary" type="button">Skip</button>
+      </footer>
+    </section>
+  </div>
+
+  <!-- ==================== HOME HUB ==================== -->
+  <div id="homeHub" class="screen">
+    <section class="hub-shell" aria-label="Home hub">
+      <header class="hub-hero">
+        <p class="hub-kicker">Home</p>
+        <h1>Play Daily or Party Now</h1>
+        <p id="homeHubGreeting">Preparing your cross-mode profile...</p>
+      </header>
+
+      <div class="hub-home-actions">
+        <article class="hub-card hub-card-solo">
+          <h2>Solo Hub</h2>
+          <p>Daily run, streak tracking, and rank snapshots.</p>
+          <button id="homeGoSoloBtn" class="btn btn-primary hub-btn-wide" type="button">Go Solo</button>
+        </article>
+        <article class="hub-card hub-card-party">
+          <h2>Party Hub</h2>
+          <p>Host or join rooms with no extra friction.</p>
+          <button id="homeGoPartyBtn" class="btn btn-secondary hub-btn-wide" type="button">Go Party</button>
+        </article>
+      </div>
+
+      <div class="hub-stat-grid" aria-live="polite">
+        <article class="hub-stat-card">
+          <span class="hub-stat-label">Level</span>
+          <strong id="homeStatLevel">--</strong>
+        </article>
+        <article class="hub-stat-card">
+          <span class="hub-stat-label">Total XP</span>
+          <strong id="homeStatXp">--</strong>
+        </article>
+        <article class="hub-stat-card">
+          <span class="hub-stat-label">Solo Streak</span>
+          <strong id="homeStatSoloStreak">--</strong>
+        </article>
+        <article class="hub-stat-card">
+          <span class="hub-stat-label">Party Status</span>
+          <strong id="homeStatPartyStatus">Ready</strong>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <!-- ==================== SOLO HUB ==================== -->
+  <div id="soloHub" class="screen">
+    <section class="hub-shell hub-shell-solo" aria-label="Solo hub">
+      <header class="hub-hero">
+        <p class="hub-kicker">Solo Hub</p>
+        <h1>Daily Cipher Clash</h1>
+        <p>Next UTC reset in <strong id="soloResetCountdown">--:--:--</strong></p>
+      </header>
+
+      <section class="hub-card">
+        <div class="hub-row">
+          <div>
+            <h2>Daily Run</h2>
+            <p id="soloStatusMessage">Start your daily run to load today's deterministic challenge.</p>
+          </div>
+          <div class="hub-inline-actions">
+            <button id="soloStartBtn" class="btn btn-primary" type="button">Start Daily</button>
+            <button id="soloStartPracticeBtn" class="btn btn-secondary" type="button">Start Practice</button>
+          </div>
+        </div>
+        <div id="soloRunMeta" class="hub-chip-row"></div>
+      </section>
+
+      <section id="soloChallengeCard" class="hub-card" hidden>
+        <div class="hub-row">
+          <div>
+            <h2 id="soloChallengeTitle">Challenge</h2>
+            <p id="soloScenarioLine">Scenario: --</p>
+            <p id="soloTwistLine">Twist: --</p>
+          </div>
+          <div class="hub-chip-row">
+            <span id="soloAttemptsChip" class="hub-chip">Attempts 0/6</span>
+            <span id="soloHintsChip" class="hub-chip">Hints 0/2</span>
+          </div>
+        </div>
+
+        <div class="solo-slot-grid" role="tablist" aria-label="Solo role slots">
+          <button class="solo-slot-btn is-active" type="button" data-solo-slot="lead">Lead <span id="soloPickLead">--</span></button>
+          <button class="solo-slot-btn" type="button" data-solo-slot="anchor">Anchor <span id="soloPickAnchor">--</span></button>
+          <button class="solo-slot-btn" type="button" data-solo-slot="wildcard">Wildcard <span id="soloPickWildcard">--</span></button>
+          <button class="solo-slot-btn" type="button" data-solo-slot="closer">Closer <span id="soloPickCloser">--</span></button>
+        </div>
+
+        <div id="soloCandidateGrid" class="solo-candidate-grid" aria-live="polite"></div>
+
+        <div class="hub-inline-actions">
+          <button id="soloSubmitBtn" class="btn btn-primary" type="button" disabled>Submit Attempt</button>
+          <button id="soloHintBtn" class="btn btn-secondary" type="button" disabled>Use Hint</button>
+          <button id="soloFinalizeBtn" class="btn btn-success" type="button" disabled>Finalize Run</button>
+        </div>
+      </section>
+
+      <section class="hub-card">
+        <h2>Attempt Feedback</h2>
+        <ul id="soloAttemptLog" class="hub-list"></ul>
+      </section>
+
+      <section id="soloSummaryCard" class="hub-card" hidden>
+        <h2>Post-Run Summary</h2>
+        <div id="soloSummaryContent"></div>
+      </section>
+
+      <section class="hub-card">
+        <div class="hub-row">
+          <h2>Daily Leaderboard</h2>
+          <button id="soloRefreshLeaderboardBtn" class="btn btn-secondary" type="button">Refresh</button>
+        </div>
+        <ul id="soloLeaderboardRows" class="hub-list"></ul>
+      </section>
+    </section>
+  </div>
+
+  <!-- ==================== PROFILE HUB ==================== -->
+  <div id="profileHub" class="screen">
+    <section class="hub-shell" aria-label="Profile hub">
+      <header class="hub-hero">
+        <p class="hub-kicker">Profile</p>
+        <h1 id="profileDisplayName">Guest</h1>
+        <p id="profileIdentityLine">User ID: --</p>
+      </header>
+      <section class="hub-card">
+        <h2>Account</h2>
+        <div class="hub-field-row"><span>Account Type</span><strong id="profileAccountType">guest</strong></div>
+        <div class="hub-field-row"><span>Created</span><strong id="profileCreatedAt">--</strong></div>
+        <div class="hub-field-row"><span>Last Updated</span><strong id="profileUpdatedAt">--</strong></div>
+      </section>
+      <section class="hub-card">
+        <h2>Mode Snapshot</h2>
+        <div class="hub-field-row"><span>Solo Best Score</span><strong id="profileSoloBestScore">--</strong></div>
+        <div class="hub-field-row"><span>Solo Current Streak</span><strong id="profileSoloCurrentStreak">--</strong></div>
+        <div class="hub-field-row"><span>Solo Longest Streak</span><strong id="profileSoloLongestStreak">--</strong></div>
+      </section>
+    </section>
+  </div>
+
+  <!-- ==================== PROGRESSION HUB ==================== -->
+  <div id="progressionHub" class="screen">
+    <section class="hub-shell" aria-label="Progression hub">
+      <header class="hub-hero">
+        <p class="hub-kicker">Progression</p>
+        <h1>Shared XP Across Solo + Party</h1>
+        <p>Server-authoritative XP and level state.</p>
+      </header>
+      <section class="hub-card">
+        <div class="hub-field-row"><span>Level</span><strong id="progressionLevel">--</strong></div>
+        <div class="hub-field-row"><span>Total XP</span><strong id="progressionTotalXp">--</strong></div>
+        <div class="hub-progress-wrap" aria-label="XP progress to next level">
+          <div class="hub-progress-track">
+            <span id="progressionXpFill" class="hub-progress-fill" style="width: 0%;"></span>
+          </div>
+          <p id="progressionXpLabel">-- / --</p>
+        </div>
+      </section>
+      <section class="hub-card">
+        <h2>Solo Mode Progress</h2>
+        <div class="hub-field-row"><span>Daily Scored Runs</span><strong id="progressionSoloRuns">--</strong></div>
+        <div class="hub-field-row"><span>Current Streak</span><strong id="progressionSoloStreak">--</strong></div>
+        <div class="hub-field-row"><span>Longest Streak</span><strong id="progressionSoloLongest">--</strong></div>
+      </section>
+    </section>
+  </div>
+
+  <!-- ==================== ACHIEVEMENTS HUB ==================== -->
+  <div id="achievementsHub" class="screen">
+    <section class="hub-shell" aria-label="Achievements hub">
+      <header class="hub-hero">
+        <p class="hub-kicker">Achievements</p>
+        <h1>Cross-Mode Unlocks</h1>
+        <p id="achievementsStatusMessage">Loading definitions and unlock ledger...</p>
+      </header>
+      <section class="hub-card">
+        <div class="hub-row">
+          <h2>Unlocked</h2>
+          <strong id="achievementsUnlockedCount">0</strong>
+        </div>
+        <ul id="achievementsList" class="hub-list"></ul>
+      </section>
+    </section>
+  </div>
 
   <!-- ==================== JOIN SCREEN ==================== -->
   <div id="join" class="screen active">
@@ -1452,7 +1674,7 @@
       }
     })();
   </script>
-  <script type="module" src="js/bootstrap.js?v=20260302-startup-hardening3"></script>
+  <script type="module" src="js/bootstrap.js?v=20260306-phase3-1"></script>
   <link rel="stylesheet" href="css/round4Eval.css?v=20260226-voice-ui1">
   <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260226-voice-ui1">
 </body>

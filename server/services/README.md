@@ -8,4 +8,8 @@ Cross-cutting backend services.
 - `round4Service.js` - final roster evaluation and leaderboard shaping.
 - `scoreScaling.js` - point conversion and weighting formulas.
 - `entryEvaluationService.js` - central adapter into evaluation pipeline.
+- `identityService.js` - guest/account identity and legacy-name resolution.
+- `metaService.js` - profile/progression/xp/achievement orchestration.
+- `soloEngineService.js` - deterministic solo daily mode lifecycle/scoring.
+- `seasonService.js` - season lifecycle, league tracks, quests, and snapshots.
 - `evaluation/` - context-engine pipeline modules (resolver/context/scoring/explain/cache).

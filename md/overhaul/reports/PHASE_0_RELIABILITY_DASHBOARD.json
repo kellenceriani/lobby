@@ -1,0 +1,45 @@
+{
+  "generatedAtIso": "2026-03-06T19:58:04.656Z",
+  "expectedSchemaVersion": 1,
+  "parseErrors": [],
+  "parseErrorCount": 0,
+  "invalidSchemaCount": 0,
+  "totals": {
+    "events": 15,
+    "rooms": 1,
+    "joins": 4,
+    "leaves": 4,
+    "reconnects": 1,
+    "reconnectRatePct": 25,
+    "roundCompletions": 1,
+    "roundTieRatePct": 100,
+    "finalCompletions": 1,
+    "finalTieRatePct": 100
+  },
+  "latencies": {
+    "avgRoundDurationMs": 0,
+    "avgMatchDurationMs": 442
+  },
+  "eventWindow": {
+    "firstTimestampMs": 1772827083309,
+    "firstTimestampIso": "2026-03-06T19:58:03.309Z",
+    "lastTimestampMs": 1772827083783,
+    "lastTimestampIso": "2026-03-06T19:58:03.783Z",
+    "durationMs": 474
+  },
+  "missingEventTypes": [],
+  "eventCounts": {
+    "room_created": 1,
+    "player_joined": 4,
+    "player_left": 4,
+    "player_reconnected": 1,
+    "phase_transition": 3,
+    "round_completed": 1,
+    "final_completed": 1
+  },
+  "phaseTransitions": {
+    "LOBBY->PRE_ROUND": 1,
+    "PRE_ROUND->RESULTS": 1,
+    "RESULTS->AI_EVALUATION": 1
+  }
+}

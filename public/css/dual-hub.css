@@ -1,0 +1,421 @@
+:root {
+  --hub-ink: #1f1531;
+  --hub-surface: rgba(255, 255, 255, 0.86);
+  --hub-surface-strong: rgba(255, 255, 255, 0.95);
+  --hub-border: rgba(31, 21, 49, 0.12);
+  --hub-shadow: 0 14px 28px rgba(31, 21, 49, 0.16);
+  --hub-shell-max: 1060px;
+}
+
+.hub-nav {
+  position: fixed;
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  z-index: 9000;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(21, 18, 35, 0.9);
+  box-shadow: 0 12px 26px rgba(10, 8, 19, 0.35);
+  backdrop-filter: blur(10px);
+}
+
+.hub-nav[hidden] {
+  display: none !important;
+}
+
+.hub-nav-btn {
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f9f3ff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hub-nav-btn.active {
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #fff;
+  border-color: transparent;
+}
+
+.hub-shell {
+  width: min(var(--hub-shell-max), 100%);
+  margin: 0 auto;
+  padding:
+    calc(18px + env(safe-area-inset-top))
+    clamp(14px, 3vw, 26px)
+    calc(96px + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 14px;
+}
+
+@supports (height: 100dvh) {
+  #homeHub,
+  #soloHub,
+  #profileHub,
+  #progressionHub,
+  #achievementsHub,
+  #dualPathOnboarding {
+    min-height: 100dvh;
+  }
+}
+
+.hub-shell-onboarding {
+  justify-content: center;
+  align-content: center;
+  min-height: 100vh;
+}
+
+.hub-hero {
+  padding: 16px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(242, 250, 255, 0.92));
+  border: 1px solid rgba(31, 21, 49, 0.1);
+  box-shadow: var(--hub-shadow);
+}
+
+.hub-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(0, 188, 212, 0.16);
+  color: #046f7d;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hub-hero h1 {
+  margin-top: 8px;
+  color: var(--hub-ink);
+  font-size: clamp(1.5rem, 3.6vw, 2.2rem);
+  line-height: 1.1;
+}
+
+.hub-hero p {
+  margin-top: 8px;
+  color: rgba(31, 21, 49, 0.82);
+  font-size: 0.95rem;
+}
+
+.hub-home-actions,
+.hub-onboarding-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+.hub-card {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--hub-border);
+  background: var(--hub-surface);
+  box-shadow: 0 6px 14px rgba(31, 21, 49, 0.11);
+}
+
+.hub-card h2 {
+  font-size: 1.15rem;
+  color: #24183a;
+}
+
+.hub-card p {
+  margin-top: 6px;
+  color: rgba(36, 24, 58, 0.8);
+}
+
+.hub-card-solo {
+  background: linear-gradient(145deg, rgba(236, 250, 255, 0.96), rgba(229, 255, 242, 0.92));
+}
+
+.hub-card-party {
+  background: linear-gradient(145deg, rgba(255, 246, 233, 0.96), rgba(255, 235, 246, 0.92));
+}
+
+.hub-btn-wide {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.hub-onboarding-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hub-countdown-text {
+  color: rgba(31, 21, 49, 0.7);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.hub-stat-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hub-stat-card {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--hub-border);
+  background: var(--hub-surface-strong);
+}
+
+.hub-stat-label {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(31, 21, 49, 0.68);
+}
+
+.hub-stat-card strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.1rem;
+  color: #24183a;
+}
+
+.hub-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hub-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hub-inline-actions .btn {
+  min-height: 44px;
+}
+
+.hub-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.hub-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 21, 49, 0.16);
+  background: rgba(255, 255, 255, 0.72);
+  color: #2f2149;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.hub-list {
+  margin-top: 10px;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.hub-list li {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 21, 49, 0.12);
+  background: rgba(255, 255, 255, 0.8);
+  color: #2f2149;
+  font-size: 0.9rem;
+}
+
+.hub-list li.empty {
+  opacity: 0.72;
+  font-style: italic;
+}
+
+.solo-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.solo-slot-btn {
+  min-height: 44px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(31, 21, 49, 0.16);
+  background: rgba(255, 255, 255, 0.82);
+  color: #2f2149;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.solo-slot-btn span {
+  font-size: 0.72rem;
+  opacity: 0.82;
+  font-weight: 600;
+}
+
+.solo-slot-btn.is-active {
+  border-color: rgba(0, 188, 212, 0.6);
+  box-shadow: 0 0 0 2px rgba(0, 188, 212, 0.18);
+}
+
+.solo-candidate-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.solo-candidate-btn {
+  min-height: 48px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(31, 21, 49, 0.14);
+  background: rgba(255, 255, 255, 0.85);
+  color: #2b1f43;
+  text-align: left;
+  cursor: pointer;
+}
+
+.solo-candidate-btn strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.solo-candidate-btn small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  opacity: 0.78;
+}
+
+.solo-candidate-btn.selected {
+  background: linear-gradient(135deg, rgba(0, 188, 212, 0.22), rgba(255, 64, 129, 0.2));
+  border-color: rgba(0, 188, 212, 0.7);
+}
+
+.hub-field-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  align-items: center;
+  border-bottom: 1px dashed rgba(31, 21, 49, 0.12);
+  padding: 6px 0;
+}
+
+.hub-field-row:last-child {
+  border-bottom: none;
+}
+
+.hub-field-row span {
+  color: rgba(36, 24, 58, 0.72);
+  font-size: 0.9rem;
+}
+
+.hub-field-row strong {
+  color: #24183a;
+  font-size: 0.9rem;
+}
+
+.hub-progress-wrap {
+  margin-top: 8px;
+}
+
+.hub-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(31, 21, 49, 0.14);
+  overflow: hidden;
+}
+
+.hub-progress-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  border-radius: 999px;
+}
+
+#progressionXpLabel {
+  margin-top: 6px;
+  font-size: 0.84rem;
+  color: rgba(36, 24, 58, 0.75);
+}
+
+@media (min-width: 820px) {
+  .hub-home-actions,
+  .hub-onboarding-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .solo-candidate-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .hub-nav {
+    top: calc(10px + env(safe-area-inset-top));
+    bottom: auto;
+    left: auto;
+    width: min(760px, calc(100vw - 20px));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .hub-shell {
+    padding-top: calc(84px + env(safe-area-inset-top));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 680px) {
+  .hub-nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .hub-row {
+    flex-direction: column;
+  }
+
+  .hub-inline-actions {
+    width: 100%;
+  }
+
+  .hub-inline-actions .btn {
+    flex: 1;
+  }
+
+  .hub-stat-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hub-nav,
+  .hub-card,
+  .solo-candidate-btn,
+  .solo-slot-btn {
+    transition: none !important;
+  }
+}

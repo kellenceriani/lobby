@@ -1,11 +1,13 @@
 const MODULE_LOAD_ORDER = [
   'js/joinEvalFallingPlaques.js?v=20260228-preflight1',
-  'js/settings.js?v=20260302-interactions2',
-  'js/app.js?v=20260302-preflight-voice2'
+  'js/settings.js?v=20260304-core-rules-refresh1',
+  'js/app.js?v=20260302-preflight-voice2',
+  'js/dualHub.js?v=20260306-phase3-1'
 ];
 
 const EXPECTED_APP_BUILD = '20260302-preflight-voice2';
-const EXPECTED_SETTINGS_BUILD = '20260302-interactions2';
+const EXPECTED_SETTINGS_BUILD = '20260304-core-rules-refresh1';
+const EXPECTED_DUAL_HUB_BUILD = '20260306-phase3-1';
 
 let startupSettled = false;
 let startupFailed = false;
@@ -149,8 +151,12 @@ function verifyBuildConsistency() {
       : {};
     const appBuild = String(build.app || '').trim();
     const settingsBuild = String(build.settings || '').trim();
-    if (appBuild !== EXPECTED_APP_BUILD || settingsBuild !== EXPECTED_SETTINGS_BUILD) {
-      throw new Error(`stale-module-build app=${appBuild || 'missing'} settings=${settingsBuild || 'missing'} expected=${EXPECTED_APP_BUILD}`);
+    const dualHubBuild = String(build.dualHub || '').trim();
+    if (appBuild !== EXPECTED_APP_BUILD || settingsBuild !== EXPECTED_SETTINGS_BUILD || dualHubBuild !== EXPECTED_DUAL_HUB_BUILD) {
+      throw new Error(
+        `stale-module-build app=${appBuild || 'missing'} settings=${settingsBuild || 'missing'} dualHub=${dualHubBuild || 'missing'}` +
+        ` expected=${EXPECTED_APP_BUILD}/${EXPECTED_SETTINGS_BUILD}/${EXPECTED_DUAL_HUB_BUILD}`
+      );
     }
     return true;
   } catch (error) {

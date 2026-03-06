@@ -41,6 +41,11 @@ const {
   normalizeCategorySettings,
   buildVoteOptions
 } = require('../services/categoryRegistryService');
+const {
+  emitPartyTelemetryEvent,
+  consumeReconnectSignal,
+  markPlayerDisconnected
+} = require('../telemetry/partyTelemetry');
 
 const allowRequest = createRateLimiter();
 const CHAT_MAX_MESSAGES = 10;
@@ -1142,6 +1147,7 @@ function registerSocketHandlers(io) {
         ready: false,
         reactions: []
       });
+      const reconnectSignal = consumeReconnectSignal(room, name);
 
       if (joinAsHost && !roomData.host) {
         roomData.host = name;
@@ -1154,6 +1160,22 @@ function registerSocketHandlers(io) {
       emitRoomData(io, room, roomData);
       markRoomsDirty();
       console.log(`${name} joined room ${room}`);
+      emitPartyTelemetryEvent('player_joined', {
+        roomCode: room,
+        playerName: name,
+        playerCount: roomData.players.length,
+        hostName: roomData.host || null,
+        joinAsHost,
+        isReconnect: reconnectSignal.isReconnect === true
+      });
+      if (reconnectSignal.isReconnect === true) {
+        emitPartyTelemetryEvent('player_reconnected', {
+          roomCode: room,
+          playerName: name,
+          playerCount: roomData.players.length,
+          reconnectWindowMs: reconnectSignal.reconnectWindowMs
+        });
+      }
     });
 
     socket.on('updateSettings', (newSettings) => {
@@ -2045,13 +2067,15 @@ function registerSocketHandlers(io) {
       markRoomsDirty();
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
       const room = socket.data.room;
       const name = socket.data.name;
       if (!room || !name) return;
 
       const roomData = getRoomData(room);
       if (!roomData) return;
+      const wasHost = roomData.host === name;
+      markPlayerDisconnected(room, name, Date.now());
 
       if (roomData.categoryVoteState && roomData.categoryVoteState.active === true) {
         if (roomData.categoryVoteState.votesByPlayer && typeof roomData.categoryVoteState.votesByPlayer === 'object') {
@@ -2060,6 +2084,13 @@ function registerSocketHandlers(io) {
       }
 
       roomData.players = roomData.players.filter(p => p.name !== name);
+      emitPartyTelemetryEvent('player_left', {
+        roomCode: room,
+        playerName: name,
+        playerCount: roomData.players.length,
+        disconnectReason: String(reason || 'unknown'),
+        wasHost
+      });
 
       if (roomData.categoryVoteState && roomData.categoryVoteState.active === true) {
         if (!roomData.players.length) {

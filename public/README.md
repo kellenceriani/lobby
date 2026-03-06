@@ -14,3 +14,4 @@ Key behavior:
 - Startup preflight runs before join unlock.
 - Join-screen Eval plaques are staged/prewarmed during preflight.
 - Lobby settings are host-authoritative and synced from socket events.
+- Dual hub navigation (`Home`, `Solo`, `Party`, `Profile`, `Progression`, `Achievements`) is rendered client-side and can be feature-flagged via `DUAL_HUB_UI_ENABLED`.

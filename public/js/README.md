@@ -4,6 +4,7 @@ Last updated: February 28, 2026
 
 - `app.js` - main client orchestrator: socket events, phase UI, audio controls, startup preflight.
 - `settings.js` - Settings OS navigation and summary rendering.
+- `dualHub.js` - Phase 3 dual-hub UX layer (Home/Solo/Party/Profile/Progression/Achievements + onboarding + Solo API UI flow).
 - `joinEvalFallingPlaques.js` - join-screen Eval plaque layer + portrait prewarm bridge.
 - `state.js` - shared in-memory client state.
 - `ui.js` - generic UI helpers and screen/tab switches.

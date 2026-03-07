@@ -13,7 +13,7 @@ function makeTempStorePath() {
   return path.join(tempDir, 'meta.store.json');
 }
 
-function main() {
+async function main() {
   const storePath = makeTempStorePath();
   const adapter = createMetaStoreAdapter({ filePath: storePath });
   const identityService = buildIdentityService({ adapter });
@@ -42,14 +42,14 @@ function main() {
   assert.strictEqual(Boolean(solution && solution.lead), true, 'solution should be exposed for test mode');
   const delayedNowMs = Date.now() + 2500;
 
-  const submit = soloService.submitAttempt({
+  const submit = await Promise.resolve(soloService.submitAttempt({
     userId,
     runId,
     idempotencyKey: 'submit-1',
     picksBySlot: solution,
     clientSubmittedAtMs: delayedNowMs,
     nowMs: delayedNowMs
-  });
+  }));
   assert.strictEqual(Boolean(submit.ok), true, 'submit should succeed');
   assert.strictEqual(Boolean(submit.attempt.solved), true, 'attempt should solve challenge');
 
@@ -75,7 +75,15 @@ function main() {
 
   const secondRun = soloService.startRun({ userId, modeId: 'daily_cipher_clash' });
   assert.strictEqual(Boolean(secondRun.ok), true, 'second run start should succeed');
-  assert.strictEqual(Boolean(secondRun.run.practice), true, 'second same-day run must be forced practice');
+  assert.strictEqual(Boolean(secondRun.idempotent), true, 'second same-day daily start should be idempotent');
+  assert.strictEqual(Boolean(secondRun.run.practice), false, 'second same-day daily start should remain scored run');
+  assert.strictEqual(String(secondRun.run.runId), runId, 'second daily start should return original run');
+  assert.strictEqual(Boolean(secondRun.summary && Number(secondRun.summary.finalScore) > 0), true, 'second daily start should return locked summary');
+
+  const practiceRun = soloService.startRun({ userId, modeId: 'daily_cipher_clash', practice: true });
+  assert.strictEqual(Boolean(practiceRun.ok), true, 'explicit practice start should succeed');
+  assert.strictEqual(Boolean(practiceRun.run.practice), true, 'explicit practice should remain practice');
+  assert.notStrictEqual(String(practiceRun.run.runId), runId, 'practice run should be a new run');
 
   const leaderboard = soloService.getDailyLeaderboard({
     modeId: 'daily_cipher_clash',
@@ -87,4 +95,7 @@ function main() {
   console.log('[Phase2 integration] passed');
 }
 
-main();
+main().catch((error) => {
+  console.error(`[Phase2 integration] failed: ${String(error && error.message || error)}`);
+  process.exit(1);
+});

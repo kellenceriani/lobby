@@ -2,12 +2,12 @@ const MODULE_LOAD_ORDER = [
   'js/joinEvalFallingPlaques.js?v=20260228-preflight1',
   'js/settings.js?v=20260304-core-rules-refresh1',
   'js/app.js?v=20260302-preflight-voice2',
-  'js/dualHub.js?v=20260306-phase3-1'
+  'js/dualHub.js?v=20260307-solo-mp-1'
 ];
 
 const EXPECTED_APP_BUILD = '20260302-preflight-voice2';
 const EXPECTED_SETTINGS_BUILD = '20260304-core-rules-refresh1';
-const EXPECTED_DUAL_HUB_BUILD = '20260306-phase3-1';
+const EXPECTED_DUAL_HUB_BUILD = '20260306-solo-clarity-3';
 
 let startupSettled = false;
 let startupFailed = false;

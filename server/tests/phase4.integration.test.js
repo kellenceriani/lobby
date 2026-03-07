@@ -14,7 +14,7 @@ function makeTempStorePath() {
   return path.join(tempDir, 'meta.store.json');
 }
 
-function main() {
+async function main() {
   const storePath = makeTempStorePath();
   const adapter = createMetaStoreAdapter({ filePath: storePath });
   const identityService = buildIdentityService({ adapter });
@@ -49,14 +49,14 @@ function main() {
   const solution = started.challenge.debugSolutionBySlot;
   const solvedAt = Date.now() + 2500;
 
-  const submit = soloService.submitAttempt({
+  const submit = await Promise.resolve(soloService.submitAttempt({
     userId: userA,
     runId,
     idempotencyKey: 'phase4-submit-1',
     picksBySlot: solution,
     clientSubmittedAtMs: solvedAt,
     nowMs: solvedAt
-  });
+  }));
   assert.strictEqual(Boolean(submit.ok), true, 'solo submit should succeed');
 
   const finalized = soloService.finalizeRun({
@@ -128,4 +128,7 @@ function main() {
   console.log('[Phase4 integration] passed');
 }
 
-main();
+main().catch((error) => {
+  console.error(`[Phase4 integration] failed: ${String(error && error.message || error)}`);
+  process.exit(1);
+});

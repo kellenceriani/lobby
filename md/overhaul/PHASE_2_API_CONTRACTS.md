@@ -25,7 +25,7 @@ Response:
 - `403` solo engine disabled
 - `404` user not found
 
-Returns run metadata plus deterministic challenge payload for the UTC day.
+Returns run metadata plus deterministic challenge payload for the UTC day (scenario, twist, twist rule, category lock, and slot prompts).
 
 ### `POST /api/solo/runs/submit`
 
@@ -53,7 +53,7 @@ Response:
 - `404` run not found
 - `409` run not active or already ready to finalize
 
-Returns evaluated slot feedback (`Perfect|Strong|Weak|Miss`) with OVR values, team summary, trend/clue line, and updated run state.
+Returns evaluated slot feedback (`Perfect|Strong|Weak|Miss`) with OVR values, team summary, trend/clue line, and updated run state. Current default attempt cap is `2` per run.
 
 ### `POST /api/solo/runs/hint`
 

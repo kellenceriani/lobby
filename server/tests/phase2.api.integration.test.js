@@ -77,7 +77,7 @@ function buildWeakEntries(seed = 1) {
   };
 }
 
-async function runFailedAttemptSeries(baseUrl, { userId, runId, count = 6, keyPrefix = 'fail' }) {
+async function runFailedAttemptSeries(baseUrl, { userId, runId, count = 2, keyPrefix = 'fail' }) {
   let last = null;
   for (let i = 0; i < count; i += 1) {
     const entries = buildWeakEntries(i + 1);
@@ -211,17 +211,31 @@ async function main() {
       'duplicate finalize must preserve score'
     );
 
-    const startPractice = await requestJson(`${baseUrl}/api/solo/runs/start`, {
+    const startDailyResume = await requestJson(`${baseUrl}/api/solo/runs/start`, {
       method: 'POST',
       body: { userId: userA, modeId: 'daily_cipher_clash' }
     });
-    assert.strictEqual(startPractice.status, 201, 'practice run should create new run');
-    assert.strictEqual(Boolean(startPractice.body.run.practice), true, 'second same-day run should be forced practice');
+    assert.strictEqual(startDailyResume.status, 200, 'second daily start should resume existing run');
+    assert.strictEqual(Boolean(startDailyResume.body.idempotent), true, 'second daily start should be idempotent');
+    assert.strictEqual(Boolean(startDailyResume.body.run.practice), false, 'daily resume should remain scored run');
+    assert.strictEqual(String(startDailyResume.body.run.runId), runAId, 'daily resume should return original daily run');
+    assert.strictEqual(
+      Number(startDailyResume.body.summary && startDailyResume.body.summary.finalScore),
+      Number(finalizeSolved.body.summary.finalScore),
+      'daily resume should include locked summary when run already finalized'
+    );
+
+    const startPractice = await requestJson(`${baseUrl}/api/solo/runs/start`, {
+      method: 'POST',
+      body: { userId: userA, modeId: 'daily_cipher_clash', practice: true }
+    });
+    assert.strictEqual(startPractice.status, 201, 'explicit practice run should create new run');
+    assert.strictEqual(Boolean(startPractice.body.run.practice), true, 'explicit practice start should remain practice');
     const practiceRunId = String(startPractice.body.run.runId || '');
     const practiceLastAttempt = await runFailedAttemptSeries(baseUrl, {
       userId: userA,
       runId: practiceRunId,
-      count: 6,
+      count: 2,
       keyPrefix: 'practice-a'
     });
     assert.strictEqual(String(practiceLastAttempt.body.run.status), 'failed_pending_finalize', 'practice run should fail after max attempts');
@@ -243,7 +257,7 @@ async function main() {
     const failedLastAttemptB = await runFailedAttemptSeries(baseUrl, {
       userId: userB,
       runId: runBId,
-      count: 6,
+      count: 2,
       keyPrefix: 'fail-b'
     });
     assert.strictEqual(String(failedLastAttemptB.body.run.status), 'failed_pending_finalize', 'runB should be ready to finalize as failed');

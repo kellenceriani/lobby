@@ -1,8 +1,11 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const { sanitizeText } = require('../storage/metaStoreAdapter');
+const { getEnabledCategories } = require('./categoryRegistryService');
+const { evaluateCharactersBatch } = require('./entryEvaluationService');
+const { generateScenario, generateTwists } = require('../core/gameEngine');
 
 const DEFAULT_MODE_ID = 'daily_cipher_clash';
-const SOLO_SCHEMA_VERSION = 2;
+const SOLO_SCHEMA_VERSION = 4;
 
 const SLOT_DEFS = Object.freeze([
   { slotId: 'lead', label: 'Lead', role: 'Open with pressure and tempo control.' },
@@ -11,60 +14,23 @@ const SLOT_DEFS = Object.freeze([
   { slotId: 'closer', label: 'Closer', role: 'Finish the mission under endgame pressure.' }
 ]);
 
-const SCENARIOS = Object.freeze([
-  'Signal Breach',
-  'Silent Summit',
-  'Vault Escape',
-  'Relay Gauntlet',
-  'Skyline Chase',
-  'Final Briefing',
-  'Cipher Cascade'
+const SOLO_THEME_POOL = Object.freeze(['all', 'action', 'adventure', 'sports', 'performance', 'food']);
+const SOLO_DIFFICULTY_POOL = Object.freeze(['normal', 'normal', 'easy', 'hard']);
+const SOLO_SLOT_FALLBACK_ENTRIES = Object.freeze([
+  'Batman',
+  'Sherlock Holmes',
+  'Wonder Woman',
+  'Spider-Man',
+  'Albert Einstein',
+  'Marie Curie',
+  'Ada Lovelace',
+  'Serena Williams'
 ]);
-
-const TWISTS = Object.freeze([
-  'Distinct Roster Signals',
-  'Multi-Word Synergy',
-  'Precision Labels',
-  'Wildcard Pressure',
-  'Category Lock Hardening',
-  'Counterflow Late Close'
-]);
-
-const SOLO_CATEGORY_LOCKS = Object.freeze([
-  {
-    id: 'fictional-beings',
-    displayName: 'Fictional Beings',
-    family: 'fictional beings',
-    strongExamples: ['Batman', 'Wonder Woman', 'Gandalf', 'Spider-Man']
-  },
-  {
-    id: 'science-tech',
-    displayName: 'Science / Technology',
-    family: 'science/technology',
-    strongExamples: ['Ada Lovelace', 'Alan Turing', 'Marie Curie', 'Nikola Tesla']
-  },
-  {
-    id: 'sports-competition',
-    displayName: 'Sports / Competition',
-    family: 'sports/competition',
-    strongExamples: ['Michael Jordan', 'Serena Williams', 'Lionel Messi', 'Simone Biles']
-  },
-  {
-    id: 'history-politics',
-    displayName: 'History / Politics',
-    family: 'history/politics',
-    strongExamples: ['Abraham Lincoln', 'Nelson Mandela', 'Winston Churchill', 'Harriet Tubman']
-  },
-  {
-    id: 'mythology-religion',
-    displayName: 'Mythology / Religion',
-    family: 'mythology/religion',
-    strongExamples: ['Zeus', 'Athena', 'Odin', 'Anubis']
-  }
-]);
+const SOLO_EVAL_BATCH_CONCURRENCY = Math.max(1, Math.min(4, Number(process.env.SOLO_EVAL_BATCH_CONCURRENCY) || 2));
+const SOLO_EVAL_QUALITY_MODE = boolEnv('SOLO_EVAL_QUALITY_MODE', true);
 
 const DEFAULT_LIMITS = Object.freeze({
-  maxAttempts: 6,
+  maxAttempts: 2,
   maxHints: 2,
   maxFutureTimestampMs: 60 * 1000,
   maxPastTimestampMs: 7 * 24 * 60 * 60 * 1000,
@@ -222,50 +188,162 @@ function ensureSoloStateInPlace(state) {
     : {};
 }
 
+function withScopedMathRandom(randomFn, callback) {
+  const originalRandom = Math.random;
+  Math.random = () => {
+    const value = Number(typeof randomFn === 'function' ? randomFn() : Math.random());
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+  };
+  try {
+    return callback();
+  } finally {
+    Math.random = originalRandom;
+  }
+}
+
+function pickDeterministic(values = [], rng = Math.random, fallback = null) {
+  const safe = Array.isArray(values) ? values.filter(Boolean) : [];
+  if (!safe.length) return fallback;
+  return safe[Math.floor(rng() * safe.length)] || safe[0] || fallback;
+}
+
+function inferThemeFromCategoryFamily(family = '', rng = Math.random) {
+  const safeFamily = String(family || '').toLowerCase();
+  if (safeFamily.includes('sports')) return 'sports';
+  if (safeFamily.includes('food')) return 'food';
+  if (safeFamily.includes('media')) return pickDeterministic(['performance', 'adventure'], rng, 'performance');
+  if (safeFamily.includes('fictional')) return pickDeterministic(['action', 'adventure'], rng, 'action');
+  if (safeFamily.includes('science')) return pickDeterministic(['adventure', 'all'], rng, 'all');
+  return pickDeterministic(SOLO_THEME_POOL, rng, 'all');
+}
+
+function buildCategoryReferenceEntries(category = {}, rng = Math.random) {
+  const strong = Array.isArray(category && category.exampleEntriesStrong)
+    ? category.exampleEntriesStrong
+    : [];
+  const weak = Array.isArray(category && category.exampleEntriesWeak)
+    ? category.exampleEntriesWeak
+    : [];
+  const pool = deterministicShuffle([...strong, ...weak, ...SOLO_SLOT_FALLBACK_ENTRIES], rng)
+    .map((entry) => sanitizeEntryText(entry))
+    .filter(Boolean)
+    .filter((entry) => !isPlaceholderEntry(entry));
+  const seen = new Set();
+  const deduped = [];
+  pool.forEach((entry) => {
+    const key = normalizeEntryKey(entry);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    deduped.push(entry);
+  });
+  if (deduped.length < SLOT_DEFS.length) {
+    SOLO_SLOT_FALLBACK_ENTRIES.forEach((entry) => {
+      const safe = sanitizeEntryText(entry);
+      const key = normalizeEntryKey(safe);
+      if (!safe || seen.has(key)) return;
+      seen.add(key);
+      deduped.push(safe);
+    });
+  }
+  return deduped.slice(0, 12);
+}
+
+function buildMultiplayerDirectives({
+  theme = 'all',
+  difficulty = 'normal',
+  rng = Math.random
+} = {}) {
+  const generatedScenario = withScopedMathRandom(rng, () => generateScenario(theme, null)) || {};
+  const scenarioText = sanitizeEntryText(generatedScenario.scenario)
+    || 'Stabilize a citywide emergency response under pressure';
+  const scenarioTheme = sanitizeEntryText(generatedScenario.category) || theme || 'all';
+  const twistPool = withScopedMathRandom(rng, () => generateTwists(difficulty, 8, scenarioText, null, scenarioTheme));
+  const twistText = sanitizeEntryText(pickDeterministic(deterministicShuffle(twistPool || [], rng), rng, 'WHILE THE CLOCK NEVER STOPS'))
+    || 'WHILE THE CLOCK NEVER STOPS';
+  return {
+    scenario: scenarioText,
+    twist: twistText,
+    source: String(generatedScenario.source || 'core')
+  };
+}
+
 function createDailyChallenge({
   modeId = DEFAULT_MODE_ID,
   dateKey = toUtcDayKey(),
-  seedSalt = ''
+  seedSalt = '',
+  challengeScope = 'daily',
+  seedNonce = ''
 } = {}) {
-  const seedInput = `${String(modeId)}|${String(dateKey)}|${String(seedSalt || '')}`;
+  const safeScope = String(challengeScope || 'daily').toLowerCase() === 'practice' ? 'practice' : 'daily';
+  const seedInput = `${String(modeId)}|${String(dateKey)}|${safeScope}|${String(seedSalt || '')}|${String(seedNonce || '')}`;
   const seedHash = hashHex(seedInput);
   const rng = createMulberry32(hashToSeed(seedInput));
-  const scenarioId = SCENARIOS[Math.floor(rng() * SCENARIOS.length)];
-  const twistId = TWISTS[Math.floor(rng() * TWISTS.length)];
-  const category = SOLO_CATEGORY_LOCKS[Math.floor(rng() * SOLO_CATEGORY_LOCKS.length)] || SOLO_CATEGORY_LOCKS[0];
+  const categories = deterministicShuffle(getEnabledCategories(), rng);
+  const category = categories.find((entry) => entry && entry.enabled !== false) || categories[0] || {
+    id: 'general',
+    displayName: 'Open Meta',
+    family: 'general',
+    riskLevel: 'med',
+    exampleEntriesStrong: SOLO_SLOT_FALLBACK_ENTRIES.slice(0, 4)
+  };
+  const theme = inferThemeFromCategoryFamily(category.family, rng);
+  const difficulty = pickDeterministic(SOLO_DIFFICULTY_POOL, rng, 'normal');
+  const directives = buildMultiplayerDirectives({ theme, difficulty, rng });
+  const scenarioId = directives.scenario;
+  const twistText = directives.twist;
+  const twistCode = `mp_${hashHex(twistText).slice(0, 10)}`;
+  const referenceEntries = buildCategoryReferenceEntries(category, rng);
   const targetProfile = {
-    solveTeamOvr: 78 + Math.floor(rng() * 7), // 78..84
+    solveTeamOvr: 78 + Math.floor(rng() * 8), // 78..85
     minInCategory: 2 + (rng() > 0.72 ? 1 : 0),
-    maxLowCards: rng() > 0.52 ? 1 : 2
+    maxLowCards: rng() > 0.52 ? 1 : 2,
+    minAverageScenarioFit: 52 + Math.floor(rng() * 13),
+    minAverageTwistFit: 52 + Math.floor(rng() * 13)
   };
   const promptDeck = SLOT_DEFS.map((slot) => ({
     slotId: slot.slotId,
     label: slot.label,
     role: slot.role,
-    prompt: `${slot.role} Category lock: ${category.displayName}. Scenario: ${scenarioId}. Twist: ${twistId}.`,
-    keywords: collectKeywordPool([slot.role, scenarioId, twistId, category.displayName], 16)
+    prompt: `${slot.role} Lock picks to ${category.displayName}.`,
+    keywords: collectKeywordPool([slot.role, scenarioId, twistText, category.displayName], 16)
   }));
-  const referenceEntries = deterministicShuffle(category.strongExamples || [], rng).slice(0, SLOT_DEFS.length);
   const idealEntriesBySlot = {};
   SLOT_DEFS.forEach((slot, idx) => {
-    idealEntriesBySlot[slot.slotId] = referenceEntries[idx] || (category.strongExamples && category.strongExamples[0]) || 'Batman';
+    idealEntriesBySlot[slot.slotId] = referenceEntries[idx] || SOLO_SLOT_FALLBACK_ENTRIES[idx] || 'Batman';
   });
 
+  const safeDateKey = String(dateKey || toUtcDayKey());
+  const dailyKey = challengeKey(modeId, safeDateKey);
+  const scopeKey = safeScope === 'practice'
+    ? `practice:${String(modeId)}:${safeDateKey}:${seedHash.slice(0, 12)}`
+    : dailyKey;
   return {
-    challengeKey: challengeKey(modeId, dateKey),
+    challengeKey: scopeKey,
+    challengeScope: safeScope,
     modeId,
-    dateKey,
+    dateKey: safeDateKey,
     seedHash,
     scenarioId,
-    twistId,
+    twistId: twistText,
+    twistCode,
+    twistRule: 'Pick entries that stay viable under this twist condition.',
     lockedCategory: {
       id: category.id,
       displayName: category.displayName,
-      family: category.family
+      family: category.family,
+      riskLevel: category.riskLevel || 'med',
+      version: 'v1'
+    },
+    directivesMeta: {
+      source: directives.source || 'core',
+      theme,
+      difficulty
     },
     entryPrompts: promptDeck,
     targetProfile,
-    referenceEntries: category.strongExamples || [],
+    attemptLimit: DEFAULT_LIMITS.maxAttempts,
+    referenceEntries,
     idealEntriesBySlot,
     createdAtMs: Date.now(),
     schemaVersion: SOLO_SCHEMA_VERSION
@@ -300,7 +378,151 @@ function verifyPicksAgainstChallenge(challenge = {}, picksBySlot = {}) {
   return { ok: true, picksBySlot: normalized };
 }
 
-function computeAttemptFeedback({
+function extractSubscore(result = {}, key = '', fallback = 50) {
+  const scoreMeta = result && result.scoreMeta && typeof result.scoreMeta === 'object'
+    ? result.scoreMeta
+    : {};
+  const subscores = scoreMeta.contextSubscores && typeof scoreMeta.contextSubscores === 'object'
+    ? scoreMeta.contextSubscores
+    : {};
+  const value = Number(subscores[key]);
+  if (Number.isFinite(value)) return clampInt(value, 0, 100);
+  return clampInt(fallback, 0, 100);
+}
+
+function normalizeCategoryStatus(result = {}) {
+  const scoreMeta = result && result.scoreMeta && typeof result.scoreMeta === 'object'
+    ? result.scoreMeta
+    : {};
+  const ctx = scoreMeta.categoryContext && typeof scoreMeta.categoryContext === 'object'
+    ? scoreMeta.categoryContext
+    : null;
+  return String(
+    result.categoryStatus
+    || (ctx && ctx.categoryStatus)
+    || 'not_in_category'
+  ).trim().toLowerCase();
+}
+
+function gradeFromOvr(ovr = 0) {
+  const safe = Number(ovr) || 0;
+  if (safe >= 92) return 'Perfect';
+  if (safe >= 80) return 'Strong';
+  if (safe >= 66) return 'Weak';
+  return 'Miss';
+}
+
+function isPlaceholderEntry(value = '') {
+  const source = normalizeEntryKey(value);
+  if (!source) return true;
+  return /^(object|thing|unknown|placeholder|entry|sample|test)\b/.test(source);
+}
+
+function buildSyntheticSoloEvaluation({ entry = '', challenge = {} } = {}) {
+  const tokens = tokenizeLoose(entry);
+  const scenarioHits = countTokenHits(tokens, collectKeywordPool([challenge && challenge.scenarioId], 14));
+  const twistHits = countTokenHits(tokens, collectKeywordPool([challenge && challenge.twistId], 14));
+  const category = challenge && challenge.lockedCategory && typeof challenge.lockedCategory === 'object'
+    ? challenge.lockedCategory
+    : { displayName: 'Open Meta', family: 'general' };
+  const categoryHits = countTokenHits(tokens, collectKeywordPool([category.displayName, category.family], 18));
+  const ovr = clampInt(38 + (tokens.length * 3) + (categoryHits * 4) + (scenarioHits * 3) + (twistHits * 3), 30, 68);
+  const categoryFit = clampInt(38 + (categoryHits * 12), 18, 72);
+  const scenarioFit = clampInt(42 + (scenarioHits * 10), 18, 74);
+  const twistFit = clampInt(42 + (twistHits * 10), 18, 74);
+  const categoryStatus = categoryFit >= 62 ? 'in_category' : categoryFit >= 48 ? 'borderline' : 'not_in_category';
+  return {
+    character: entry,
+    score: clampInt((ovr / 99) * 30, 0, 30),
+    ovr,
+    imageUrl: null,
+    infoSource: 'fallback',
+    rarity: 'Bronze',
+    characterType: 'balanced',
+    reason: 'Fallback evaluation',
+    categoryFit,
+    categoryStatus,
+    categoryStatusLabel: categoryStatus === 'in_category' ? 'IN CATEGORY' : categoryStatus === 'borderline' ? 'BORDERLINE ENTRY' : 'NOT IN CATEGORY',
+    notes: ['Fallback profile used while preserving multiplayer thresholds.'],
+    scoreMeta: {
+      contextSubscores: {
+        currentScenarioFit: scenarioFit,
+        currentTwistFit: twistFit
+      },
+      categoryContext: {
+        categoryFit,
+        categoryStatus
+      },
+      infoConfidence: 0,
+      trustedInfo: false
+    },
+    ovrTier: {
+      label: 'Bronze'
+    }
+  };
+}
+
+function normalizeEvaluationCard({ slot = {}, entryText = '', evaluation = {} } = {}) {
+  const ovr = clampInt(Number(evaluation && evaluation.ovr) || 0, 0, 99);
+  const score = clampInt(Number(evaluation && evaluation.score) || 0, 0, 30);
+  const categoryStatus = normalizeCategoryStatus(evaluation);
+  const categoryFit = clampInt(
+    Number(evaluation && evaluation.categoryFit)
+    || Number(evaluation && evaluation.scoreMeta && evaluation.scoreMeta.categoryContext && evaluation.scoreMeta.categoryContext.categoryFit)
+    || 50,
+    0,
+    100
+  );
+  const scenarioFit = extractSubscore(evaluation, 'currentScenarioFit', 50);
+  const twistFit = extractSubscore(evaluation, 'currentTwistFit', 50);
+  const grade = gradeFromOvr(ovr);
+  const notes = Array.isArray(evaluation && evaluation.notes) ? evaluation.notes.slice(0, 3) : [];
+  return {
+    slotId: slot.slotId,
+    label: slot.label,
+    pickedCandidateId: String(evaluation && evaluation.character || entryText || '').trim(),
+    grade,
+    score,
+    ovr,
+    scenarioFit,
+    twistFit,
+    categoryFit,
+    categoryStatus,
+    categoryStatusLabel: String(
+      evaluation && evaluation.categoryStatusLabel
+      || (categoryStatus === 'in_category' ? 'IN CATEGORY' : categoryStatus === 'borderline' ? 'BORDERLINE ENTRY' : 'NOT IN CATEGORY')
+    ),
+    imageUrl: evaluation && evaluation.imageUrl ? String(evaluation.imageUrl) : null,
+    infoSource: evaluation && evaluation.infoSource ? String(evaluation.infoSource) : null,
+    rarity: String(evaluation && evaluation.rarity || 'Bronze'),
+    characterType: evaluation && evaluation.characterType ? String(evaluation.characterType) : null,
+    ovrTierLabel: evaluation && evaluation.ovrTier && evaluation.ovrTier.label ? String(evaluation.ovrTier.label) : null,
+    reason: evaluation && evaluation.reason ? String(evaluation.reason) : '',
+    notes,
+    scoreMeta: {
+      infoConfidence: Number(evaluation && evaluation.scoreMeta && evaluation.scoreMeta.infoConfidence) || 0,
+      trustedInfo: Boolean(evaluation && evaluation.scoreMeta && evaluation.scoreMeta.trustedInfo)
+    }
+  };
+}
+
+function evaluateTwistRule({ challenge = {}, slotFeedback = [] } = {}) {
+  const rows = Array.isArray(slotFeedback) ? slotFeedback : [];
+  const averageTwistFit = rows.length
+    ? Math.round(rows.reduce((sum, slot) => sum + (Number(slot && slot.twistFit) || 0), 0) / rows.length)
+    : 0;
+  const target = Number(challenge && challenge.targetProfile && challenge.targetProfile.minAverageTwistFit) || 56;
+  const passCount = rows.filter((slot) => Number(slot && slot.twistFit) >= (target - 6)).length;
+  return {
+    passed: averageTwistFit >= target,
+    progress: `${averageTwistFit}/${target}`,
+    message: `Average twist fit must reach ${target}+ (${passCount}/${Math.max(1, rows.length)} cards in range).`,
+    averageTwistFit,
+    targetTwistFit: target
+  };
+}
+
+async function computeAttemptFeedback({
   challenge,
   picksBySlot,
   previousAttempt = null
@@ -308,94 +530,139 @@ function computeAttemptFeedback({
   const category = challenge && challenge.lockedCategory && typeof challenge.lockedCategory === 'object'
     ? challenge.lockedCategory
     : { displayName: 'Open Meta', family: 'general' };
-  const scenarioKeywords = collectKeywordPool([challenge && challenge.scenarioId, category.displayName], 16);
-  const twistKeywords = collectKeywordPool([challenge && challenge.twistId], 12);
-  const categoryKeywords = collectKeywordPool([
-    category.displayName,
-    category.family,
-    ...(Array.isArray(challenge && challenge.referenceEntries) ? challenge.referenceEntries : [])
-  ], 20);
   const targetProfile = challenge && challenge.targetProfile && typeof challenge.targetProfile === 'object'
     ? challenge.targetProfile
-    : { solveTeamOvr: 80, minInCategory: 2, maxLowCards: 1 };
+    : {
+      solveTeamOvr: 80,
+      minInCategory: 2,
+      maxLowCards: 1,
+      minAverageScenarioFit: 55,
+      minAverageTwistFit: 55
+    };
 
-  const normalizedEntries = SLOT_DEFS.map((slot) => normalizeEntryKey(picksBySlot && picksBySlot[slot.slotId]));
-  const duplicateCounts = normalizedEntries.reduce((acc, key) => {
-    if (!key) return acc;
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
+  const scenario = String(challenge && challenge.scenarioId || '').trim();
+  const twist = String(challenge && challenge.twistId || '').trim();
+  const teamPool = SLOT_DEFS.map((slot) => String(picksBySlot && picksBySlot[slot.slotId] || '').trim()).filter(Boolean);
+  const categoryContext = category && category.id
+    ? {
+      enabled: true,
+      id: String(category.id),
+      name: String(category.displayName || category.id),
+      family: String(category.family || 'general'),
+      version: String(category.version || 'v1')
+    }
+    : {
+      enabled: false,
+      id: null,
+      name: null,
+      family: null,
+      version: 'v1'
+    };
 
-  const slotFeedback = [];
+  const rowsForBatch = [];
+  const placeholders = new Map();
+  SLOT_DEFS.forEach((slot) => {
+    const entry = String(picksBySlot && picksBySlot[slot.slotId] || '').trim();
+    if (isPlaceholderEntry(entry)) {
+      placeholders.set(slot.slotId, buildSyntheticSoloEvaluation({ entry, challenge }));
+      return;
+    }
+    rowsForBatch.push({
+      slotId: slot.slotId,
+      character: entry,
+      scenario,
+      twist,
+      options: {
+        originalScenario: scenario,
+        originalTwist: twist,
+        evaluationMode: 'round',
+        categoryContext,
+        fastRoundMode: !SOLO_EVAL_QUALITY_MODE,
+        roundQualityPass: SOLO_EVAL_QUALITY_MODE,
+        roundResolveTimeoutMs: SOLO_EVAL_QUALITY_MODE ? 2400 : 900,
+        roundAliasOverrideTimeoutMs: SOLO_EVAL_QUALITY_MODE ? 820 : 360,
+        skipImageEnrichment: false,
+        skipImageBackfill: false,
+        skipSyntheticImageUpgrade: false,
+        skipExternalFactEnrichment: !SOLO_EVAL_QUALITY_MODE,
+        teamPool,
+        roundPool: teamPool,
+        fetchContext: {
+          scenario,
+          twist,
+          originalScenario: scenario,
+          originalTwist: twist,
+          draftedRound: 4
+        }
+      }
+    });
+  });
+
+  let batchResults = [];
+  if (rowsForBatch.length) {
+    try {
+      batchResults = await evaluateCharactersBatch(
+        rowsForBatch.map((row) => ({
+          character: row.character,
+          scenario: row.scenario,
+          twist: row.twist,
+          options: row.options
+        })),
+        { concurrency: SOLO_EVAL_BATCH_CONCURRENCY }
+      );
+    } catch (_error) {
+      batchResults = [];
+    }
+  }
+  const evalBySlot = new Map();
+  rowsForBatch.forEach((row, idx) => {
+    const resolved = batchResults[idx] && typeof batchResults[idx] === 'object' && batchResults[idx].character
+      ? batchResults[idx]
+      : buildSyntheticSoloEvaluation({ entry: row.character, challenge });
+    evalBySlot.set(row.slotId, resolved);
+  });
+  placeholders.forEach((value, slotId) => {
+    evalBySlot.set(slotId, value);
+  });
+
+  const slotFeedback = SLOT_DEFS.map((slot) => {
+    const entryText = String(picksBySlot && picksBySlot[slot.slotId] || '').trim();
+    const evaluation = evalBySlot.get(slot.slotId) || buildSyntheticSoloEvaluation({ entry: entryText, challenge });
+    return normalizeEvaluationCard({ slot, entryText, evaluation });
+  });
+
   let perfect = 0;
   let strong = 0;
   let weak = 0;
   let miss = 0;
-  let totalScore = 0;
-  let totalOvr = 0;
-  let inCategoryCount = 0;
-  let lowOvrCount = 0;
-
-  SLOT_DEFS.forEach((slot, index) => {
-    const entry = String(picksBySlot[slot.slotId] || '').trim();
-    const entryTokens = tokenizeLoose(entry);
-    const roleKeywords = collectKeywordPool([slot.role], 8);
-    const scenarioHits = countTokenHits(entryTokens, scenarioKeywords);
-    const twistHits = countTokenHits(entryTokens, twistKeywords);
-    const categoryHits = countTokenHits(entryTokens, categoryKeywords);
-    const roleHits = countTokenHits(entryTokens, roleKeywords);
-    const lexicalQuality = clampInt(28 + Math.min(20, entry.length) + (entryTokens.length * 6), 0, 100);
-    const duplicatePenalty = (duplicateCounts[normalizeEntryKey(entry)] || 0) > 1 ? 10 : 0;
-    const hashNoise = (hashToSeed(`${String(challenge && challenge.seedHash || '')}|${slot.slotId}|${entry}`) % 11) - 5;
-    const ovr = clampInt(
-      34
-      + Math.round(lexicalQuality * 0.24)
-      + (categoryHits * 12)
-      + (scenarioHits * 5)
-      + (twistHits * 4)
-      + (roleHits * 4)
-      + hashNoise
-      - duplicatePenalty,
-      28,
-      99
-    );
-    const slotScore = clampInt((ovr / 99) * 30, 0, 30);
-    const categoryStatus = categoryHits >= 2 ? 'in_category' : categoryHits === 1 ? 'borderline' : 'not_in_category';
-    if (categoryStatus === 'in_category') inCategoryCount += 1;
-    if (ovr < 60) lowOvrCount += 1;
-
-    let grade = 'Miss';
-    if (ovr >= 88) {
-      grade = 'Perfect';
-      perfect += 1;
-    } else if (ovr >= 76) {
-      grade = 'Strong';
-      strong += 1;
-    } else if (ovr >= 63) {
-      grade = 'Weak';
-      weak += 1;
-    } else {
-      miss += 1;
-    }
-    totalOvr += ovr;
-    totalScore += slotScore;
-    slotFeedback.push({
-      slotId: slot.slotId,
-      label: slot.label,
-      pickedCandidateId: entry,
-      grade,
-      score: slotScore,
-      ovr,
-      categoryStatus,
-      notes: [
-        `Scenario fit hits: ${scenarioHits}`,
-        `Twist fit hits: ${twistHits}`,
-        `Category fit hits: ${categoryHits}`
-      ]
-    });
+  const totalScore = slotFeedback.reduce((sum, slot) => sum + (Number(slot.score) || 0), 0);
+  const totalOvr = slotFeedback.reduce((sum, slot) => sum + (Number(slot.ovr) || 0), 0);
+  const averageOVR = slotFeedback.length ? Math.round(totalOvr / slotFeedback.length) : 0;
+  const averageScenarioFit = slotFeedback.length
+    ? Math.round(slotFeedback.reduce((sum, slot) => sum + (Number(slot.scenarioFit) || 0), 0) / slotFeedback.length)
+    : 0;
+  const averageTwistFit = slotFeedback.length
+    ? Math.round(slotFeedback.reduce((sum, slot) => sum + (Number(slot.twistFit) || 0), 0) / slotFeedback.length)
+    : 0;
+  const averageCategoryFit = slotFeedback.length
+    ? Math.round(slotFeedback.reduce((sum, slot) => sum + (Number(slot.categoryFit) || 0), 0) / slotFeedback.length)
+    : 0;
+  const inCategoryCount = slotFeedback.filter((slot) => String(slot.categoryStatus) === 'in_category').length;
+  const lowOvrCount = slotFeedback.filter((slot) => Number(slot.ovr) < 60).length;
+  slotFeedback.forEach((slot) => {
+    if (slot.grade === 'Perfect') perfect += 1;
+    else if (slot.grade === 'Strong') strong += 1;
+    else if (slot.grade === 'Weak') weak += 1;
+    else miss += 1;
   });
 
-  const averageOVR = SLOT_DEFS.length ? Math.round(totalOvr / SLOT_DEFS.length) : 0;
+  const twistStatus = evaluateTwistRule({ challenge, slotFeedback });
+  const scenarioTarget = Number(targetProfile.minAverageScenarioFit || 55);
+  const scenarioStatus = {
+    passed: averageScenarioFit >= scenarioTarget,
+    progress: `${averageScenarioFit}/${scenarioTarget}`,
+    message: `Average scenario fit must reach ${scenarioTarget}+`
+  };
   const debugIdeal = challenge && challenge.idealEntriesBySlot && typeof challenge.idealEntriesBySlot === 'object'
     ? challenge.idealEntriesBySlot
     : null;
@@ -407,11 +674,18 @@ function computeAttemptFeedback({
     averageOVR >= Number(targetProfile.solveTeamOvr || 80)
     && inCategoryCount >= Number(targetProfile.minInCategory || 2)
     && lowOvrCount <= Number(targetProfile.maxLowCards || 1)
+    && scenarioStatus.passed === true
+    && twistStatus.passed === true
   );
   const points = clampInt((totalScore / (SLOT_DEFS.length * 30)) * 100, 0, 100);
   const quality = clampInt(
-    (averageOVR * 0.62)
-    + ((inCategoryCount / SLOT_DEFS.length) * 25)
+    (averageOVR * 0.52)
+    + (averageScenarioFit * 0.18)
+    + (averageTwistFit * 0.18)
+    + (averageCategoryFit * 0.12)
+    + ((inCategoryCount / SLOT_DEFS.length) * 16)
+    + (twistStatus.passed ? 4 : 0)
+    + (scenarioStatus.passed ? 3 : 0)
     + (solved ? 10 : 0),
     0,
     100
@@ -427,6 +701,11 @@ function computeAttemptFeedback({
   let clueLine = 'Roster is missing mission lock thresholds.';
   if (solved) {
     clueLine = 'Roster locked. Mission target cleared.';
+  } else if (scenarioStatus.passed !== true) {
+    clueLine = `Scenario fit low: ${scenarioStatus.message} (${scenarioStatus.progress}).`;
+  } else if (twistStatus.passed !== true) {
+    const progress = twistStatus.progress ? ` (${twistStatus.progress})` : '';
+    clueLine = `Twist unmet: ${twistStatus.message || 'Follow the twist rule.'}${progress}`;
   } else if (inCategoryCount < Number(targetProfile.minInCategory || 2)) {
     clueLine = `Need ${Number(targetProfile.minInCategory || 2)} in-category slots (have ${inCategoryCount}).`;
   } else if (averageOVR < Number(targetProfile.solveTeamOvr || 80)) {
@@ -446,6 +725,11 @@ function computeAttemptFeedback({
       slot.grade = 'Perfect';
       slot.ovr = Math.max(92, Number(slot.ovr) || 0);
       slot.score = Math.max(28, Number(slot.score) || 0);
+      slot.scenarioFit = Math.max(80, Number(slot.scenarioFit) || 0);
+      slot.twistFit = Math.max(80, Number(slot.twistFit) || 0);
+      slot.categoryFit = Math.max(80, Number(slot.categoryFit) || 0);
+      slot.categoryStatus = 'in_category';
+      slot.categoryStatusLabel = 'IN CATEGORY';
     });
   }
 
@@ -461,11 +745,20 @@ function computeAttemptFeedback({
     teamSummary: {
       averageOVR,
       totalScore,
+      averageScenarioFit,
+      averageTwistFit,
+      averageCategoryFit,
       inCategoryCount,
       lowOvrCount,
+      scenarioPassed: scenarioStatus.passed === true,
+      scenarioProgress: scenarioStatus.progress || '',
+      twistPassed: twistStatus.passed === true,
+      twistProgress: twistStatus.progress || '',
       targetOVR: Number(targetProfile.solveTeamOvr || 80),
       minInCategory: Number(targetProfile.minInCategory || 2),
-      maxLowCards: Number(targetProfile.maxLowCards || 1)
+      maxLowCards: Number(targetProfile.maxLowCards || 1),
+      minAverageScenarioFit: Number(targetProfile.minAverageScenarioFit || 55),
+      minAverageTwistFit: Number(targetProfile.minAverageTwistFit || 55)
     },
     weakSlot: weakest
       ? {
@@ -475,6 +768,8 @@ function computeAttemptFeedback({
       }
       : null,
     teamSynergyTrend: synergyTrend,
+    twistStatus,
+    scenarioStatus,
     clueLine
   };
 }
@@ -500,11 +795,14 @@ function buildRunClientView(run = {}) {
 function buildChallengeClientView(challenge = {}, { exposeSolution = false } = {}) {
   const payload = {
     challengeKey: challenge.challengeKey,
+    challengeScope: challenge.challengeScope || 'daily',
     modeId: challenge.modeId,
     dateKey: challenge.dateKey,
     seedHash: challenge.seedHash,
     scenarioId: challenge.scenarioId,
     twistId: challenge.twistId,
+    twistRule: challenge.twistRule,
+    directivesMeta: clone(challenge.directivesMeta || {}),
     lockedCategory: clone(challenge.lockedCategory || {}),
     entryPrompts: Array.isArray(challenge.entryPrompts)
       ? challenge.entryPrompts.map((prompt) => ({
@@ -520,7 +818,7 @@ function buildChallengeClientView(challenge = {}, { exposeSolution = false } = {
         prompt: slot.role
       })),
     targetProfile: clone(challenge.targetProfile || {}),
-    attemptLimit: DEFAULT_LIMITS.maxAttempts,
+    attemptLimit: Number(challenge && challenge.attemptLimit) || DEFAULT_LIMITS.maxAttempts,
     hintLimit: DEFAULT_LIMITS.maxHints
   };
   if (exposeSolution) {
@@ -708,7 +1006,8 @@ function buildSoloEngineService({
     ...(limits && typeof limits === 'object' ? limits : {})
   };
   const flags = {
-    soloEnabled: featureFlags.soloEnabled === true || boolEnv('SOLO_ENGINE_ENABLED', false),
+    // Solo should be enabled by default for local/dev unless explicitly disabled with SOLO_ENGINE_ENABLED=0.
+    soloEnabled: featureFlags.soloEnabled === true || boolEnv('SOLO_ENGINE_ENABLED', true),
     exposeSolution: featureFlags.exposeSolution === true || boolEnv('SOLO_ENGINE_EXPOSE_SOLUTION', false)
   };
   const seedSalt = sanitizeText(process.env.SOLO_ENGINE_SEED_SALT || '', 160);
@@ -731,7 +1030,7 @@ function buildSoloEngineService({
     };
   }
 
-  function getOrCreateChallengeInPlace(state, { modeId = DEFAULT_MODE_ID, dateKey = toUtcDayKey() } = {}) {
+  function getOrCreateDailyChallengeInPlace(state, { modeId = DEFAULT_MODE_ID, dateKey = toUtcDayKey() } = {}) {
     ensureSoloStateInPlace(state);
     const key = challengeKey(modeId, dateKey);
     const existing = state.dailyChallenges[key] && typeof state.dailyChallenges[key] === 'object'
@@ -745,22 +1044,91 @@ function buildSoloEngineService({
       state.dailyChallenges[key] = createDailyChallenge({
         modeId,
         dateKey,
-        seedSalt
+        seedSalt,
+        challengeScope: 'daily'
       });
     }
     return state.dailyChallenges[key];
   }
 
-  function findExistingActiveScoredRun(state, { userId = '', modeId = DEFAULT_MODE_ID, dateKey = toUtcDayKey() } = {}) {
-    return Object.values(state.soloRuns || {}).find((run) => (
+  function createPracticeChallengeInPlace(state, {
+    modeId = DEFAULT_MODE_ID,
+    dateKey = toUtcDayKey(),
+    seedNonce = ''
+  } = {}) {
+    ensureSoloStateInPlace(state);
+    const challenge = createDailyChallenge({
+      modeId,
+      dateKey,
+      seedSalt,
+      challengeScope: 'practice',
+      seedNonce
+    });
+    state.dailyChallenges[challenge.challengeKey] = challenge;
+    return challenge;
+  }
+
+  function findExistingDailyRun(state, { userId = '', modeId = DEFAULT_MODE_ID, dateKey = toUtcDayKey() } = {}) {
+    const safeUserId = sanitizeText(userId, 120);
+    const safeModeId = sanitizeText(modeId, 64) || DEFAULT_MODE_ID;
+    const safeDateKey = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '')) ? String(dateKey) : toUtcDayKey();
+    if (!safeUserId) return null;
+
+    const runs = Object.values(state.soloRuns || {}).filter((run) => (
       run
-      && run.userId === userId
-      && run.modeId === modeId
-      && run.dateKey === dateKey
+      && run.userId === safeUserId
+      && run.modeId === safeModeId
+      && run.dateKey === safeDateKey
       && run.practice !== true
-      && run.finalized !== true
-      && ['active', 'solved_pending_finalize', 'failed_pending_finalize'].includes(String(run.status || ''))
-    )) || null;
+    ));
+    if (!runs.length) return null;
+
+    const indexKey = scoredRunIndexKey(safeUserId, safeModeId, safeDateKey);
+    const indexedRunId = state.indexes.scoredSoloRunByUserModeDate[indexKey];
+    if (indexedRunId) {
+      const indexed = runs.find((run) => run.runId === indexedRunId) || null;
+      if (indexed) return indexed;
+    }
+
+    const statusWeight = (run = {}) => {
+      const status = String(run.status || '');
+      if (status === 'active') return 4;
+      if (status === 'solved_pending_finalize' || status === 'failed_pending_finalize') return 3;
+      if (status === 'solved' || status === 'failed') return 2;
+      return 1;
+    };
+
+    return runs.slice().sort((a, b) => (
+      (Number(a.finalized !== true) - Number(b.finalized !== true)) * -1
+      || (statusWeight(b) - statusWeight(a))
+      || ((Number(b.completedAtMs) || 0) - (Number(a.completedAtMs) || 0))
+      || ((Number(b.createdAtMs) || 0) - (Number(a.createdAtMs) || 0))
+      || String(b.runId || '').localeCompare(String(a.runId || ''))
+    ))[0] || null;
+  }
+
+  function buildStartRunResponse({
+    run = null,
+    challenge = null,
+    created = false,
+    idempotent = false,
+    practiceForced = false
+  } = {}) {
+    const safeRun = run && typeof run === 'object' ? run : {};
+    const hints = Array.isArray(safeRun.hints) ? safeRun.hints : [];
+    const latestHint = hints.length ? hints[hints.length - 1] : null;
+    return {
+      ok: true,
+      created: created === true,
+      idempotent: idempotent === true,
+      run: buildRunClientView(safeRun),
+      challenge: buildChallengeClientView(challenge || {}, { exposeSolution: flags.exposeSolution }),
+      attempts: Array.isArray(safeRun.attempts) ? clone(safeRun.attempts) : [],
+      summary: safeRun.finalSummary ? clone(safeRun.finalSummary) : null,
+      latestHint: latestHint ? String(latestHint.message || '').trim() : '',
+      latestHintSlot: latestHint ? String(latestHint.slotLabel || latestHint.slotId || '').trim() : '',
+      practiceForced: practiceForced === true
+    };
   }
 
   function startRun({
@@ -779,24 +1147,34 @@ function buildSoloEngineService({
       ensureSoloStateInPlace(state);
       if (!state.users[safeUserId]) return { ok: false, code: 'user_not_found' };
       const dateKey = toUtcDayKey(nowMs);
-      const indexKey = scoredRunIndexKey(safeUserId, safeModeId, dateKey);
-      const existingScoredRunId = state.indexes.scoredSoloRunByUserModeDate[indexKey];
-      const forcedPractice = Boolean(existingScoredRunId);
-      const existingActiveScored = !forcedPractice && !safePractice
-        ? findExistingActiveScoredRun(state, { userId: safeUserId, modeId: safeModeId, dateKey })
-        : null;
-      const challenge = getOrCreateChallengeInPlace(state, { modeId: safeModeId, dateKey });
-
-      if (existingActiveScored) {
-        return {
-          ok: true,
-          created: false,
-          idempotent: true,
-          run: buildRunClientView(existingActiveScored),
-          challenge: buildChallengeClientView(challenge, { exposeSolution: flags.exposeSolution }),
-          practiceForced: false
-        };
+      if (!safePractice) {
+        const existingDailyRun = findExistingDailyRun(state, {
+          userId: safeUserId,
+          modeId: safeModeId,
+          dateKey
+        });
+        if (existingDailyRun) {
+          const existingChallenge = state.dailyChallenges[existingDailyRun.challengeKey]
+            && typeof state.dailyChallenges[existingDailyRun.challengeKey] === 'object'
+            ? state.dailyChallenges[existingDailyRun.challengeKey]
+            : getOrCreateDailyChallengeInPlace(state, { modeId: safeModeId, dateKey });
+          return buildStartRunResponse({
+            run: existingDailyRun,
+            challenge: existingChallenge,
+            created: false,
+            idempotent: true,
+            practiceForced: false
+          });
+        }
       }
+
+      const challenge = !safePractice
+        ? getOrCreateDailyChallengeInPlace(state, { modeId: safeModeId, dateKey })
+        : createPracticeChallengeInPlace(state, {
+          modeId: safeModeId,
+          dateKey,
+          seedNonce: `${safeUserId}|${nowMs}|${crypto.randomBytes(5).toString('hex')}`
+        });
 
       const runId = createRunId();
       const run = {
@@ -805,8 +1183,8 @@ function buildSoloEngineService({
         modeId: safeModeId,
         dateKey,
         challengeKey: challenge.challengeKey,
-        practice: safePractice || forcedPractice,
-        scoredEligible: !safePractice && !forcedPractice,
+        practice: safePractice,
+        scoredEligible: !safePractice,
         status: 'active',
         maxAttempts: runtimeLimits.maxAttempts,
         maxHints: runtimeLimits.maxHints,
@@ -839,18 +1217,17 @@ function buildSoloEngineService({
         hints: [],
         updatedAtMs: nowMs
       };
-      return {
-        ok: true,
+      return buildStartRunResponse({
+        run,
+        challenge,
         created: true,
         idempotent: false,
-        run: buildRunClientView(run),
-        challenge: buildChallengeClientView(challenge, { exposeSolution: flags.exposeSolution }),
-        practiceForced: forcedPractice
-      };
+        practiceForced: false
+      });
     });
   }
 
-  function submitAttempt({
+  async function submitAttempt({
     userId = '',
     runId = '',
     picksBySlot = {},
@@ -865,6 +1242,48 @@ function buildSoloEngineService({
       return { ok: false, code: 'invalid_submit_payload' };
     }
     if (flags.soloEnabled !== true) return { ok: false, code: 'solo_engine_disabled' };
+
+    const snapshot = adapter.readState();
+    ensureSoloStateInPlace(snapshot);
+    const preRun = findRunById(snapshot, safeRunId);
+    if (!preRun) return { ok: false, code: 'run_not_found' };
+    if (preRun.userId !== safeUserId) return { ok: false, code: 'run_user_mismatch' };
+    if (preRun.idempotency && preRun.idempotency.submit && preRun.idempotency.submit[safeIdempotencyKey]) {
+      const attemptId = preRun.idempotency.submit[safeIdempotencyKey];
+      const existingAttempt = (preRun.attempts || []).find((row) => row.attemptId === attemptId) || null;
+      if (!existingAttempt) return { ok: false, code: 'idempotency_reference_missing' };
+      return {
+        ok: true,
+        idempotent: true,
+        attempt: clone(existingAttempt),
+        run: buildRunClientView(preRun)
+      };
+    }
+    if (preRun.finalized === true || !['active', 'solved_pending_finalize', 'failed_pending_finalize'].includes(String(preRun.status || ''))) {
+      return { ok: false, code: 'run_not_active' };
+    }
+    if (preRun.status !== 'active') {
+      return { ok: false, code: 'run_ready_to_finalize' };
+    }
+    const initialTsGuard = guardClientTimestamp({
+      run: preRun,
+      actionClientTimestampMs: clientSubmittedAtMs,
+      nowMs,
+      limits: runtimeLimits
+    });
+    if (!initialTsGuard.ok) {
+      return { ok: false, code: initialTsGuard.code };
+    }
+    const challenge = snapshot.dailyChallenges[preRun.challengeKey];
+    if (!challenge) return { ok: false, code: 'challenge_missing' };
+    const pickValidation = verifyPicksAgainstChallenge(challenge, picksBySlot);
+    if (!pickValidation.ok) return { ok: false, code: pickValidation.code };
+    const previousAttempt = preRun.attempts.length ? preRun.attempts[preRun.attempts.length - 1] : null;
+    const feedback = await computeAttemptFeedback({
+      challenge,
+      picksBySlot: pickValidation.picksBySlot,
+      previousAttempt
+    });
 
     return adapter.writeState((state) => {
       ensureSoloStateInPlace(state);
@@ -883,13 +1302,10 @@ function buildSoloEngineService({
           run: buildRunClientView(run)
         };
       }
-
       if (run.finalized === true || !['active', 'solved_pending_finalize', 'failed_pending_finalize'].includes(String(run.status || ''))) {
         return { ok: false, code: 'run_not_active' };
       }
-      if (run.status !== 'active') {
-        return { ok: false, code: 'run_ready_to_finalize' };
-      }
+      if (run.status !== 'active') return { ok: false, code: 'run_ready_to_finalize' };
 
       const tsGuard = guardClientTimestamp({
         run,
@@ -904,16 +1320,6 @@ function buildSoloEngineService({
         return { ok: false, code: tsGuard.code };
       }
 
-      const challenge = state.dailyChallenges[run.challengeKey];
-      if (!challenge) return { ok: false, code: 'challenge_missing' };
-      const pickValidation = verifyPicksAgainstChallenge(challenge, picksBySlot);
-      if (!pickValidation.ok) return { ok: false, code: pickValidation.code };
-      const previousAttempt = run.attempts.length ? run.attempts[run.attempts.length - 1] : null;
-      const feedback = computeAttemptFeedback({
-        challenge,
-        picksBySlot: pickValidation.picksBySlot,
-        previousAttempt
-      });
       const attemptNumber = run.attempts.length + 1;
       const attemptId = `att_${run.runId}_${attemptNumber}`;
       const attempt = {
@@ -1045,6 +1451,7 @@ function buildSoloEngineService({
       const teamTarget = Number(challenge && challenge.targetProfile && challenge.targetProfile.solveTeamOvr) || 80;
       const teamCurrent = Number(latestAttempt && latestAttempt.teamSummary && latestAttempt.teamSummary.averageOVR) || 0;
       const teamDelta = Math.max(1, teamTarget - teamCurrent);
+      const twistRule = String(challenge && challenge.twistRule || '').trim();
       const hintNumber = run.hints.length + 1;
       const hintId = `hnt_${run.runId}_${hintNumber}`;
       const hint = {
@@ -1053,8 +1460,8 @@ function buildSoloEngineService({
         slotId: nextSlot.slotId,
         slotLabel: nextSlot.label,
         message: nextSuggestion
-          ? `${nextSlot.label} is under target. Stay in ${String(challenge.lockedCategory && challenge.lockedCategory.displayName || 'category')} lane and look for +${teamDelta} team OVR. Try an entry with confidence similar to "${nextSuggestion}".`
-          : `${nextSlot.label} is under target. Stay in ${String(challenge.lockedCategory && challenge.lockedCategory.displayName || 'category')} lane and look for +${teamDelta} team OVR.`,
+          ? `${nextSlot.label}: stay in ${String(challenge.lockedCategory && challenge.lockedCategory.displayName || 'category')}, push +${teamDelta} OVR, twist "${twistRule || 'active'}". Try "${nextSuggestion}".`
+          : `${nextSlot.label}: stay in ${String(challenge.lockedCategory && challenge.lockedCategory.displayName || 'category')}, push +${teamDelta} OVR, twist "${twistRule || 'active'}".`,
         clientRequestedAtMs: tsGuard.clientTimestampMs,
         serverRequestedAtMs: nowMs
       };

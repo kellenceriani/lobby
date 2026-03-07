@@ -370,27 +370,32 @@ app.post('/api/solo/runs/start', (req, res) => {
   res.status(started.created === true ? 201 : 200).json(started);
 });
 
-app.post('/api/solo/runs/submit', (req, res) => {
+app.post('/api/solo/runs/submit', async (req, res) => {
   const validated = validateSoloSubmitAttempt(req.body || {});
   if (!validated.ok) {
     res.status(400).json({ error: validated.code });
     return;
   }
-  const submitted = soloEngineService.submitAttempt({
-    userId: validated.value.userId,
-    runId: validated.value.runId,
-    idempotencyKey: validated.value.idempotencyKey,
-    picksBySlot: validated.value.entriesBySlot,
-    clientSubmittedAtMs: validated.value.clientSubmittedAtMs || Date.now(),
-    nowMs: Date.now()
-  });
-  if (!submitted || submitted.ok !== true) {
-    res.status(mapSoloErrorToStatus(submitted && submitted.code)).json({
-      error: submitted && submitted.code ? submitted.code : 'solo_submit_failed'
+  try {
+    const submitted = await soloEngineService.submitAttempt({
+      userId: validated.value.userId,
+      runId: validated.value.runId,
+      idempotencyKey: validated.value.idempotencyKey,
+      picksBySlot: validated.value.entriesBySlot,
+      clientSubmittedAtMs: validated.value.clientSubmittedAtMs || Date.now(),
+      nowMs: Date.now()
     });
-    return;
+    if (!submitted || submitted.ok !== true) {
+      res.status(mapSoloErrorToStatus(submitted && submitted.code)).json({
+        error: submitted && submitted.code ? submitted.code : 'solo_submit_failed'
+      });
+      return;
+    }
+    res.json(submitted);
+  } catch (error) {
+    console.error(`[Solo submit] unexpected error: ${String(error && error.message || error)}`);
+    res.status(500).json({ error: 'solo_submit_failed' });
   }
-  res.json(submitted);
 });
 
 app.post('/api/solo/runs/hint', (req, res) => {

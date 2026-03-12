@@ -54,7 +54,10 @@ async function createGuest(baseUrl, { displayName, guestAlias }) {
     body: { displayName, guestAlias }
   });
   assert.strictEqual(response.status, 201, 'guest should be created');
-  return String(response.body.user.userId || '');
+  return {
+    userId: String(response.body.user.userId || ''),
+    sessionToken: String(response.body && response.body.sessionToken || '')
+  };
 }
 
 async function main() {
@@ -100,10 +103,13 @@ async function main() {
 
     const userA = await createGuest(baseUrl, { displayName: 'Phase4 API A', guestAlias: 'dev:phase4-api-a' });
     const userB = await createGuest(baseUrl, { displayName: 'Phase4 API B', guestAlias: 'dev:phase4-api-b' });
+    const headersA = { 'x-lw-session': userA.sessionToken };
+    const headersB = { 'x-lw-session': userB.sessionToken };
 
     const start = await requestJson(`${baseUrl}/api/solo/runs/start`, {
       method: 'POST',
-      body: { userId: userA, modeId: 'daily_cipher_clash' }
+      headers: headersA,
+      body: { userId: userA.userId, modeId: 'daily_cipher_clash' }
     });
     assert.strictEqual(start.status, 201, 'solo start should create');
     const runId = String(start.body.run.runId || '');
@@ -112,8 +118,9 @@ async function main() {
 
     const submit = await requestJson(`${baseUrl}/api/solo/runs/submit`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         runId,
         idempotencyKey: 'phase4-api-submit-1',
         clientSubmittedAtMs: Date.now(),
@@ -124,8 +131,9 @@ async function main() {
 
     const finalize = await requestJson(`${baseUrl}/api/solo/runs/finalize`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         runId,
         idempotencyKey: 'phase4-api-finalize-1',
         clientFinalizedAtMs: Date.now()
@@ -140,8 +148,8 @@ async function main() {
         eventId: 'phase4-api-party-1',
         matchId: 'phase4-api-party-1',
         participants: [
-          { userId: userA, placement: 1, teamworkScore: 8, sportsmanshipScore: 5, won: true },
-          { userId: userB, placement: 2, teamworkScore: 7, sportsmanshipScore: 4, won: false }
+          { userId: userA.userId, placement: 1, teamworkScore: 8, sportsmanshipScore: 5, won: true },
+          { userId: userB.userId, placement: 2, teamworkScore: 7, sportsmanshipScore: 4, won: false }
         ]
       }
     });
@@ -153,30 +161,40 @@ async function main() {
         eventId: 'phase4-api-party-1',
         matchId: 'phase4-api-party-1',
         participants: [
-          { userId: userA, placement: 1, teamworkScore: 8, sportsmanshipScore: 5, won: true },
-          { userId: userB, placement: 2, teamworkScore: 7, sportsmanshipScore: 4, won: false }
+          { userId: userA.userId, placement: 1, teamworkScore: 8, sportsmanshipScore: 5, won: true },
+          { userId: userB.userId, placement: 2, teamworkScore: 7, sportsmanshipScore: 4, won: false }
         ]
       }
     });
     assert.strictEqual(partyEventDup.status, 200, 'duplicate party event should be idempotent');
     assert.strictEqual(Boolean(partyEventDup.body.idempotent), true, 'duplicate party event should mark idempotent');
 
-    const soloBoard = await requestJson(`${baseUrl}/api/seasons/leaderboards/solo?limit=20&userId=${encodeURIComponent(userA)}`);
+    const soloBoard = await requestJson(
+      `${baseUrl}/api/seasons/leaderboards/solo?limit=20&userId=${encodeURIComponent(userA.userId)}`,
+      { headers: headersA }
+    );
     assert.strictEqual(soloBoard.status, 200, 'solo season leaderboard should succeed');
     assert.strictEqual(Number(soloBoard.body.totalEntries) >= 1, true, 'solo season leaderboard should have entries');
 
-    const partyBoard = await requestJson(`${baseUrl}/api/seasons/leaderboards/party?limit=20&userId=${encodeURIComponent(userA)}`);
+    const partyBoard = await requestJson(
+      `${baseUrl}/api/seasons/leaderboards/party?limit=20&userId=${encodeURIComponent(userA.userId)}`,
+      { headers: headersA }
+    );
     assert.strictEqual(partyBoard.status, 200, 'party season leaderboard should succeed');
     assert.strictEqual(Number(partyBoard.body.totalEntries) >= 2, true, 'party season leaderboard should have entries');
 
-    const profile = await requestJson(`${baseUrl}/api/seasons/profile/${encodeURIComponent(userA)}?includeHistory=1`);
+    const profile = await requestJson(
+      `${baseUrl}/api/seasons/profile/${encodeURIComponent(userA.userId)}?includeHistory=1`,
+      { headers: headersA }
+    );
     assert.strictEqual(profile.status, 200, 'season profile should succeed');
     assert.strictEqual(Boolean(profile.body.profile), true, 'season profile payload should exist');
 
     const claim = await requestJson(`${baseUrl}/api/seasons/quests/claim`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         milestoneId: 'milestone_20',
         idempotencyKey: 'phase4-api-claim-1'
       }
@@ -185,8 +203,9 @@ async function main() {
 
     const claimDup = await requestJson(`${baseUrl}/api/seasons/quests/claim`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         milestoneId: 'milestone_20',
         idempotencyKey: 'phase4-api-claim-1'
       }

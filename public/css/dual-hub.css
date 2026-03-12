@@ -13,30 +13,38 @@
   right: max(10px, env(safe-area-inset-right));
   bottom: calc(10px + env(safe-area-inset-bottom));
   z-index: 9000;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
-  padding: 8px;
-  border-radius: 16px;
-  background: rgba(21, 18, 35, 0.9);
-  box-shadow: 0 12px 26px rgba(10, 8, 19, 0.35);
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 9px;
+  border-radius: 18px;
+  background: rgba(18, 17, 31, 0.92);
+  box-shadow: 0 14px 28px rgba(10, 8, 19, 0.35);
   backdrop-filter: blur(10px);
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: pan-x;
 }
 
 .hub-nav[hidden] {
   display: none !important;
 }
 
+.hub-nav::-webkit-scrollbar {
+  display: none;
+}
+
 .hub-nav-btn {
-  min-height: 44px;
-  padding: 6px 8px;
+  flex: 1 0 84px;
+  min-height: 48px;
+  padding: 6px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  border-radius: 13px;
   background: rgba(255, 255, 255, 0.04);
   color: #f9f3ff;
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   font-weight: 800;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -68,6 +76,7 @@
   #profileHub,
   #progressionHub,
   #achievementsHub,
+  #entryAuth,
   #dualPathOnboarding {
     min-height: 100dvh;
   }
@@ -77,6 +86,13 @@
   justify-content: center;
   align-content: center;
   min-height: 100vh;
+}
+
+.hub-shell-auth {
+  justify-content: center;
+  align-content: center;
+  min-height: 100vh;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
 }
 
 .hub-hero {
@@ -101,6 +117,18 @@
   text-transform: uppercase;
 }
 
+.hub-brand-wordmark {
+  margin-top: 8px;
+  font-size: clamp(1.3rem, 4vw, 1.9rem);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 900;
+  background: linear-gradient(125deg, var(--primary), var(--secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 .hub-hero h1 {
   margin-top: 8px;
   color: var(--hub-ink);
@@ -112,6 +140,14 @@
   margin-top: 8px;
   color: rgba(31, 21, 49, 0.82);
   font-size: 0.95rem;
+}
+
+.hub-hero-subline {
+  font-size: 0.88rem !important;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(20, 62, 92, 0.8) !important;
 }
 
 .hub-home-actions,
@@ -127,6 +163,95 @@
   border: 1px solid var(--hub-border);
   background: var(--hub-surface);
   box-shadow: 0 6px 14px rgba(31, 21, 49, 0.11);
+}
+
+.hub-auth-card {
+  display: grid;
+  gap: 10px;
+}
+
+.hub-auth-field {
+  display: grid;
+  gap: 5px;
+}
+
+.hub-auth-field label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 800;
+  color: rgba(30, 59, 85, 0.76);
+}
+
+.hub-auth-field input {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid rgba(28, 56, 83, 0.22);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #173a56;
+  font-weight: 700;
+}
+
+.hub-auth-field input:focus {
+  border-color: rgba(0, 188, 212, 0.82);
+  box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.16);
+}
+
+.hub-auth-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.hub-auth-actions > .hub-btn-wide:first-child:last-child {
+  grid-column: 1 / -1;
+}
+
+.hub-auth-divider {
+  position: relative;
+  text-align: center;
+  color: rgba(31, 21, 49, 0.66);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hub-auth-divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(31, 21, 49, 0.14);
+}
+
+.hub-auth-divider span {
+  position: relative;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.hub-auth-status {
+  min-height: 20px;
+  margin-top: 2px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #245071;
+}
+
+.hub-auth-status[data-tone="error"] {
+  color: #b3261e;
+}
+
+.hub-auth-status[data-tone="success"] {
+  color: #1b7b3a;
+}
+
+.hub-auth-status[data-tone="warning"] {
+  color: #a86209;
 }
 
 .hub-card h2 {
@@ -981,6 +1106,52 @@ body.solo-submit-overlay-open {
   font-size: 0.9rem;
 }
 
+.hub-profile-editor {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.hub-profile-editor label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  color: rgba(30, 58, 84, 0.74);
+}
+
+.hub-profile-editor input,
+.hub-profile-editor textarea {
+  border-radius: 10px;
+  border: 1px solid rgba(28, 56, 82, 0.2);
+  background: rgba(255, 255, 255, 0.95);
+  color: #1a415f;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.hub-profile-editor textarea {
+  resize: vertical;
+  min-height: 74px;
+  line-height: 1.35;
+}
+
+.hub-profile-save-status {
+  min-height: 20px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #245071;
+}
+
+.hub-profile-save-status[data-tone="error"] {
+  color: #b3261e;
+}
+
+.hub-profile-save-status[data-tone="success"] {
+  color: #1b7b3a;
+}
+
 .hub-progress-wrap {
   margin-top: 8px;
 }
@@ -1030,7 +1201,13 @@ body.solo-submit-overlay-open {
     bottom: auto;
     left: auto;
     width: min(760px, calc(100vw - 20px));
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+    overflow: visible;
+  }
+
+  .hub-nav-btn {
+    flex: initial;
   }
 
   .hub-shell {
@@ -1040,10 +1217,6 @@ body.solo-submit-overlay-open {
 }
 
 @media (max-width: 680px) {
-  .hub-nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .hub-row {
     flex-direction: column;
   }
@@ -1075,6 +1248,10 @@ body.solo-submit-overlay-open {
   .solo-hint-inline {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .hub-auth-actions {
+    grid-template-columns: 1fr;
   }
 }
 

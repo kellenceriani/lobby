@@ -19,7 +19,7 @@
   <link rel="stylesheet" href="css/base.css?v=20260226-voice-router1">
   <link rel="stylesheet" href="css/lobby.css?v=20260301-chat-ios2">
   <link rel="stylesheet" href="css/settings.css?v=20260227-settings-os1">
-  <link rel="stylesheet" href="css/dual-hub.css?v=20260307-solo-mp-3">
+  <link rel="stylesheet" href="css/dual-hub.css?v=20260312-local-auth-sessions-1">
   <link rel="stylesheet" href="css/game.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/results.css?v=20260223-livefix1">
   <link rel="stylesheet" href="css/joinEvalFallingPlaques.css?v=20260223-livefix1">
@@ -59,6 +59,43 @@
     <button id="hubNavAchievements" class="hub-nav-btn" type="button" data-route="achievements">Achievements</button>
   </nav>
 
+  <!-- ==================== ENTRY AUTH SCREEN ==================== -->
+  <div id="entryAuth" class="screen">
+    <section class="hub-shell hub-shell-auth" aria-label="Entry authentication">
+      <header class="hub-hero hub-hero-auth">
+        <p class="hub-kicker">Entry</p>
+        <p class="hub-brand-wordmark">LobbyWARS</p>
+        <h1>Log In or Play as Guest</h1>
+        <p>Create a real LobbyWARS account with Username + Password. Guest mode is temporary and does not earn XP.</p>
+      </header>
+
+      <section id="authEntryCard" class="hub-card hub-auth-card">
+        <div class="hub-auth-field">
+          <label for="authDisplayName">Display Name</label>
+          <input id="authDisplayName" type="text" maxlength="32" autocomplete="nickname" placeholder="Display name for profile">
+        </div>
+        <div class="hub-auth-field">
+          <label for="authLoginHandle">Username</label>
+          <input id="authLoginHandle" type="text" maxlength="32" autocomplete="username" placeholder="Unique username">
+        </div>
+        <div class="hub-auth-field">
+          <label for="authPassword">Password</label>
+          <input id="authPassword" type="password" maxlength="72" autocomplete="current-password" placeholder="8+ characters">
+        </div>
+        <div class="hub-auth-actions">
+          <button id="authLoginBtn" class="btn btn-primary" type="button">Log In</button>
+          <button id="authCreateBtn" class="btn btn-secondary" type="button">Create Account</button>
+        </div>
+        <div class="hub-auth-divider" aria-hidden="true"><span>or</span></div>
+        <div class="hub-auth-actions">
+          <button id="authGuestBtn" class="btn btn-primary hub-btn-wide" type="button">Play as Guest</button>
+          <button id="authContinueBtn" class="btn btn-secondary hub-btn-wide" type="button" hidden>Continue Signed-In Profile</button>
+        </div>
+        <p id="authStatus" class="hub-auth-status" hidden></p>
+      </section>
+    </section>
+  </div>
+
   <!-- ==================== DUAL-HUB ONBOARDING ==================== -->
   <div id="dualPathOnboarding" class="screen">
     <section class="hub-shell hub-shell-onboarding" aria-label="Choose your path onboarding">
@@ -93,7 +130,9 @@
     <section class="hub-shell" aria-label="Home hub">
       <header class="hub-hero">
         <p class="hub-kicker">Home</p>
-        <h1>Play Daily or Party Now</h1>
+        <p class="hub-brand-wordmark">LobbyWARS</p>
+        <h1>Home Command</h1>
+        <p class="hub-hero-subline">Play Daily or Party Now</p>
         <p id="homeHubGreeting">Preparing your cross-mode profile...</p>
       </header>
 
@@ -136,6 +175,7 @@
     <section class="hub-shell hub-shell-solo" aria-label="Solo hub">
       <header class="hub-hero hub-hero-solo">
         <p class="hub-kicker">Solo Run</p>
+        <p class="hub-brand-wordmark">LobbyWARS</p>
         <h1>Daily Cipher Clash</h1>
         <p class="solo-hero-line">Next reset <strong id="soloResetCountdown">--:--:--</strong></p>
       </header>
@@ -257,8 +297,20 @@
       <section class="hub-card">
         <h2>Account</h2>
         <div class="hub-field-row"><span>Account Type</span><strong id="profileAccountType">guest</strong></div>
+        <div class="hub-field-row"><span>Username</span><strong id="profileLoginHandle">--</strong></div>
         <div class="hub-field-row"><span>Created</span><strong id="profileCreatedAt">--</strong></div>
         <div class="hub-field-row"><span>Last Updated</span><strong id="profileUpdatedAt">--</strong></div>
+        <div class="hub-profile-editor">
+          <label for="profileEditDisplayName">Display Name</label>
+          <input id="profileEditDisplayName" type="text" maxlength="32" autocomplete="nickname" placeholder="Display name">
+          <label for="profileEditBio">Bio</label>
+          <textarea id="profileEditBio" maxlength="240" rows="3" placeholder="Optional profile bio (max 240 chars)"></textarea>
+          <div class="hub-inline-actions">
+            <button id="profileSaveBtn" class="btn btn-primary" type="button">Save Profile</button>
+            <button id="profileSwitchAccountBtn" class="btn btn-secondary" type="button">Switch Profile</button>
+          </div>
+          <p id="profileSaveStatus" class="hub-profile-save-status" data-tone="info"></p>
+        </div>
       </section>
       <section class="hub-card">
         <h2>Mode Snapshot</h2>
@@ -340,8 +392,8 @@
       </div>
 
       <div class="input-group">
-        <label for="name"><svg class="icon-inline" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/></svg> Your Name:</label>
-        <input id="name" placeholder="Enter your name" maxlength="20" autocomplete="off" aria-label="Player name">
+        <label for="name"><svg class="icon-inline" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/></svg> Party Name:</label>
+        <input id="name" placeholder="Name for this party session" maxlength="20" autocomplete="off" aria-label="Party player name">
       </div>
       
       <div class="input-group">
@@ -1717,7 +1769,7 @@
       }
     })();
   </script>
-  <script type="module" src="js/bootstrap.js?v=20260307-phase3-2"></script>
+  <script type="module" src="js/bootstrap.js?v=20260312-local-auth-sessions-1"></script>
   <link rel="stylesheet" href="css/round4Eval.css?v=20260226-voice-ui1">
   <link rel="stylesheet" href="css/round4Eval-ovr.css?v=20260226-voice-ui1">
 </body>

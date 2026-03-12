@@ -5,12 +5,19 @@ const DEFAULT_XP_CONFIG = Object.freeze({
   maxXpPerDay: Math.max(50, Number(process.env.META_MAX_XP_PER_DAY) || 3000),
   maxGrantsPerDay: Math.max(1, Number(process.env.META_MAX_GRANTS_PER_DAY) || 200)
 });
+const GUEST_RETENTION_DAYS = Math.max(0, Number(process.env.GUEST_RETENTION_DAYS) || 30);
 
 function boolEnv(name, fallback = false) {
   const raw = process.env[name];
   if (raw == null) return fallback;
   const normalized = String(raw).trim().toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(normalized);
+}
+
+function parseIsoMs(value = '') {
+  const parsed = Date.parse(String(value || ''));
+  if (!Number.isFinite(parsed)) return 0;
+  return parsed;
 }
 
 function createDefaultAchievementDefinitions() {
@@ -147,6 +154,105 @@ function buildMetaService({
       });
     });
     return defaults;
+  }
+
+  function pruneStaleGuestData({ nowMs = Date.now() } = {}) {
+    if (GUEST_RETENTION_DAYS <= 0) {
+      return { ok: true, removedUsers: 0, retentionDays: 0 };
+    }
+    const retentionMs = GUEST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const cutoffMs = Math.max(0, Number(nowMs) || Date.now()) - retentionMs;
+    let removedUsers = 0;
+    let removedLedgerRows = 0;
+    let removedRuns = 0;
+    let removedAttempts = 0;
+
+    adapter.writeState((state) => {
+      const users = state.users && typeof state.users === 'object' ? state.users : {};
+      const staleGuestIds = Object.keys(users).filter((userId) => {
+        const user = users[userId];
+        if (!user || typeof user !== 'object') return false;
+        if (String(user.kind || '').trim().toLowerCase() !== 'guest') return false;
+        const touchedMs = Math.max(
+          parseIsoMs(user.updatedAt || ''),
+          parseIsoMs(user.createdAt || ''),
+          parseIsoMs(state.profiles && state.profiles[userId] && state.profiles[userId].updatedAt || ''),
+          parseIsoMs(state.playerProgression && state.playerProgression[userId] && state.playerProgression[userId].updatedAt || '')
+        );
+        return touchedMs > 0 && touchedMs <= cutoffMs;
+      });
+
+      staleGuestIds.forEach((userId) => {
+        const safeUserId = sanitizeText(userId, 120);
+        if (!safeUserId) return;
+        removedUsers += 1;
+
+        delete state.users[safeUserId];
+        delete state.profiles[safeUserId];
+        delete state.playerProgression[safeUserId];
+        delete state.achievementUnlocksByUser[safeUserId];
+
+        Object.keys(state.xpLedgerByGrantId || {}).forEach((grantId) => {
+          const row = state.xpLedgerByGrantId[grantId];
+          if (row && row.userId === safeUserId) {
+            delete state.xpLedgerByGrantId[grantId];
+            removedLedgerRows += 1;
+          }
+        });
+
+        Object.keys(state.soloRuns || {}).forEach((runId) => {
+          const row = state.soloRuns[runId];
+          if (row && row.userId === safeUserId) {
+            delete state.soloRuns[runId];
+            removedRuns += 1;
+          }
+        });
+
+        Object.keys(state.dailyAttempts || {}).forEach((runId) => {
+          const row = state.dailyAttempts[runId];
+          if (row && row.userId === safeUserId) {
+            delete state.dailyAttempts[runId];
+            removedAttempts += 1;
+          }
+        });
+
+        const indexes = state.indexes && typeof state.indexes === 'object' ? state.indexes : {};
+        const byGuestAlias = indexes.guestAliasToUserId && typeof indexes.guestAliasToUserId === 'object'
+          ? indexes.guestAliasToUserId
+          : {};
+        Object.keys(byGuestAlias).forEach((alias) => {
+          if (byGuestAlias[alias] === safeUserId) delete byGuestAlias[alias];
+        });
+        indexes.guestAliasToUserId = byGuestAlias;
+
+        const byLegacyName = indexes.legacyNameToUserId && typeof indexes.legacyNameToUserId === 'object'
+          ? indexes.legacyNameToUserId
+          : {};
+        Object.keys(byLegacyName).forEach((legacyKey) => {
+          if (byLegacyName[legacyKey] === safeUserId) delete byLegacyName[legacyKey];
+        });
+        indexes.legacyNameToUserId = byLegacyName;
+
+        const byScoredRun = indexes.scoredSoloRunByUserModeDate && typeof indexes.scoredSoloRunByUserModeDate === 'object'
+          ? indexes.scoredSoloRunByUserModeDate
+          : {};
+        const prefix = `${safeUserId.toLowerCase()}|`;
+        Object.keys(byScoredRun).forEach((indexKey) => {
+          if (String(indexKey || '').startsWith(prefix)) delete byScoredRun[indexKey];
+        });
+        indexes.scoredSoloRunByUserModeDate = byScoredRun;
+        state.indexes = indexes;
+      });
+    });
+
+    return {
+      ok: true,
+      removedUsers,
+      removedLedgerRows,
+      removedRuns,
+      removedAttempts,
+      retentionDays: GUEST_RETENTION_DAYS
+    };
   }
 
   function getProfileBundle(userId = '') {
@@ -290,6 +396,9 @@ function buildMetaService({
       const user = state.users[safeUserId];
       const progression = state.playerProgression[safeUserId];
       if (!user || !progression) return { ok: false, code: 'user_not_found' };
+      if (String(user.kind || '').trim().toLowerCase() === 'guest') {
+        return { ok: false, code: 'guest_progression_disabled' };
+      }
 
       const existingGrant = state.xpLedgerByGrantId[safeGrantId];
       if (existingGrant) {
@@ -360,11 +469,13 @@ function buildMetaService({
 
   function runStartupMigrations() {
     ensureAchievementDefinitions();
+    const guestPrune = pruneStaleGuestData({ nowMs: Date.now() });
     return {
       ok: true,
       schemaVersion: 1,
       flags,
-      xpConfig: config
+      xpConfig: config,
+      guestPrune
     };
   }
 
@@ -378,7 +489,8 @@ function buildMetaService({
     listXpLedgerForUser,
     listAchievements,
     evaluateAchievementsForUser,
-    ensureAchievementDefinitions
+    ensureAchievementDefinitions,
+    pruneStaleGuestData
   };
 }
 

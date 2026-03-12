@@ -37,6 +37,26 @@ function sanitizeEmail(value) {
   return email;
 }
 
+function sanitizeLocalHandle(value) {
+  const handle = sanitizeText(value, 48).toLowerCase();
+  if (!handle || !/^[a-z0-9._-]{3,48}$/.test(handle)) return '';
+  return handle;
+}
+
+function sanitizeLocalPassword(value) {
+  const password = String(value == null ? '' : value).trim();
+  if (!password) return '';
+  if (password.length < 8 || password.length > 72) return '';
+  return password;
+}
+
+function sanitizeGoogleIdToken(value) {
+  const token = sanitizeText(value, 5000);
+  if (!token || token.length < 80) return '';
+  if (!/^[A-Za-z0-9._-]+$/.test(token)) return '';
+  return token;
+}
+
 function sanitizeUserId(value) {
   const userId = sanitizeText(value, 120);
   if (!userId) return '';
@@ -101,6 +121,70 @@ function validateAccountLink(body = {}) {
   };
 }
 
+function validateLocalRegister(body = {}) {
+  const payload = body && typeof body === 'object' ? body : {};
+  const handle = sanitizeLocalHandle(payload.handle || '');
+  const password = sanitizeLocalPassword(payload.password || '');
+  if (!handle || !password) {
+    return { ok: false, code: 'invalid_local_register_payload' };
+  }
+
+  let displayName = '';
+  if (Object.prototype.hasOwnProperty.call(payload, 'displayName')) {
+    displayName = sanitizeName(payload.displayName || '');
+    if (!displayName) return { ok: false, code: 'invalid_display_name' };
+  }
+
+  return {
+    ok: true,
+    value: {
+      userId: sanitizeUserId(payload.userId || payload.existingUserId || ''),
+      handle,
+      password,
+      displayName,
+      guestAlias: sanitizeGuestAlias(payload.guestAlias || '')
+    }
+  };
+}
+
+function validateLocalLogin(body = {}) {
+  const payload = body && typeof body === 'object' ? body : {};
+  const handle = sanitizeLocalHandle(payload.handle || '');
+  const password = sanitizeLocalPassword(payload.password || '');
+  if (!handle || !password) {
+    return { ok: false, code: 'invalid_local_login_payload' };
+  }
+  return {
+    ok: true,
+    value: {
+      handle,
+      password
+    }
+  };
+}
+
+function validateGoogleSession(body = {}) {
+  const payload = body && typeof body === 'object' ? body : {};
+  const idToken = sanitizeGoogleIdToken(payload.idToken || payload.googleIdToken || '');
+  if (!idToken) {
+    return { ok: false, code: 'invalid_google_token_payload' };
+  }
+  let desiredUsername = '';
+  if (Object.prototype.hasOwnProperty.call(payload, 'desiredUsername')) {
+    desiredUsername = sanitizeText(payload.desiredUsername || '', 32);
+    if (!desiredUsername) return { ok: false, code: 'invalid_display_name' };
+  }
+  return {
+    ok: true,
+    value: {
+      idToken,
+      existingUserId: sanitizeUserId(payload.existingUserId || payload.userId || ''),
+      desiredUsername,
+      guestAlias: sanitizeGuestAlias(payload.guestAlias || '')
+    }
+  };
+}
+
 function validateProfilePatch(body = {}) {
   const payload = body && typeof body === 'object' ? body : {};
   const patch = {};
@@ -148,6 +232,9 @@ module.exports = {
   sanitizeUserId,
   validateGuestSessionCreate,
   validateAccountLink,
+  validateLocalRegister,
+  validateLocalLogin,
+  validateGoogleSession,
   validateProfilePatch,
   validateXpGrant
 };

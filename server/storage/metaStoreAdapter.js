@@ -41,6 +41,8 @@ function createDefaultMetaState() {
     dailyAttempts: {},
     soloRuns: {},
     leaderboardSnapshots: {},
+    localAuthByHandle: {},
+    authSessionsByTokenHash: {},
     seasonSchemaVersion: 0,
     seasonDefinitions: {},
     seasonRuntime: {
@@ -95,6 +97,12 @@ function migrateMetaState(raw) {
     state.leaderboardSnapshots = state.leaderboardSnapshots && typeof state.leaderboardSnapshots === 'object'
       ? state.leaderboardSnapshots
       : (state.leaderboard_snapshots && typeof state.leaderboard_snapshots === 'object' ? state.leaderboard_snapshots : {});
+    state.localAuthByHandle = state.localAuthByHandle && typeof state.localAuthByHandle === 'object'
+      ? state.localAuthByHandle
+      : (state.local_auth_by_handle && typeof state.local_auth_by_handle === 'object' ? state.local_auth_by_handle : {});
+    state.authSessionsByTokenHash = state.authSessionsByTokenHash && typeof state.authSessionsByTokenHash === 'object'
+      ? state.authSessionsByTokenHash
+      : (state.auth_sessions_by_token_hash && typeof state.auth_sessions_by_token_hash === 'object' ? state.auth_sessions_by_token_hash : {});
     state.indexes = state.indexes && typeof state.indexes === 'object' ? state.indexes : {};
     state.indexes.providerAccountToUserId = state.indexes.providerAccountToUserId && typeof state.indexes.providerAccountToUserId === 'object'
       ? state.indexes.providerAccountToUserId
@@ -151,6 +159,10 @@ function migrateMetaState(raw) {
     dailyAttempts: state.dailyAttempts && typeof state.dailyAttempts === 'object' ? state.dailyAttempts : {},
     soloRuns: state.soloRuns && typeof state.soloRuns === 'object' ? state.soloRuns : {},
     leaderboardSnapshots: state.leaderboardSnapshots && typeof state.leaderboardSnapshots === 'object' ? state.leaderboardSnapshots : {},
+    localAuthByHandle: state.localAuthByHandle && typeof state.localAuthByHandle === 'object' ? state.localAuthByHandle : {},
+    authSessionsByTokenHash: state.authSessionsByTokenHash && typeof state.authSessionsByTokenHash === 'object'
+      ? state.authSessionsByTokenHash
+      : {},
     seasonSchemaVersion: Math.max(0, Number(state.seasonSchemaVersion) || 0),
     seasonDefinitions: state.seasonDefinitions && typeof state.seasonDefinitions === 'object' ? state.seasonDefinitions : {},
     seasonRuntime: state.seasonRuntime && typeof state.seasonRuntime === 'object'
@@ -283,6 +295,19 @@ class FileMetaStoreAdapter {
     return state.playerProgression[key] ? deepClone(state.playerProgression[key]) : null;
   }
 
+  getUserIdByProviderAccount(provider = '', providerAccountId = '') {
+    const key = buildProviderAccountKey(provider, providerAccountId);
+    if (!key) return null;
+    const state = this.ensureLoaded();
+    return String(
+      state
+      && state.indexes
+      && state.indexes.providerAccountToUserId
+      && state.indexes.providerAccountToUserId[key]
+      || ''
+    ).trim() || null;
+  }
+
   createUserSession({
     displayName = '',
     guestAlias = '',
@@ -406,6 +431,210 @@ class FileMetaStoreAdapter {
         idempotent: wasLinked,
         user: deepClone(user),
         profile: profile ? deepClone(profile) : null
+      };
+    });
+  }
+
+  getLocalAuthRecord(handle = '') {
+    const safeHandle = sanitizeText(handle, 64).toLowerCase();
+    if (!safeHandle) return null;
+    const state = this.ensureLoaded();
+    const record = state.localAuthByHandle && state.localAuthByHandle[safeHandle]
+      ? state.localAuthByHandle[safeHandle]
+      : null;
+    return record ? deepClone(record) : null;
+  }
+
+  registerLocalAccount({
+    userId = '',
+    handle = '',
+    passwordHash = '',
+    passwordSalt = '',
+    displayName = '',
+    guestAlias = ''
+  } = {}) {
+    const safeUserId = sanitizeText(userId, 120);
+    const safeHandle = sanitizeText(handle, 64).toLowerCase();
+    const safePasswordHash = sanitizeText(passwordHash, 320);
+    const safePasswordSalt = sanitizeText(passwordSalt, 320);
+    const safeDisplayName = sanitizeText(displayName, 32);
+    const safeGuestAlias = sanitizeText(guestAlias, 120);
+    const providerKey = buildProviderAccountKey('local', safeHandle);
+
+    if (!safeHandle || !safePasswordHash || !safePasswordSalt || !providerKey) {
+      return { ok: false, code: 'invalid_local_register_payload' };
+    }
+
+    return this.writeState((state) => {
+      state.localAuthByHandle = state.localAuthByHandle && typeof state.localAuthByHandle === 'object'
+        ? state.localAuthByHandle
+        : {};
+
+      const existingAuth = state.localAuthByHandle[safeHandle];
+      if (existingAuth) {
+        return { ok: false, code: 'local_handle_taken' };
+      }
+
+      let targetUserId = safeUserId;
+      let createdNewUser = false;
+      const createdAt = nowIso();
+
+      if (targetUserId) {
+        if (!state.users[targetUserId]) {
+          return { ok: false, code: 'user_not_found' };
+        }
+      } else {
+        targetUserId = makeUserId(state.counters.nextUserSeq);
+        state.counters.nextUserSeq += 1;
+        createdNewUser = true;
+
+        const user = {
+          userId: targetUserId,
+          kind: 'guest',
+          status: 'active',
+          guestAlias: safeGuestAlias || null,
+          linkedAccount: null,
+          createdAt,
+          updatedAt: createdAt
+        };
+        const profile = {
+          userId: targetUserId,
+          displayName: safeDisplayName || 'Player',
+          bio: '',
+          avatarId: null,
+          createdAt,
+          updatedAt: createdAt
+        };
+        const progression = {
+          userId: targetUserId,
+          totalXp: 0,
+          level: 1,
+          xpIntoLevel: 0,
+          xpForNextLevel: 100,
+          dailyXp: {},
+          createdAt,
+          updatedAt: createdAt
+        };
+        state.users[targetUserId] = user;
+        state.profiles[targetUserId] = profile;
+        state.playerProgression[targetUserId] = progression;
+        if (safeGuestAlias) {
+          state.indexes.guestAliasToUserId[safeGuestAlias] = targetUserId;
+        }
+      }
+
+      const mappedUserId = state.indexes.providerAccountToUserId[providerKey];
+      if (mappedUserId && mappedUserId !== targetUserId) {
+        return { ok: false, code: 'provider_account_already_linked' };
+      }
+
+      const user = state.users[targetUserId];
+      if (!user) return { ok: false, code: 'user_not_found' };
+      const profile = state.profiles[targetUserId];
+      const progression = state.playerProgression[targetUserId];
+      const now = nowIso();
+
+      user.kind = 'linked';
+      user.linkedAccount = {
+        provider: 'local',
+        providerAccountId: safeHandle,
+        email: null
+      };
+      user.updatedAt = now;
+
+      if (profile && safeDisplayName) {
+        profile.displayName = safeDisplayName;
+        profile.updatedAt = now;
+      }
+
+      state.localAuthByHandle[safeHandle] = {
+        handle: safeHandle,
+        userId: targetUserId,
+        passwordHash: safePasswordHash,
+        passwordSalt: safePasswordSalt,
+        failedAttempts: 0,
+        lockUntilMs: 0,
+        lastLoginAt: null,
+        createdAt: now,
+        updatedAt: now
+      };
+      state.indexes.providerAccountToUserId[providerKey] = targetUserId;
+
+      return {
+        ok: true,
+        createdUser: createdNewUser,
+        user: deepClone(user),
+        profile: profile ? deepClone(profile) : null,
+        progression: progression ? deepClone(progression) : null
+      };
+    });
+  }
+
+  authenticateLocalAccount({
+    handle = '',
+    passwordHash = '',
+    maxFailures = 5,
+    lockWindowMs = 300000
+  } = {}) {
+    const safeHandle = sanitizeText(handle, 64).toLowerCase();
+    const safePasswordHash = sanitizeText(passwordHash, 320);
+    const safeMaxFailures = Math.max(1, Number(maxFailures) || 5);
+    const safeLockWindowMs = Math.max(1000, Number(lockWindowMs) || 300000);
+    if (!safeHandle || !safePasswordHash) {
+      return { ok: false, code: 'invalid_local_login_payload' };
+    }
+
+    return this.writeState((state) => {
+      state.localAuthByHandle = state.localAuthByHandle && typeof state.localAuthByHandle === 'object'
+        ? state.localAuthByHandle
+        : {};
+      const record = state.localAuthByHandle[safeHandle];
+      if (!record || !record.userId) {
+        return { ok: false, code: 'invalid_credentials' };
+      }
+
+      const nowMs = Date.now();
+      const lockUntilMs = Math.max(0, Number(record.lockUntilMs) || 0);
+      if (lockUntilMs > nowMs) {
+        return {
+          ok: false,
+          code: 'account_locked',
+          retryAfterMs: lockUntilMs - nowMs
+        };
+      }
+
+      const matches = String(record.passwordHash || '') === safePasswordHash;
+      if (!matches) {
+        const failures = Math.max(0, Number(record.failedAttempts) || 0) + 1;
+        record.failedAttempts = failures;
+        if (failures >= safeMaxFailures) {
+          record.failedAttempts = 0;
+          record.lockUntilMs = nowMs + safeLockWindowMs;
+        }
+        record.updatedAt = nowIso();
+        return {
+          ok: false,
+          code: record.lockUntilMs > nowMs ? 'account_locked' : 'invalid_credentials',
+          retryAfterMs: record.lockUntilMs > nowMs ? (record.lockUntilMs - nowMs) : 0
+        };
+      }
+
+      record.failedAttempts = 0;
+      record.lockUntilMs = 0;
+      record.lastLoginAt = nowIso();
+      record.updatedAt = record.lastLoginAt;
+
+      const user = state.users[record.userId] || null;
+      const profile = state.profiles[record.userId] || null;
+      const progression = state.playerProgression[record.userId] || null;
+      if (!user) {
+        return { ok: false, code: 'user_not_found' };
+      }
+      return {
+        ok: true,
+        user: deepClone(user),
+        profile: profile ? deepClone(profile) : null,
+        progression: progression ? deepClone(progression) : null
       };
     });
   }

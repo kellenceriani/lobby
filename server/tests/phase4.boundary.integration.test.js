@@ -36,8 +36,18 @@ function main() {
   metaService.runStartupMigrations();
   seasonService.runStartupMigrations();
 
-  const a = identityService.createGuestSession({ displayName: 'Boundary A', guestAlias: 'dev:boundary-a' });
-  const b = identityService.createGuestSession({ displayName: 'Boundary B', guestAlias: 'dev:boundary-b' });
+  const a = identityService.createLocalAccount({
+    handle: 'boundary_a',
+    password: 'BoundaryA123!',
+    displayName: 'Boundary A'
+  });
+  const b = identityService.createLocalAccount({
+    handle: 'boundary_b',
+    password: 'BoundaryB123!',
+    displayName: 'Boundary B'
+  });
+  assert.strictEqual(Boolean(a && a.ok), true, 'userA local account should be created');
+  assert.strictEqual(Boolean(b && b.ok), true, 'userB local account should be created');
   const userA = String(a.user.userId);
   const userB = String(b.user.userId);
 

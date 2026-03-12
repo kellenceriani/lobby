@@ -10,6 +10,7 @@ const { getCategoryRegistrySnapshot } = require('./server/services/categoryRegis
 const { resolveAudioCalloutBatch } = require('./server/services/audioCalloutResolverService');
 const { createMetaStoreAdapter } = require('./server/storage/metaStoreAdapter');
 const { buildIdentityService } = require('./server/services/identityService');
+const { buildSessionService } = require('./server/services/sessionService');
 const { buildMetaService } = require('./server/services/metaService');
 const { buildSoloEngineService } = require('./server/services/soloEngineService');
 const { buildSeasonService } = require('./server/services/seasonService');
@@ -17,6 +18,9 @@ const {
   sanitizeUserId,
   validateGuestSessionCreate,
   validateAccountLink,
+  validateLocalRegister,
+  validateLocalLogin,
+  validateGoogleSession,
   validateProfilePatch,
   validateXpGrant
 } = require('./server/services/metaApiValidation');
@@ -54,6 +58,7 @@ const io = new Server(server, {
 });
 const metaStoreAdapter = createMetaStoreAdapter();
 const identityService = buildIdentityService({ adapter: metaStoreAdapter });
+const sessionService = buildSessionService({ adapter: metaStoreAdapter });
 const metaService = buildMetaService({ adapter: metaStoreAdapter });
 const seasonService = buildSeasonService({
   adapter: metaStoreAdapter,
@@ -79,6 +84,103 @@ function readBooleanEnv(name, fallback = false) {
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return fallback;
+}
+
+const SESSION_HEADER = 'x-lw-session';
+const SESSION_COOKIE = 'lw_session';
+const SESSION_TTL_MS = Math.max(60 * 60 * 1000, Number(process.env.SESSION_TTL_MS) || (30 * 24 * 60 * 60 * 1000));
+
+function sanitizeSessionToken(value = '') {
+  const token = String(value == null ? '' : value).trim();
+  if (!token) return '';
+  if (token.length < 24 || token.length > 1024) return '';
+  if (!/^[A-Za-z0-9._\-~]+$/.test(token)) return '';
+  return token;
+}
+
+function parseCookieMap(rawCookie = '') {
+  const out = {};
+  const source = String(rawCookie || '').trim();
+  if (!source) return out;
+  source.split(';').forEach((segment) => {
+    const [rawKey, ...rawValue] = String(segment || '').split('=');
+    const key = String(rawKey || '').trim();
+    if (!key) return;
+    const value = String(rawValue.join('=') || '').trim();
+    out[key] = value;
+  });
+  return out;
+}
+
+function requestSessionToken(req) {
+  const headerToken = sanitizeSessionToken(req && req.headers ? req.headers[SESSION_HEADER] : '');
+  if (headerToken) return headerToken;
+  const authHeader = String(req && req.headers ? req.headers.authorization || '' : '').trim();
+  if (/^Bearer\s+/i.test(authHeader)) {
+    const bearer = sanitizeSessionToken(authHeader.replace(/^Bearer\s+/i, '').trim());
+    if (bearer) return bearer;
+  }
+  const cookies = parseCookieMap(req && req.headers ? req.headers.cookie || '' : '');
+  return sanitizeSessionToken(cookies[SESSION_COOKIE] || '');
+}
+
+function setSessionCookie(res, token = '') {
+  const safeToken = sanitizeSessionToken(token);
+  if (!safeToken) return;
+  const secureCookie = readBooleanEnv(
+    'SESSION_COOKIE_SECURE',
+    String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production'
+  );
+  res.cookie(SESSION_COOKIE, safeToken, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: secureCookie,
+    path: '/',
+    maxAge: SESSION_TTL_MS
+  });
+}
+
+function clearSessionCookie(res) {
+  const secureCookie = readBooleanEnv(
+    'SESSION_COOKIE_SECURE',
+    String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production'
+  );
+  res.cookie(SESSION_COOKIE, '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: secureCookie,
+    path: '/',
+    maxAge: 0
+  });
+}
+
+function requireAuthorizedUser(req, res, expectedUserId = '') {
+  const safeExpectedUserId = sanitizeUserId(expectedUserId || '');
+  if (!safeExpectedUserId) {
+    res.status(400).json({ error: 'invalid_user_id' });
+    return null;
+  }
+  const token = requestSessionToken(req);
+  if (!token) {
+    res.status(401).json({ error: 'auth_session_required' });
+    return null;
+  }
+  const resolved = sessionService.resolveSession(token, { touch: true, nowMs: Date.now() });
+  if (!resolved || resolved.ok !== true || !resolved.session || !resolved.session.userId) {
+    clearSessionCookie(res);
+    res.status(401).json({ error: 'auth_session_invalid' });
+    return null;
+  }
+  if (String(resolved.session.userId) !== safeExpectedUserId) {
+    res.status(403).json({ error: 'auth_user_mismatch' });
+    return null;
+  }
+  req.authSession = resolved.session;
+  return {
+    token,
+    session: resolved.session,
+    userId: safeExpectedUserId
+  };
 }
 
 async function runAdaptiveTtsStartupPreflight() {
@@ -158,25 +260,261 @@ app.get('/api/categories', (_req, res) => {
 });
 
 app.get('/api/meta/flags', (_req, res) => {
+  const googleClientId = String(process.env.GOOGLE_CLIENT_ID || '').trim().split(',')[0] || '';
   res.json({
     progressionEnabled: metaService.flags.progressionEnabled === true,
     achievementsEnabled: metaService.flags.achievementsEnabled === true,
     soloEngineEnabled: soloEngineService.flags.soloEnabled === true,
     seasonLayerEnabled: seasonService.flags.seasonEnabled === true,
-    dualHubUiEnabled: readBooleanEnv('DUAL_HUB_UI_ENABLED', true)
+    dualHubUiEnabled: readBooleanEnv('DUAL_HUB_UI_ENABLED', true),
+    googleAuthEnabled: Boolean(googleClientId),
+    googleClientId
   });
 });
 
 app.post('/api/identity/guest-session', (req, res) => {
   const payload = validateGuestSessionCreate(req.body || {});
   const created = identityService.createGuestSession(payload);
+  if (!created || !created.user || !created.user.userId) {
+    res.status(400).json({ error: 'guest_session_failed' });
+    return;
+  }
+  const issued = sessionService.createSession({
+    userId: created.user.userId,
+    authMode: 'guest',
+    nowMs: Date.now()
+  });
+  if (!issued || issued.ok !== true || !issued.sessionToken) {
+    res.status(500).json({ error: issued && issued.code ? issued.code : 'session_issue_failed' });
+    return;
+  }
+  setSessionCookie(res, issued.sessionToken);
   const statusCode = created && created.created === true ? 201 : 200;
   res.status(statusCode).json({
     created: created && created.created === true,
     user: created ? created.user : null,
     profile: created ? created.profile : null,
-    progression: created ? created.progression : null
+    progression: created ? created.progression : null,
+    session: issued.session,
+    sessionToken: issued.sessionToken
   });
+});
+
+app.post('/api/identity/local-register', (req, res) => {
+  const validated = validateLocalRegister(req.body || {});
+  if (!validated.ok) {
+    res.status(400).json({ error: validated.code });
+    return;
+  }
+
+  const created = identityService.createLocalAccount(validated.value);
+  if (!created || created.ok !== true) {
+    if (created && created.code === 'user_not_found') {
+      res.status(404).json({ error: created.code });
+      return;
+    }
+    if (created && ['local_handle_taken', 'provider_account_already_linked', 'local_account_exists', 'user_already_linked'].includes(String(created.code || ''))) {
+      res.status(409).json({ error: created.code });
+      return;
+    }
+    res.status(400).json({ error: created && created.code ? created.code : 'local_register_failed' });
+    return;
+  }
+
+  if (metaService.flags.achievementsEnabled === true) {
+    try {
+      metaService.ensureAchievementDefinitions();
+      metaService.evaluateAchievementsForUser(created.user && created.user.userId ? created.user.userId : '');
+    } catch (_error) {}
+  }
+
+  const issued = sessionService.createSession({
+    userId: created.user && created.user.userId ? created.user.userId : '',
+    authMode: 'local',
+    nowMs: Date.now()
+  });
+  if (!issued || issued.ok !== true || !issued.sessionToken) {
+    res.status(500).json({ error: issued && issued.code ? issued.code : 'session_issue_failed' });
+    return;
+  }
+  setSessionCookie(res, issued.sessionToken);
+
+  res.status(created.createdUser === true ? 201 : 200).json({
+    ok: true,
+    createdUser: created.createdUser === true,
+    user: created.user || null,
+    profile: created.profile || null,
+    progression: created.progression || null,
+    auth: created.auth || null,
+    session: issued.session,
+    sessionToken: issued.sessionToken
+  });
+});
+
+app.post('/api/identity/local-login', (req, res) => {
+  const validated = validateLocalLogin(req.body || {});
+  if (!validated.ok) {
+    res.status(400).json({ error: validated.code });
+    return;
+  }
+
+  const login = identityService.loginLocalAccount(validated.value);
+  if (!login || login.ok !== true) {
+    if (login && login.code === 'invalid_credentials') {
+      res.status(401).json({ error: login.code });
+      return;
+    }
+    if (login && login.code === 'account_locked') {
+      res.status(423).json({
+        error: login.code,
+        retryAfterMs: Math.max(0, Number(login.retryAfterMs) || 0)
+      });
+      return;
+    }
+    if (login && login.code === 'user_not_found') {
+      res.status(404).json({ error: login.code });
+      return;
+    }
+    res.status(400).json({ error: login && login.code ? login.code : 'local_login_failed' });
+    return;
+  }
+
+  const issued = sessionService.createSession({
+    userId: login.user && login.user.userId ? login.user.userId : '',
+    authMode: 'local',
+    nowMs: Date.now()
+  });
+  if (!issued || issued.ok !== true || !issued.sessionToken) {
+    res.status(500).json({ error: issued && issued.code ? issued.code : 'session_issue_failed' });
+    return;
+  }
+  setSessionCookie(res, issued.sessionToken);
+
+  res.json({
+    ok: true,
+    user: login.user || null,
+    profile: login.profile || null,
+    progression: login.progression || null,
+    auth: login.auth || null,
+    session: issued.session,
+    sessionToken: issued.sessionToken
+  });
+});
+
+app.post('/api/identity/google-session', async (req, res) => {
+  const validated = validateGoogleSession(req.body || {});
+  if (!validated.ok) {
+    res.status(400).json({ error: validated.code });
+    return;
+  }
+
+  let session = null;
+  try {
+    session = await identityService.signInWithGoogle(validated.value);
+  } catch (_error) {
+    session = { ok: false, code: 'google_session_failed' };
+  }
+
+  if (!session || session.ok !== true) {
+    const code = String(session && session.code || 'google_session_failed');
+    if ([
+      'google_auth_not_configured',
+      'invalid_google_audience',
+      'google_email_not_verified',
+      'google_verify_unreachable',
+      'google_token_expired'
+    ].includes(code)) {
+      res.status(401).json({ error: code });
+      return;
+    }
+    if (code === 'invalid_google_token') {
+      res.status(401).json({ error: code });
+      return;
+    }
+    if (code === 'provider_account_already_linked') {
+      res.status(409).json({ error: code });
+      return;
+    }
+    if (code === 'user_not_found') {
+      res.status(404).json({ error: code });
+      return;
+    }
+    res.status(400).json({ error: code });
+    return;
+  }
+
+  if (metaService.flags.achievementsEnabled === true) {
+    try {
+      metaService.ensureAchievementDefinitions();
+      metaService.evaluateAchievementsForUser(session.user && session.user.userId ? session.user.userId : '');
+    } catch (_error) {}
+  }
+
+  const issued = sessionService.createSession({
+    userId: session.user && session.user.userId ? session.user.userId : '',
+    authMode: 'google',
+    nowMs: Date.now()
+  });
+  if (!issued || issued.ok !== true || !issued.sessionToken) {
+    res.status(500).json({ error: issued && issued.code ? issued.code : 'session_issue_failed' });
+    return;
+  }
+  setSessionCookie(res, issued.sessionToken);
+
+  res.status(session.created === true ? 201 : 200).json({
+    ok: true,
+    created: session.created === true,
+    user: session.user || null,
+    profile: session.profile || null,
+    progression: session.progression || null,
+    auth: session.auth || null,
+    session: issued.session,
+    sessionToken: issued.sessionToken
+  });
+});
+
+app.post('/api/identity/session-resume', (req, res) => {
+  const tokenFromBody = sanitizeSessionToken(req && req.body ? req.body.sessionToken || '' : '');
+  const token = tokenFromBody || requestSessionToken(req);
+  if (!token) {
+    clearSessionCookie(res);
+    res.status(401).json({ error: 'auth_session_required' });
+    return;
+  }
+
+  const resolved = sessionService.resolveSession(token, { touch: true, nowMs: Date.now() });
+  if (!resolved || resolved.ok !== true || !resolved.session || !resolved.session.userId) {
+    clearSessionCookie(res);
+    res.status(401).json({ error: 'auth_session_invalid' });
+    return;
+  }
+
+  const bundle = identityService.getIdentityBundle(resolved.session.userId);
+  if (!bundle || !bundle.user || !bundle.user.userId) {
+    clearSessionCookie(res);
+    res.status(404).json({ error: 'user_not_found' });
+    return;
+  }
+
+  setSessionCookie(res, token);
+  res.json({
+    ok: true,
+    user: bundle.user || null,
+    profile: bundle.profile || null,
+    progression: bundle.progression || null,
+    session: resolved.session,
+    sessionToken: token
+  });
+});
+
+app.post('/api/identity/session-signout', (req, res) => {
+  const tokenFromBody = sanitizeSessionToken(req && req.body ? req.body.sessionToken || '' : '');
+  const token = tokenFromBody || requestSessionToken(req);
+  if (token) {
+    sessionService.revokeSession(token, { nowMs: Date.now() });
+  }
+  clearSessionCookie(res);
+  res.json({ ok: true });
 });
 
 app.post('/api/identity/link-account', (req, res) => {
@@ -187,6 +525,8 @@ app.post('/api/identity/link-account', (req, res) => {
     });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, validated.value.userId);
+  if (!auth) return;
 
   const linked = identityService.linkGuestToAccount(validated.value);
   if (!linked || linked.ok !== true) {
@@ -219,6 +559,8 @@ app.get('/api/meta/profile/:userId', (req, res) => {
     res.status(400).json({ error: 'invalid_user_id' });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, userId);
+  if (!auth) return;
   const bundle = metaService.getProfileBundle(userId);
   if (!bundle) {
     res.status(404).json({ error: 'user_not_found' });
@@ -233,6 +575,8 @@ app.patch('/api/meta/profile/:userId', (req, res) => {
     res.status(400).json({ error: 'invalid_user_id' });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, userId);
+  if (!auth) return;
   const validated = validateProfilePatch(req.body || {});
   if (!validated.ok) {
     res.status(400).json({ error: validated.code });
@@ -252,6 +596,8 @@ app.get('/api/meta/progression/:userId', (req, res) => {
     res.status(400).json({ error: 'invalid_user_id' });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, userId);
+  if (!auth) return;
   const bundle = metaService.getProfileBundle(userId);
   if (!bundle) {
     res.status(404).json({ error: 'user_not_found' });
@@ -279,6 +625,8 @@ app.post('/api/meta/xp-grants', (req, res) => {
     }
     userId = resolved.user.userId;
   }
+  const auth = requireAuthorizedUser(req, res, userId);
+  if (!auth) return;
 
   const granted = metaService.grantXp({
     userId,
@@ -292,6 +640,10 @@ app.post('/api/meta/xp-grants', (req, res) => {
 
   if (!granted || granted.ok !== true) {
     if (granted && granted.code === 'meta_progression_disabled') {
+      res.status(403).json({ error: granted.code });
+      return;
+    }
+    if (granted && granted.code === 'guest_progression_disabled') {
       res.status(403).json({ error: granted.code });
       return;
     }
@@ -312,6 +664,8 @@ app.get('/api/meta/xp-ledger/:userId', (req, res) => {
     res.status(400).json({ error: 'invalid_user_id' });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, userId);
+  if (!auth) return;
   const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 50));
   res.json({
     userId,
@@ -325,6 +679,8 @@ app.get('/api/meta/achievements/:userId', (req, res) => {
     res.status(400).json({ error: 'invalid_user_id' });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, userId);
+  if (!auth) return;
   res.json(metaService.listAchievements(userId));
 });
 
@@ -355,6 +711,8 @@ app.post('/api/solo/runs/start', (req, res) => {
     res.status(400).json({ error: validated.code });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, validated.value.userId);
+  if (!auth) return;
   const started = soloEngineService.startRun({
     userId: validated.value.userId,
     modeId: validated.value.modeId,
@@ -376,6 +734,8 @@ app.post('/api/solo/runs/submit', async (req, res) => {
     res.status(400).json({ error: validated.code });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, validated.value.userId);
+  if (!auth) return;
   try {
     const submitted = await soloEngineService.submitAttempt({
       userId: validated.value.userId,
@@ -404,6 +764,8 @@ app.post('/api/solo/runs/hint', (req, res) => {
     res.status(400).json({ error: validated.code });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, validated.value.userId);
+  if (!auth) return;
   const hinted = soloEngineService.requestHint({
     userId: validated.value.userId,
     runId: validated.value.runId,
@@ -426,6 +788,8 @@ app.post('/api/solo/runs/finalize', (req, res) => {
     res.status(400).json({ error: validated.code });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, validated.value.userId);
+  if (!auth) return;
   const finalized = soloEngineService.finalizeRun({
     userId: validated.value.userId,
     runId: validated.value.runId,
@@ -447,6 +811,10 @@ app.get('/api/solo/leaderboards/daily', (req, res) => {
   if (!validated.ok) {
     res.status(400).json({ error: validated.code });
     return;
+  }
+  if (validated.value.userId) {
+    const auth = requireAuthorizedUser(req, res, validated.value.userId);
+    if (!auth) return;
   }
   const leaderboard = soloEngineService.getDailyLeaderboard({
     modeId: validated.value.modeId,
@@ -487,6 +855,10 @@ app.get('/api/seasons/leaderboards/:trackId', (req, res) => {
     res.status(400).json({ error: validated.code });
     return;
   }
+  if (validated.value.userId) {
+    const auth = requireAuthorizedUser(req, res, validated.value.userId);
+    if (!auth) return;
+  }
   const board = seasonService.getSeasonLeaderboard(validated.value);
   if (!board || board.ok !== true) {
     res.status(mapSeasonErrorToStatus(board && board.code)).json({
@@ -506,6 +878,8 @@ app.get('/api/seasons/profile/:userId', (req, res) => {
     res.status(400).json({ error: validated.code });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, validated.value.userId);
+  if (!auth) return;
   const profile = seasonService.getSeasonProfile(validated.value);
   if (!profile || profile.ok !== true) {
     res.status(mapSeasonErrorToStatus(profile && profile.code)).json({
@@ -538,6 +912,8 @@ app.post('/api/seasons/quests/claim', (req, res) => {
     res.status(400).json({ error: validated.code });
     return;
   }
+  const auth = requireAuthorizedUser(req, res, validated.value.userId);
+  if (!auth) return;
   const claimed = seasonService.claimMilestoneReward(validated.value);
   if (!claimed || claimed.ok !== true) {
     res.status(mapSeasonErrorToStatus(claimed && claimed.code)).json({
@@ -805,13 +1181,16 @@ async function bootServer() {
   // Start independent warmups immediately so word loading can overlap with TTS startup preflight.
   initWordCache();
   const metaMigrationResult = metaService.runStartupMigrations();
+  const prunedSessions = sessionService.pruneExpiredSessions({ nowMs: Date.now() });
   const seasonMigrationResult = seasonService.runStartupMigrations();
   const soloMigrationResult = soloEngineService.runStartupMigrations();
   console.log(
     `[Meta startup] schema=v${String(metaMigrationResult.schemaVersion || 'n/a')}` +
     ` progression=${metaMigrationResult.flags && metaMigrationResult.flags.progressionEnabled ? 'on' : 'off'}` +
-    ` achievements=${metaMigrationResult.flags && metaMigrationResult.flags.achievementsEnabled ? 'on' : 'off'}`
+    ` achievements=${metaMigrationResult.flags && metaMigrationResult.flags.achievementsEnabled ? 'on' : 'off'}` +
+    ` staleGuestsPruned=${Math.max(0, Number(metaMigrationResult && metaMigrationResult.guestPrune && metaMigrationResult.guestPrune.removedUsers) || 0)}`
   );
+  console.log(`[Auth startup] expiredSessionsPruned=${Math.max(0, Number(prunedSessions && prunedSessions.removed) || 0)}`);
   console.log(
     `[Season startup] enabled=${seasonMigrationResult.seasonEnabled ? 'on' : 'off'}` +
     ` schema=v${String(seasonMigrationResult.seasonSchemaVersion || 'n/a')}` +

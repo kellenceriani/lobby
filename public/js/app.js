@@ -7796,7 +7796,7 @@ function joinRoom() {
   const joinAsHost = document.getElementById('joinAsHost')?.checked === true;
 
   if (!name) {
-    showToast('Please enter your name!', 'warning');
+    showToast('Please enter a party name!', 'warning');
     document.getElementById('name').focus();
     return;
   }
@@ -7806,7 +7806,7 @@ function joinRoom() {
     return;
   }
   if (name.length < 2) {
-    showToast('Name must be at least 2 characters.', 'warning');
+    showToast('Party name must be at least 2 characters.', 'warning');
     return;
   }
   if (room.length < 2) {

@@ -1,6 +1,6 @@
 import { showScreen, showToast } from './ui.js';
 
-const DUAL_HUB_BUILD = '20260307-solo-mp-2';
+const DUAL_HUB_BUILD = '20260312-local-auth-sessions-1';
 try {
   window.__lobbyBuild = window.__lobbyBuild || {};
   window.__lobbyBuild.dualHub = DUAL_HUB_BUILD;
@@ -8,6 +8,8 @@ try {
 
 const ONBOARDING_DONE_KEY = 'lobbywars_dual_hub_onboarding_done_v1';
 const IDENTITY_KEY = 'lobbywars_dual_hub_identity_v1';
+const PARTY_ALIAS_KEY = 'lobbywars_party_alias_v1';
+const TEMP_GUEST_ALIAS_SESSION_KEY = 'lobbywars_temp_guest_alias_v1';
 const SOLO_MODE_ID = 'daily_cipher_clash';
 const SOLO_SLOT_IDS = ['lead', 'anchor', 'wildcard', 'closer'];
 const SOLO_SUBMIT_STAGES = Object.freeze([
@@ -27,7 +29,6 @@ const HUB_ROUTES = Object.freeze({
 });
 
 const HUB_SCREEN_IDS = new Set([
-  'dualPathOnboarding',
   'homeHub',
   'soloHub',
   'join',
@@ -47,7 +48,13 @@ const state = {
   identity: {
     userId: '',
     guestAlias: '',
-    displayName: 'Guest'
+    displayName: 'Guest',
+    authMode: 'guest',
+    loginHandle: '',
+    sessionToken: ''
+  },
+  auth: {
+    inFlight: false
   },
   profileBundle: null,
   achievements: {
@@ -59,6 +66,7 @@ const state = {
     remainingSeconds: 8,
     start: null
   },
+  partyAlias: '',
   solo: {
     run: null,
     challenge: null,
@@ -91,6 +99,26 @@ function safeStorageGet(key = '') {
 function safeStorageSet(key = '', value = '') {
   try {
     window.localStorage.setItem(String(key || ''), String(value || ''));
+  } catch (_error) {}
+}
+
+function safeStorageRemove(key = '') {
+  try {
+    window.localStorage.removeItem(String(key || ''));
+  } catch (_error) {}
+}
+
+function safeSessionStorageGet(key = '') {
+  try {
+    return window.sessionStorage.getItem(String(key || ''));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function safeSessionStorageSet(key = '', value = '') {
+  try {
+    window.sessionStorage.setItem(String(key || ''), String(value || ''));
   } catch (_error) {}
 }
 
@@ -187,25 +215,68 @@ function nextUtcResetMs(nowMs = Date.now()) {
 function getStoredIdentity() {
   const stored = safeStorageJsonGet(IDENTITY_KEY);
   if (!stored || typeof stored !== 'object') return null;
+  const mode = String(stored.authMode || 'guest').trim().toLowerCase();
+  const normalizedMode = mode === 'local' || mode === 'google' ? mode : 'guest';
   return {
     userId: String(stored.userId || '').trim(),
     guestAlias: String(stored.guestAlias || '').trim(),
-    displayName: String(stored.displayName || 'Guest').trim() || 'Guest'
+    displayName: String(stored.displayName || 'Guest').trim() || 'Guest',
+    authMode: normalizedMode,
+    loginHandle: String(stored.loginHandle || '').trim().toLowerCase(),
+    sessionToken: String(stored.sessionToken || '').trim()
   };
 }
 
 function setStoredIdentity(identity = {}) {
+  const mode = String(identity.authMode || 'guest').trim().toLowerCase();
+  const normalizedMode = mode === 'local' || mode === 'google' ? mode : 'guest';
   safeStorageJsonSet(IDENTITY_KEY, {
     userId: String(identity.userId || '').trim(),
     guestAlias: String(identity.guestAlias || '').trim(),
-    displayName: String(identity.displayName || 'Guest').trim() || 'Guest'
+    displayName: String(identity.displayName || 'Guest').trim() || 'Guest',
+    authMode: normalizedMode,
+    loginHandle: String(identity.loginHandle || '').trim().toLowerCase(),
+    sessionToken: String(identity.sessionToken || '').trim()
   });
 }
 
-async function requestJson(url, { method = 'GET', body = null } = {}) {
+function clearStoredIdentity() {
+  safeStorageRemove(IDENTITY_KEY);
+}
+
+function getStoredPartyAlias() {
+  const alias = safeStorageGet(PARTY_ALIAS_KEY);
+  return String(alias || '').trim().slice(0, 20);
+}
+
+function setStoredPartyAlias(alias = '') {
+  const safeAlias = String(alias || '').trim().slice(0, 20);
+  if (!safeAlias) {
+    safeStorageRemove(PARTY_ALIAS_KEY);
+    return;
+  }
+  safeStorageSet(PARTY_ALIAS_KEY, safeAlias);
+}
+
+function getOrCreateSessionGuestAlias() {
+  const existing = String(safeSessionStorageGet(TEMP_GUEST_ALIAS_SESSION_KEY) || '').trim();
+  if (existing) return existing.slice(0, 120);
+  const nextAlias = makeGuestAlias();
+  safeSessionStorageSet(TEMP_GUEST_ALIAS_SESSION_KEY, nextAlias);
+  return nextAlias;
+}
+
+async function requestJson(url, { method = 'GET', body = null, headers = {} } = {}) {
+  const safeHeaders = headers && typeof headers === 'object' ? { ...headers } : {};
+  if (body) safeHeaders['Content-Type'] = 'application/json';
+  const sessionToken = String(state.identity && state.identity.sessionToken || '').trim();
+  if (sessionToken && String(url || '').startsWith('/api/')) {
+    safeHeaders['x-lw-session'] = sessionToken;
+  }
   const response = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    credentials: 'same-origin',
+    headers: safeHeaders,
     body: body ? JSON.stringify(body) : undefined
   });
   const text = await response.text();
@@ -242,43 +313,222 @@ async function loadFlags() {
 }
 
 function getPreferredDisplayName() {
-  const nameInput = document.getElementById('name');
-  const fromInput = nameInput ? String(nameInput.value || '').trim() : '';
-  if (fromInput) return fromInput.slice(0, 32);
   const stored = getStoredIdentity();
   if (stored && stored.displayName) return stored.displayName.slice(0, 32);
   return 'Guest';
 }
 
-async function ensureIdentity() {
-  const stored = getStoredIdentity();
-  const guestAlias = stored && stored.guestAlias ? stored.guestAlias : makeGuestAlias();
-  const displayName = getPreferredDisplayName();
+function normalizeDisplayName(value = '') {
+  const cleaned = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  return cleaned.slice(0, 32);
+}
+
+function setAuthStatus(message = '', tone = 'info') {
+  const statusNode = document.getElementById('authStatus');
+  if (!statusNode) return;
+  const safeMessage = String(message || '').trim();
+  statusNode.textContent = safeMessage;
+  statusNode.hidden = !safeMessage;
+  statusNode.setAttribute('data-tone', safeMessage ? String(tone || 'info') : 'info');
+}
+
+function syncAuthActionDisabledStates() {
+  const busy = state.auth.inFlight === true;
+  const guestBtn = document.getElementById('authGuestBtn');
+  const loginBtn = document.getElementById('authLoginBtn');
+  const createBtn = document.getElementById('authCreateBtn');
+  const continueBtn = document.getElementById('authContinueBtn');
+  if (guestBtn) guestBtn.disabled = busy;
+  if (loginBtn) loginBtn.disabled = busy;
+  if (createBtn) createBtn.disabled = busy;
+  if (continueBtn) continueBtn.disabled = busy;
+}
+
+function setAuthBusy(active = false) {
+  const busy = active === true;
+  state.auth.inFlight = busy;
+  syncAuthActionDisabledStates();
+}
+
+function hydratePartyAliasInput() {
+  const nameInput = document.getElementById('name');
+  if (!nameInput) return;
+  const preferredAlias = state.partyAlias || getStoredPartyAlias();
+  if (!String(nameInput.value || '').trim() && preferredAlias) {
+    nameInput.value = preferredAlias.slice(0, 20);
+  }
+}
+
+function applyIdentityBundle(
+  bundle = {},
+  {
+    authMode = 'guest',
+    guestAlias = '',
+    loginHandle = '',
+    sessionToken = '',
+    fallbackDisplayName = '',
+    persist = true
+  } = {}
+) {
+  const user = bundle && bundle.user && typeof bundle.user === 'object' ? bundle.user : null;
+  const profile = bundle && bundle.profile && typeof bundle.profile === 'object' ? bundle.profile : null;
+  const progression = bundle && bundle.progression && typeof bundle.progression === 'object' ? bundle.progression : null;
+  if (!user || !user.userId) {
+    throw new Error('identity_bundle_missing_user');
+  }
+
+  state.identity.userId = String(user.userId || '').trim();
+  state.identity.guestAlias = String(guestAlias || user.guestAlias || '').trim();
+  state.identity.displayName = normalizeDisplayName(
+    (profile && profile.displayName)
+    || fallbackDisplayName
+    || getPreferredDisplayName()
+    || 'Guest'
+  ) || 'Guest';
+  const normalizedAuthMode = (() => {
+    const mode = String(authMode || '').trim().toLowerCase();
+    if (mode === 'local' || mode === 'google') return mode;
+    return 'guest';
+  })();
+  state.identity.authMode = normalizedAuthMode;
+  state.identity.loginHandle = String(
+    loginHandle
+    || (user && user.linkedAccount && user.linkedAccount.providerAccountId)
+    || ''
+  ).trim().toLowerCase();
+  state.identity.sessionToken = String(
+    sessionToken
+    || (bundle && bundle.sessionToken)
+    || ''
+  ).trim();
+  state.profileBundle = {
+    user,
+    profile: profile || null,
+    progression: progression || null
+  };
+  if (persist === true) {
+    setStoredIdentity(state.identity);
+  } else {
+    clearStoredIdentity();
+  }
+  hydratePartyAliasInput();
+}
+
+async function bootstrapGuestIdentity({
+  displayName = '',
+  guestAlias = ''
+} = {}) {
+  const safeDisplayName = normalizeDisplayName(displayName) || 'Guest';
+  const safeGuestAlias = String(guestAlias || '').trim() || getOrCreateSessionGuestAlias();
   const response = await requestJson('/api/identity/guest-session', {
     method: 'POST',
     body: {
-      displayName,
-      guestAlias
+      displayName: safeDisplayName,
+      guestAlias: safeGuestAlias
     }
   });
   if (!response.ok || !response.body || !response.body.user || !response.body.user.userId) {
-    throw new Error('identity_bootstrap_failed');
+    throw new Error(String(response.body && response.body.error || 'guest_identity_bootstrap_failed'));
   }
+  applyIdentityBundle(response.body, {
+    authMode: 'guest',
+    guestAlias: safeGuestAlias,
+    loginHandle: '',
+    sessionToken: String(response.body.sessionToken || '').trim(),
+    fallbackDisplayName: safeDisplayName,
+    persist: false
+  });
+}
 
-  state.identity.userId = String(response.body.user.userId || '');
-  state.identity.guestAlias = guestAlias;
-  state.identity.displayName = String(
-    (response.body.profile && response.body.profile.displayName)
-    || displayName
-    || 'Guest'
-  ).trim() || 'Guest';
-
-  setStoredIdentity(state.identity);
-
-  const partyNameInput = document.getElementById('name');
-  if (partyNameInput && !String(partyNameInput.value || '').trim()) {
-    partyNameInput.value = state.identity.displayName;
+async function bootstrapLocalRegister({
+  handle = '',
+  password = '',
+  displayName = ''
+} = {}) {
+  const safeHandle = String(handle || '').trim().toLowerCase();
+  const safePassword = String(password || '').trim();
+  const safeDisplayName = normalizeDisplayName(displayName);
+  const response = await requestJson('/api/identity/local-register', {
+    method: 'POST',
+    body: {
+      handle: safeHandle,
+      password: safePassword,
+      displayName: safeDisplayName || undefined
+    }
+  });
+  if (!response.ok || !response.body || !response.body.user || !response.body.user.userId) {
+    throw new Error(String(response.body && response.body.error || 'local_register_failed'));
   }
+  applyIdentityBundle(response.body, {
+    authMode: 'local',
+    guestAlias: String(response.body.user && response.body.user.guestAlias || '').trim(),
+    loginHandle: safeHandle,
+    sessionToken: String(response.body.sessionToken || '').trim(),
+    fallbackDisplayName: safeDisplayName || safeHandle
+  });
+}
+
+async function bootstrapLocalLogin({
+  handle = '',
+  password = ''
+} = {}) {
+  const safeHandle = String(handle || '').trim().toLowerCase();
+  const safePassword = String(password || '').trim();
+  const response = await requestJson('/api/identity/local-login', {
+    method: 'POST',
+    body: {
+      handle: safeHandle,
+      password: safePassword
+    }
+  });
+  if (!response.ok || !response.body || !response.body.user || !response.body.user.userId) {
+    throw new Error(String(response.body && response.body.error || 'local_login_failed'));
+  }
+  applyIdentityBundle(response.body, {
+    authMode: 'local',
+    guestAlias: String(response.body.user && response.body.user.guestAlias || '').trim(),
+    loginHandle: safeHandle,
+    sessionToken: String(response.body.sessionToken || '').trim(),
+    fallbackDisplayName: safeHandle
+  });
+}
+
+async function continueStoredIdentity() {
+  const stored = getStoredIdentity();
+  if (!stored || !stored.userId || !stored.sessionToken) {
+    throw new Error('stored_identity_missing');
+  }
+  state.identity.sessionToken = String(stored.sessionToken || '').trim();
+  const response = await requestJson('/api/identity/session-resume', {
+    method: 'POST',
+    body: {
+      sessionToken: state.identity.sessionToken
+    }
+  });
+  if (!response.ok || !response.body || !response.body.user || !response.body.user.userId) {
+    throw new Error(String(response.body && response.body.error || 'account_resume_failed'));
+  }
+  const provider = String(
+    response.body.user
+    && response.body.user.linkedAccount
+    && response.body.user.linkedAccount.provider
+    || stored.authMode
+  ).trim().toLowerCase();
+  const resolvedMode = provider === 'local' || provider === 'google' ? provider : stored.authMode;
+  const resolvedHandle = String(
+    response.body.user
+    && response.body.user.linkedAccount
+    && response.body.user.linkedAccount.providerAccountId
+    || stored.loginHandle
+  ).trim().toLowerCase();
+  applyIdentityBundle(response.body, {
+    authMode: resolvedMode,
+    guestAlias: String(response.body.user && response.body.user.guestAlias || '').trim(),
+    loginHandle: resolvedHandle,
+    sessionToken: String(response.body.sessionToken || state.identity.sessionToken || '').trim(),
+    fallbackDisplayName: stored.displayName
+  });
 }
 
 function getUserId() {
@@ -326,19 +576,44 @@ function renderHome() {
   const profile = state.profileBundle && state.profileBundle.profile ? state.profileBundle.profile : null;
   const progression = state.profileBundle && state.profileBundle.progression ? state.profileBundle.progression : null;
   const soloProgress = getSoloProgressState();
+  const partyAlias = String(state.partyAlias || getStoredPartyAlias() || '').trim();
   const greeting = document.getElementById('homeHubGreeting');
   if (greeting) {
-    greeting.textContent = profile
-      ? `${profile.displayName || 'Guest'}, your cross-mode profile is ready.`
-      : 'Guest profile active. Start Solo or jump into Party.';
+    if (state.identity.authMode === 'local' && state.identity.loginHandle) {
+      greeting.textContent = `Signed in as @${state.identity.loginHandle}. ${profile && profile.displayName ? profile.displayName : 'Player'} is ready for Solo + Party.`;
+    } else {
+      greeting.textContent = profile
+        ? `${profile.displayName || 'Guest'}, temporary guest profile active.`
+        : 'Temporary guest profile active. Start Solo practice or jump into Party.';
+    }
   }
 
   const levelNode = document.getElementById('homeStatLevel');
-  if (levelNode) levelNode.textContent = formatNumber(progression && progression.level);
+  if (levelNode) {
+    levelNode.textContent = state.identity.authMode === 'guest'
+      ? '--'
+      : formatNumber(progression && progression.level);
+  }
   const xpNode = document.getElementById('homeStatXp');
-  if (xpNode) xpNode.textContent = formatNumber(progression && progression.totalXp);
+  if (xpNode) {
+    xpNode.textContent = state.identity.authMode === 'guest'
+      ? '--'
+      : formatNumber(progression && progression.totalXp);
+  }
   const streakNode = document.getElementById('homeStatSoloStreak');
-  if (streakNode) streakNode.textContent = formatNumber(soloProgress.currentStreak);
+  if (streakNode) {
+    streakNode.textContent = state.identity.authMode === 'guest'
+      ? '--'
+      : formatNumber(soloProgress.currentStreak);
+  }
+  const partyStatusNode = document.getElementById('homeStatPartyStatus');
+  if (partyStatusNode) {
+    if (state.identity.authMode === 'guest') {
+      partyStatusNode.textContent = 'Temporary session';
+    } else {
+      partyStatusNode.textContent = partyAlias ? `Alias: ${partyAlias}` : 'Alias not set';
+    }
+  }
 }
 
 function renderProfile() {
@@ -351,11 +626,58 @@ function renderProfile() {
   const identityNode = document.getElementById('profileIdentityLine');
   if (identityNode) identityNode.textContent = `User ID: ${getUserId() || '--'}`;
   const accountTypeNode = document.getElementById('profileAccountType');
-  if (accountTypeNode) accountTypeNode.textContent = String((user && user.kind) || 'guest');
+  if (accountTypeNode) {
+    if (state.identity.authMode === 'google') {
+      accountTypeNode.textContent = 'google_linked';
+    } else if (state.identity.authMode === 'local') {
+      accountTypeNode.textContent = 'local_login';
+    } else {
+      accountTypeNode.textContent = 'guest_temporary';
+    }
+  }
+  const loginHandleNode = document.getElementById('profileLoginHandle');
+  const resolvedLoginHandle = String(
+    state.identity.loginHandle
+    || (user && user.linkedAccount && user.linkedAccount.providerAccountId)
+    || ''
+  ).trim().toLowerCase();
+  if (loginHandleNode) {
+    if (state.identity.authMode === 'google') {
+      loginHandleNode.textContent = resolvedLoginHandle || '--';
+    } else if (state.identity.authMode === 'local') {
+      loginHandleNode.textContent = `@${resolvedLoginHandle || '--'}`;
+    } else {
+      loginHandleNode.textContent = '--';
+    }
+  }
   const createdNode = document.getElementById('profileCreatedAt');
   if (createdNode) createdNode.textContent = formatDateTime(user && user.createdAt);
   const updatedNode = document.getElementById('profileUpdatedAt');
   if (updatedNode) updatedNode.textContent = formatDateTime(profile && profile.updatedAt);
+
+  const displayNameInput = document.getElementById('profileEditDisplayName');
+  if (displayNameInput && document.activeElement !== displayNameInput) {
+    displayNameInput.value = normalizeDisplayName((profile && profile.displayName) || state.identity.displayName || 'Guest');
+  }
+  const bioInput = document.getElementById('profileEditBio');
+  if (bioInput && document.activeElement !== bioInput) {
+    bioInput.value = String(profile && profile.bio || '');
+  }
+  const saveBtn = document.getElementById('profileSaveBtn');
+  const statusNode = document.getElementById('profileSaveStatus');
+  if (state.identity.authMode === 'guest') {
+    if (saveBtn) saveBtn.disabled = true;
+    if (statusNode && !String(statusNode.textContent || '').trim()) {
+      statusNode.textContent = 'Guest profiles are temporary and are not saved.';
+      statusNode.setAttribute('data-tone', 'info');
+    }
+  } else {
+    if (saveBtn && state.auth.inFlight !== true) saveBtn.disabled = false;
+    if (statusNode && String(statusNode.textContent || '').trim() === 'Guest profiles are temporary and are not saved.') {
+      statusNode.textContent = '';
+      statusNode.setAttribute('data-tone', 'info');
+    }
+  }
 
   const bestScoreNode = document.getElementById('profileSoloBestScore');
   if (bestScoreNode) bestScoreNode.textContent = formatNumber(soloProgress.bestScore || 0);
@@ -368,6 +690,7 @@ function renderProfile() {
 function renderProgression() {
   const progression = state.profileBundle && state.profileBundle.progression ? state.profileBundle.progression : null;
   const soloProgress = getSoloProgressState();
+  const isGuest = state.identity.authMode === 'guest';
   const level = Math.max(1, Number(progression && progression.level) || 1);
   const totalXp = Math.max(0, Number(progression && progression.totalXp) || 0);
   const xpIntoLevel = Math.max(0, Number(progression && progression.xpIntoLevel) || 0);
@@ -375,20 +698,24 @@ function renderProgression() {
   const pct = Math.max(0, Math.min(100, (xpIntoLevel / xpForNextLevel) * 100));
 
   const levelNode = document.getElementById('progressionLevel');
-  if (levelNode) levelNode.textContent = formatNumber(level);
+  if (levelNode) levelNode.textContent = isGuest ? '--' : formatNumber(level);
   const totalXpNode = document.getElementById('progressionTotalXp');
-  if (totalXpNode) totalXpNode.textContent = formatNumber(totalXp);
+  if (totalXpNode) totalXpNode.textContent = isGuest ? '--' : formatNumber(totalXp);
   const fillNode = document.getElementById('progressionXpFill');
-  if (fillNode) fillNode.style.width = `${pct.toFixed(1)}%`;
+  if (fillNode) fillNode.style.width = isGuest ? '0%' : `${pct.toFixed(1)}%`;
   const labelNode = document.getElementById('progressionXpLabel');
-  if (labelNode) labelNode.textContent = `${formatNumber(xpIntoLevel)} / ${formatNumber(xpForNextLevel)} XP`;
+  if (labelNode) {
+    labelNode.textContent = isGuest
+      ? 'Guest sessions do not accumulate XP.'
+      : `${formatNumber(xpIntoLevel)} / ${formatNumber(xpForNextLevel)} XP`;
+  }
 
   const runsNode = document.getElementById('progressionSoloRuns');
-  if (runsNode) runsNode.textContent = formatNumber(soloProgress.totalScoredRuns || 0);
+  if (runsNode) runsNode.textContent = isGuest ? '--' : formatNumber(soloProgress.totalScoredRuns || 0);
   const streakNode = document.getElementById('progressionSoloStreak');
-  if (streakNode) streakNode.textContent = formatNumber(soloProgress.currentStreak || 0);
+  if (streakNode) streakNode.textContent = isGuest ? '--' : formatNumber(soloProgress.currentStreak || 0);
   const longestNode = document.getElementById('progressionSoloLongest');
-  if (longestNode) longestNode.textContent = formatNumber(soloProgress.longestStreak || 0);
+  if (longestNode) longestNode.textContent = isGuest ? '--' : formatNumber(soloProgress.longestStreak || 0);
 }
 
 function renderAchievements() {
@@ -398,6 +725,15 @@ function renderAchievements() {
   if (!listNode) return;
 
   listNode.innerHTML = '';
+  if (state.identity.authMode === 'guest') {
+    if (statusNode) statusNode.textContent = 'Guest sessions do not persist achievements.';
+    if (countNode) countNode.textContent = '--';
+    const row = document.createElement('li');
+    row.className = 'empty';
+    row.textContent = 'Sign in with a LobbyWARS account to unlock and save achievements.';
+    listNode.appendChild(row);
+    return;
+  }
   if (state.flags.achievementsEnabled !== true) {
     if (statusNode) statusNode.textContent = 'Achievements are disabled by feature flag.';
     if (countNode) countNode.textContent = '0';
@@ -444,6 +780,15 @@ function renderMetaViews() {
   renderAchievements();
 }
 
+function applyHubNavFeatureVisibility() {
+  const progressionBtn = document.getElementById('hubNavProgression');
+  const achievementsBtn = document.getElementById('hubNavAchievements');
+  const progressionAllowed = state.flags.progressionEnabled === true && state.identity.authMode !== 'guest';
+  const achievementsAllowed = state.flags.achievementsEnabled === true && state.identity.authMode !== 'guest';
+  if (progressionBtn) progressionBtn.hidden = progressionAllowed !== true;
+  if (achievementsBtn) achievementsBtn.hidden = achievementsAllowed !== true;
+}
+
 function setHubNavVisibilityForScreen(screenId = '') {
   const nav = document.getElementById('hubNav');
   if (!nav) return;
@@ -464,7 +809,9 @@ function setActiveRoute(route = '') {
 }
 
 function navigateToRoute(route = 'home') {
-  const safeRoute = Object.prototype.hasOwnProperty.call(HUB_ROUTES, route) ? route : 'home';
+  let safeRoute = Object.prototype.hasOwnProperty.call(HUB_ROUTES, route) ? route : 'home';
+  if (safeRoute === 'progression' && state.flags.progressionEnabled !== true) safeRoute = 'home';
+  if (safeRoute === 'achievements' && state.flags.achievementsEnabled !== true) safeRoute = 'home';
   const screenId = HUB_ROUTES[safeRoute];
   showScreen(screenId);
   setActiveRoute(safeRoute);
@@ -836,6 +1183,7 @@ function renderSoloSummary() {
 function updateSoloActionButtons() {
   const run = state.solo.run;
   const isLocked = state.solo.submitInFlight === true;
+  const guestMode = state.identity.authMode === 'guest';
   const startBtn = document.getElementById('soloStartBtn');
   const startPracticeBtn = document.getElementById('soloStartPracticeBtn');
   const submitBtn = document.getElementById('soloSubmitBtn');
@@ -852,7 +1200,10 @@ function updateSoloActionButtons() {
     && (Number(run.hintsUsed) || 0) < (Number(run.maxHints) || 2)
   );
   const canFinalize = Boolean(run && (run.status === 'solved_pending_finalize' || run.status === 'failed_pending_finalize'));
-  if (startBtn) startBtn.disabled = isLocked;
+  if (startBtn) {
+    startBtn.disabled = isLocked || guestMode;
+    startBtn.title = guestMode ? 'Guest mode supports Practice only.' : '';
+  }
   if (startPracticeBtn) startPracticeBtn.disabled = isLocked;
   if (submitBtn) submitBtn.disabled = isLocked || !canSubmit;
   if (hintBtn) hintBtn.disabled = isLocked || !canHint;
@@ -916,6 +1267,11 @@ function applyRunAndChallenge(run = null, challenge = null) {
 async function startSoloRun({ practice = false } = {}) {
   if (state.solo.submitInFlight) return;
   setSoloSubmitProcessing(false);
+  const guestMode = state.identity.authMode === 'guest';
+  const resolvedPractice = guestMode ? true : practice === true;
+  if (guestMode && practice !== true) {
+    setSoloStatusMessage('Guest mode is temporary: Practice only (no XP, no ranked daily).');
+  }
   if (state.flags.soloEngineEnabled !== true) {
     setSoloStatusMessage('Solo flag is off in meta; attempting start anyway.');
   }
@@ -926,7 +1282,7 @@ async function startSoloRun({ practice = false } = {}) {
     body: {
       userId,
       modeId: SOLO_MODE_ID,
-      practice: practice === true,
+      practice: resolvedPractice,
       clientStartedAtMs: Date.now()
     }
   });
@@ -1080,12 +1436,21 @@ async function finalizeSoloRun() {
 }
 
 async function refreshSoloLeaderboard() {
+  const isGuest = state.identity.authMode === 'guest';
   const userId = getUserId();
+  const list = document.getElementById('soloLeaderboardRows');
+  if (!list) return;
+  if (isGuest) {
+    list.innerHTML = '';
+    const row = document.createElement('li');
+    row.className = 'empty';
+    row.textContent = 'Guest sessions are practice-only and do not appear on ranked daily leaderboards.';
+    list.appendChild(row);
+    return;
+  }
   const response = await requestJson(
     `/api/solo/leaderboards/daily?modeId=${encodeURIComponent(SOLO_MODE_ID)}&limit=20&userId=${encodeURIComponent(userId)}`
   );
-  const list = document.getElementById('soloLeaderboardRows');
-  if (!list) return;
   list.innerHTML = '';
   if (!response.ok || !response.body) {
     const row = document.createElement('li');
@@ -1194,15 +1559,313 @@ function bindHomeActions() {
   }
 }
 
-function bindPartyInputSync() {
+function bindPartyAliasSync() {
   const nameInput = document.getElementById('name');
   if (!nameInput) return;
-  nameInput.addEventListener('change', () => {
-    const safeName = String(nameInput.value || '').trim();
-    if (!safeName) return;
-    state.identity.displayName = safeName.slice(0, 32);
-    setStoredIdentity(state.identity);
+  state.partyAlias = getStoredPartyAlias();
+  if (state.partyAlias && !String(nameInput.value || '').trim()) {
+    nameInput.value = state.partyAlias;
+  }
+  nameInput.addEventListener('input', () => {
+    const safeAlias = String(nameInput.value || '').trim().slice(0, 20);
+    if (safeAlias !== String(nameInput.value || '')) {
+      nameInput.value = safeAlias;
+    }
   });
+  nameInput.addEventListener('change', () => {
+    const safeAlias = String(nameInput.value || '').trim().slice(0, 20);
+    state.partyAlias = safeAlias;
+    setStoredPartyAlias(safeAlias);
+    renderHome();
+  });
+}
+
+function authErrorToMessage(error = '') {
+  const code = String(error || '').trim();
+  if (!code) return 'Authentication failed.';
+  if (code === 'invalid_credentials') return 'Login failed. Check username and password.';
+  if (code === 'account_locked') return 'Account locked after repeated attempts. Wait and try again.';
+  if (code === 'local_handle_taken') return 'That username is already in use.';
+  if (code === 'local_account_exists') return 'This profile is already secured. Use Log In.';
+  if (code === 'invalid_local_register_payload') return 'Username must be 3+ chars and password must be 8+ chars.';
+  if (code === 'invalid_local_login_payload') return 'Enter both username and password.';
+  if (code === 'user_already_linked') return 'This profile is already linked to another login provider.';
+  if (code === 'stored_identity_missing') return 'No saved profile was found on this device.';
+  if (code === 'stored_identity_mismatch') return 'Saved profile is no longer linked to this provider.';
+  if (code === 'account_resume_failed') return 'Saved account could not be resumed.';
+  if (code === 'auth_session_required') return 'Session missing. Please log in again.';
+  if (code === 'auth_session_invalid') return 'Session expired. Please log in again.';
+  if (code === 'auth_user_mismatch') return 'Session does not match this account.';
+  return `Authentication failed (${code}).`;
+}
+
+function resetIdentityRuntimeState() {
+  state.identity = {
+    userId: '',
+    guestAlias: '',
+    displayName: 'Guest',
+    authMode: 'guest',
+    loginHandle: '',
+    sessionToken: ''
+  };
+  state.profileBundle = null;
+  state.achievements = {
+    definitions: [],
+    unlocks: []
+  };
+  state.solo.run = null;
+  state.solo.challenge = null;
+  state.solo.attempts = [];
+  state.solo.summary = null;
+  state.solo.latestHint = '';
+  state.solo.latestHintSlot = '';
+  resetSoloDraftState();
+  applyHubNavFeatureVisibility();
+  refreshAuthContinueButton();
+  syncAuthActionDisabledStates();
+  renderMetaViews();
+  setSoloStatusMessage('Start Daily to lock today\'s run and enter the draft stage.');
+}
+
+function refreshAuthContinueButton() {
+  const continueBtn = document.getElementById('authContinueBtn');
+  if (!continueBtn) return;
+  const stored = getStoredIdentity();
+  if (!stored || !stored.userId || stored.authMode === 'guest' || !stored.sessionToken) {
+    continueBtn.hidden = true;
+    return;
+  }
+  continueBtn.hidden = false;
+  if (stored.authMode === 'local' && stored.loginHandle) {
+    continueBtn.textContent = `Continue @${stored.loginHandle}`;
+  } else {
+    continueBtn.textContent = `Continue ${stored.displayName || 'Profile'}`;
+  }
+}
+
+function showAuthEntryScreen({
+  message = '',
+  tone = 'info'
+} = {}) {
+  const authDisplayInput = document.getElementById('authDisplayName');
+  const authHandleInput = document.getElementById('authLoginHandle');
+  const authPasswordInput = document.getElementById('authPassword');
+  const stored = getStoredIdentity();
+  if (authDisplayInput) authDisplayInput.value = stored && stored.displayName ? stored.displayName : '';
+  if (authHandleInput) authHandleInput.value = stored && stored.authMode !== 'guest' && stored.loginHandle ? stored.loginHandle : '';
+  if (authPasswordInput) authPasswordInput.value = '';
+  const loginBtn = document.getElementById('authLoginBtn');
+  const createBtn = document.getElementById('authCreateBtn');
+  if (loginBtn) loginBtn.textContent = 'Log In';
+  if (createBtn) createBtn.textContent = 'Create Account';
+  refreshAuthContinueButton();
+  syncAuthActionDisabledStates();
+  showScreen('entryAuth');
+  setHubNavVisibilityForScreen('entryAuth');
+  setAuthStatus(message, tone);
+}
+
+async function completeIdentityBootstrap({ skipOnboarding = false } = {}) {
+  await Promise.all([
+    loadProfileBundle(),
+    loadAchievements()
+  ]);
+  renderMetaViews();
+  applyHubNavFeatureVisibility();
+  await refreshSoloLeaderboard();
+  if (state.identity.authMode === 'guest') {
+    setSoloStatusMessage('Guest mode is temporary: Practice only, no XP, no progression save.');
+  }
+  if (!skipOnboarding && shouldShowOnboarding()) {
+    showScreen('dualPathOnboarding');
+    setHubNavVisibilityForScreen('dualPathOnboarding');
+    if (typeof state.onboarding.start === 'function') {
+      state.onboarding.start();
+    }
+    return;
+  }
+  navigateToRoute('home');
+}
+
+async function runAuthAction(action) {
+  if (state.auth.inFlight) return;
+  setAuthBusy(true);
+  setAuthStatus('Authorizing profile...', 'info');
+  try {
+    await action();
+    await completeIdentityBootstrap();
+    setAuthStatus('');
+  } catch (error) {
+    const code = String(error && error.message || error || '').trim();
+    setAuthStatus(authErrorToMessage(code), 'error');
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function saveProfileEdits() {
+  if (state.identity.authMode === 'guest') {
+    return;
+  }
+  const userId = getUserId();
+  if (!userId) return;
+  const saveBtn = document.getElementById('profileSaveBtn');
+  const statusNode = document.getElementById('profileSaveStatus');
+  const displayNameInput = document.getElementById('profileEditDisplayName');
+  const bioInput = document.getElementById('profileEditBio');
+  if (!displayNameInput || !bioInput) return;
+
+  const displayName = normalizeDisplayName(displayNameInput.value || '');
+  if (!displayName || displayName.length < 2) {
+    if (statusNode) {
+      statusNode.textContent = 'Display name must be at least 2 characters.';
+      statusNode.setAttribute('data-tone', 'error');
+    }
+    return;
+  }
+
+  const bio = String(bioInput.value || '').trim().slice(0, 240);
+  if (saveBtn) saveBtn.disabled = true;
+  if (statusNode) {
+    statusNode.textContent = 'Saving profile...';
+    statusNode.setAttribute('data-tone', 'info');
+  }
+
+  try {
+    const response = await requestJson(`/api/meta/profile/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: {
+        displayName,
+        bio
+      }
+    });
+    if (!response.ok || !response.body || !response.body.profile) {
+      const code = String(response.body && response.body.error || response.status);
+      if (statusNode) {
+        statusNode.textContent = `Save failed (${code})`;
+        statusNode.setAttribute('data-tone', 'error');
+      }
+      return;
+    }
+    if (state.profileBundle && typeof state.profileBundle === 'object') {
+      state.profileBundle.profile = response.body.profile;
+    }
+    state.identity.displayName = normalizeDisplayName(response.body.profile.displayName || state.identity.displayName || 'Guest') || 'Guest';
+    setStoredIdentity(state.identity);
+    renderMetaViews();
+    if (statusNode) {
+      statusNode.textContent = 'Profile saved.';
+      statusNode.setAttribute('data-tone', 'success');
+    }
+    showToast('Profile updated.', 'info', 1800);
+  } catch (_error) {
+    if (statusNode) {
+      statusNode.textContent = 'Save failed (network_error)';
+      statusNode.setAttribute('data-tone', 'error');
+    }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function signOutToAuth() {
+  const sessionToken = String(state.identity.sessionToken || '').trim();
+  if (sessionToken) {
+    try {
+      await requestJson('/api/identity/session-signout', {
+        method: 'POST',
+        body: { sessionToken }
+      });
+    } catch (_error) {}
+  }
+  clearOnboardingTimer();
+  clearStoredIdentity();
+  resetIdentityRuntimeState();
+  showAuthEntryScreen({
+    message: 'Profile session cleared. Choose Log In, Create Account, or Play as Guest.',
+    tone: 'info'
+  });
+}
+
+function bindProfileEvents() {
+  const saveBtn = document.getElementById('profileSaveBtn');
+  const switchBtn = document.getElementById('profileSwitchAccountBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => { void saveProfileEdits(); });
+  }
+  if (switchBtn) {
+    switchBtn.addEventListener('click', () => {
+      if (window.confirm('Switch profile and return to the login screen?')) {
+        void signOutToAuth();
+      }
+    });
+  }
+}
+
+function bindAuthEvents() {
+  const guestBtn = document.getElementById('authGuestBtn');
+  const loginBtn = document.getElementById('authLoginBtn');
+  const createBtn = document.getElementById('authCreateBtn');
+  const continueBtn = document.getElementById('authContinueBtn');
+  const displayInput = document.getElementById('authDisplayName');
+  const handleInput = document.getElementById('authLoginHandle');
+  const passwordInput = document.getElementById('authPassword');
+  const authCard = document.getElementById('authEntryCard');
+
+  if (guestBtn) {
+    guestBtn.addEventListener('click', () => {
+      void runAuthAction(async () => {
+        await bootstrapGuestIdentity({
+          displayName: normalizeDisplayName(displayInput && displayInput.value || '') || 'Guest',
+          guestAlias: getOrCreateSessionGuestAlias()
+        });
+      });
+    });
+  }
+
+  if (loginBtn) {
+    loginBtn.addEventListener('click', () => {
+      void runAuthAction(async () => {
+        await bootstrapLocalLogin({
+          handle: String(handleInput && handleInput.value || '').trim().toLowerCase(),
+          password: String(passwordInput && passwordInput.value || '')
+        });
+      });
+    });
+  }
+
+  if (createBtn) {
+    createBtn.addEventListener('click', () => {
+      void runAuthAction(async () => {
+        await bootstrapLocalRegister({
+          handle: String(handleInput && handleInput.value || '').trim().toLowerCase(),
+          password: String(passwordInput && passwordInput.value || ''),
+          displayName: normalizeDisplayName(displayInput && displayInput.value || '')
+        });
+      });
+    });
+  }
+
+  if (continueBtn) {
+    continueBtn.addEventListener('click', () => {
+      void runAuthAction(async () => {
+        await continueStoredIdentity();
+      });
+    });
+  }
+
+  if (authCard) {
+    authCard.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          if (createBtn && !createBtn.disabled) createBtn.click();
+          return;
+        }
+        if (loginBtn && !loginBtn.disabled) loginBtn.click();
+      }
+    });
+  }
 }
 
 function bindScreenStateSync() {
@@ -1229,32 +1892,18 @@ async function initializeDualHub() {
   bindOnboarding();
   bindHomeActions();
   bindSoloUiEvents();
-  bindPartyInputSync();
+  bindPartyAliasSync();
+  bindProfileEvents();
+  bindAuthEvents();
   bindScreenStateSync();
   startSoloCountdownTimer();
   renderSoloHintLine();
-
-  try {
-    await ensureIdentity();
-    await Promise.all([
-      loadProfileBundle(),
-      loadAchievements()
-    ]);
-    renderMetaViews();
-    await refreshSoloLeaderboard();
-  } catch (error) {
-    showToast(`Dual hub init warning: ${String(error && error.message || error)}`, 'warning', 3600);
-  }
-
-  if (shouldShowOnboarding()) {
-    showScreen('dualPathOnboarding');
-    setHubNavVisibilityForScreen('dualPathOnboarding');
-    if (typeof state.onboarding.start === 'function') {
-      state.onboarding.start();
-    }
-  } else {
-    navigateToRoute('home');
-  }
+  applyHubNavFeatureVisibility();
+  renderMetaViews();
+  showAuthEntryScreen({
+    message: 'Choose Log In, Create Account, or Play as Guest to enter LobbyWARS.',
+    tone: 'info'
+  });
 }
 
 if (document.readyState === 'loading') {

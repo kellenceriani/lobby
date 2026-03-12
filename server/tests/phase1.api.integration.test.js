@@ -25,10 +25,13 @@ async function waitForServerReady(baseUrl, timeoutMs = 20000) {
   throw new Error('server_start_timeout');
 }
 
-async function requestJson(url, { method = 'GET', body = null } = {}) {
+async function requestJson(url, { method = 'GET', body = null, headers = {} } = {}) {
   const response = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(headers && typeof headers === 'object' ? headers : {})
+    },
     body: body ? JSON.stringify(body) : undefined
   });
   const text = await response.text();
@@ -78,13 +81,19 @@ async function main() {
     assert.strictEqual(guestSession.status, 201, 'guest-session should create user');
     assert.strictEqual(Boolean(guestSession.body && guestSession.body.user), true, 'guest-session should return user');
     const userId = String(guestSession.body.user.userId || '');
+    const sessionToken = String(guestSession.body && guestSession.body.sessionToken || '');
     assert.strictEqual(Boolean(userId), true, 'userId must be present');
+    assert.strictEqual(Boolean(sessionToken), true, 'session token must be present');
+    const authHeaders = { 'x-lw-session': sessionToken };
 
-    const profileGet = await requestJson(`${baseUrl}/api/meta/profile/${encodeURIComponent(userId)}`);
+    const profileGet = await requestJson(`${baseUrl}/api/meta/profile/${encodeURIComponent(userId)}`, {
+      headers: authHeaders
+    });
     assert.strictEqual(profileGet.status, 200, 'profile read should succeed');
 
     const profilePatch = await requestJson(`${baseUrl}/api/meta/profile/${encodeURIComponent(userId)}`, {
       method: 'PATCH',
+      headers: authHeaders,
       body: {
         displayName: 'Api Tester Prime',
         bio: 'API integration validation.'
@@ -95,6 +104,7 @@ async function main() {
 
     const linkAccount = await requestJson(`${baseUrl}/api/identity/link-account`, {
       method: 'POST',
+      headers: authHeaders,
       body: {
         userId,
         provider: 'discord',
@@ -107,6 +117,7 @@ async function main() {
 
     const xpGrant = await requestJson(`${baseUrl}/api/meta/xp-grants`, {
       method: 'POST',
+      headers: authHeaders,
       body: {
         userId,
         grantId: 'grant_api_test_1',
@@ -120,6 +131,7 @@ async function main() {
 
     const xpGrantDuplicate = await requestJson(`${baseUrl}/api/meta/xp-grants`, {
       method: 'POST',
+      headers: authHeaders,
       body: {
         userId,
         grantId: 'grant_api_test_1',
@@ -130,12 +142,16 @@ async function main() {
     assert.strictEqual(xpGrantDuplicate.status, 200, 'duplicate xp grant should be idempotent');
     assert.strictEqual(Boolean(xpGrantDuplicate.body.idempotent), true, 'duplicate xp grant must be idempotent');
 
-    const xpLedger = await requestJson(`${baseUrl}/api/meta/xp-ledger/${encodeURIComponent(userId)}?limit=10`);
+    const xpLedger = await requestJson(`${baseUrl}/api/meta/xp-ledger/${encodeURIComponent(userId)}?limit=10`, {
+      headers: authHeaders
+    });
     assert.strictEqual(xpLedger.status, 200, 'xp ledger read should succeed');
     assert.strictEqual(Array.isArray(xpLedger.body.entries), true, 'xp ledger entries should be an array');
     assert.strictEqual(xpLedger.body.entries.length >= 1, true, 'xp ledger should have at least one entry');
 
-    const achievements = await requestJson(`${baseUrl}/api/meta/achievements/${encodeURIComponent(userId)}`);
+    const achievements = await requestJson(`${baseUrl}/api/meta/achievements/${encodeURIComponent(userId)}`, {
+      headers: authHeaders
+    });
     assert.strictEqual(achievements.status, 200, 'achievement read should succeed');
     assert.strictEqual(Array.isArray(achievements.body.definitions), true, 'achievement definitions should be present');
     assert.strictEqual(Array.isArray(achievements.body.unlocks), true, 'achievement unlocks should be present');

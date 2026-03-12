@@ -25,10 +25,13 @@ async function waitForServerReady(baseUrl, timeoutMs = 25000) {
   throw new Error('server_start_timeout');
 }
 
-async function requestJson(url, { method = 'GET', body = null } = {}) {
+async function requestJson(url, { method = 'GET', body = null, headers = {} } = {}) {
   const response = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(headers && typeof headers === 'object' ? headers : {})
+    },
     body: body ? JSON.stringify(body) : undefined
   });
   const text = await response.text();
@@ -55,7 +58,10 @@ async function createGuest(baseUrl, { displayName, guestAlias }) {
   });
   assert.strictEqual(response.status, 201, 'guest creation should return 201');
   assert.strictEqual(Boolean(response.body && response.body.user && response.body.user.userId), true, 'guest userId should exist');
-  return String(response.body.user.userId);
+  return {
+    userId: String(response.body.user.userId),
+    sessionToken: String(response.body && response.body.sessionToken || '')
+  };
 }
 
 function challengeSignature(challenge = {}) {
@@ -77,12 +83,13 @@ function buildWeakEntries(seed = 1) {
   };
 }
 
-async function runFailedAttemptSeries(baseUrl, { userId, runId, count = 2, keyPrefix = 'fail' }) {
+async function runFailedAttemptSeries(baseUrl, { userId, runId, count = 2, keyPrefix = 'fail', headers = {} }) {
   let last = null;
   for (let i = 0; i < count; i += 1) {
     const entries = buildWeakEntries(i + 1);
     const submitted = await requestJson(`${baseUrl}/api/solo/runs/submit`, {
       method: 'POST',
+      headers,
       body: {
         userId,
         runId,
@@ -128,14 +135,18 @@ async function main() {
 
     const userA = await createGuest(baseUrl, { displayName: 'Solo A', guestAlias: 'dev:solo-a' });
     const userB = await createGuest(baseUrl, { displayName: 'Solo B', guestAlias: 'dev:solo-b' });
+    const headersA = { 'x-lw-session': userA.sessionToken };
+    const headersB = { 'x-lw-session': userB.sessionToken };
 
     const startA = await requestJson(`${baseUrl}/api/solo/runs/start`, {
       method: 'POST',
-      body: { userId: userA, modeId: 'daily_cipher_clash' }
+      headers: headersA,
+      body: { userId: userA.userId, modeId: 'daily_cipher_clash' }
     });
     const startB = await requestJson(`${baseUrl}/api/solo/runs/start`, {
       method: 'POST',
-      body: { userId: userB, modeId: 'daily_cipher_clash' }
+      headers: headersB,
+      body: { userId: userB.userId, modeId: 'daily_cipher_clash' }
     });
     assert.strictEqual(startA.status, 201, 'startA should create run');
     assert.strictEqual(startB.status, 201, 'startB should create run');
@@ -154,8 +165,9 @@ async function main() {
 
     const submitSolved = await requestJson(`${baseUrl}/api/solo/runs/submit`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         runId: runAId,
         idempotencyKey: 'a-submit-1',
         clientSubmittedAtMs: Date.now(),
@@ -168,8 +180,9 @@ async function main() {
 
     const submitSolvedDuplicate = await requestJson(`${baseUrl}/api/solo/runs/submit`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         runId: runAId,
         idempotencyKey: 'a-submit-1',
         clientSubmittedAtMs: Date.now(),
@@ -182,8 +195,9 @@ async function main() {
 
     const finalizeSolved = await requestJson(`${baseUrl}/api/solo/runs/finalize`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         runId: runAId,
         idempotencyKey: 'a-final-1',
         clientFinalizedAtMs: Date.now()
@@ -196,8 +210,9 @@ async function main() {
 
     const finalizeSolvedDuplicate = await requestJson(`${baseUrl}/api/solo/runs/finalize`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         runId: runAId,
         idempotencyKey: 'a-final-1',
         clientFinalizedAtMs: Date.now()
@@ -213,7 +228,8 @@ async function main() {
 
     const startDailyResume = await requestJson(`${baseUrl}/api/solo/runs/start`, {
       method: 'POST',
-      body: { userId: userA, modeId: 'daily_cipher_clash' }
+      headers: headersA,
+      body: { userId: userA.userId, modeId: 'daily_cipher_clash' }
     });
     assert.strictEqual(startDailyResume.status, 200, 'second daily start should resume existing run');
     assert.strictEqual(Boolean(startDailyResume.body.idempotent), true, 'second daily start should be idempotent');
@@ -227,23 +243,26 @@ async function main() {
 
     const startPractice = await requestJson(`${baseUrl}/api/solo/runs/start`, {
       method: 'POST',
-      body: { userId: userA, modeId: 'daily_cipher_clash', practice: true }
+      headers: headersA,
+      body: { userId: userA.userId, modeId: 'daily_cipher_clash', practice: true }
     });
     assert.strictEqual(startPractice.status, 201, 'explicit practice run should create new run');
     assert.strictEqual(Boolean(startPractice.body.run.practice), true, 'explicit practice start should remain practice');
     const practiceRunId = String(startPractice.body.run.runId || '');
     const practiceLastAttempt = await runFailedAttemptSeries(baseUrl, {
-      userId: userA,
+      userId: userA.userId,
       runId: practiceRunId,
       count: 2,
-      keyPrefix: 'practice-a'
+      keyPrefix: 'practice-a',
+      headers: headersA
     });
     assert.strictEqual(String(practiceLastAttempt.body.run.status), 'failed_pending_finalize', 'practice run should fail after max attempts');
 
     const finalizePractice = await requestJson(`${baseUrl}/api/solo/runs/finalize`, {
       method: 'POST',
+      headers: headersA,
       body: {
-        userId: userA,
+        userId: userA.userId,
         runId: practiceRunId,
         idempotencyKey: 'practice-a-final',
         clientFinalizedAtMs: Date.now()
@@ -255,17 +274,19 @@ async function main() {
     assert.strictEqual(String(finalizePractice.body.summary.xp.status), 'practice_no_xp', 'practice run should grant no XP');
 
     const failedLastAttemptB = await runFailedAttemptSeries(baseUrl, {
-      userId: userB,
+      userId: userB.userId,
       runId: runBId,
       count: 2,
-      keyPrefix: 'fail-b'
+      keyPrefix: 'fail-b',
+      headers: headersB
     });
     assert.strictEqual(String(failedLastAttemptB.body.run.status), 'failed_pending_finalize', 'runB should be ready to finalize as failed');
 
     const finalizeFailedB = await requestJson(`${baseUrl}/api/solo/runs/finalize`, {
       method: 'POST',
+      headers: headersB,
       body: {
-        userId: userB,
+        userId: userB.userId,
         runId: runBId,
         idempotencyKey: 'b-final-1',
         clientFinalizedAtMs: Date.now()
@@ -275,7 +296,10 @@ async function main() {
     assert.strictEqual(String(finalizeFailedB.body.summary.outcome), 'failed', 'runB must finalize as failed');
     assert.strictEqual(Boolean(finalizeFailedB.body.summary.scored), true, 'runB should be scored despite failure');
 
-    const leaderboard = await requestJson(`${baseUrl}/api/solo/leaderboards/daily?modeId=daily_cipher_clash&limit=20&userId=${encodeURIComponent(userA)}`);
+    const leaderboard = await requestJson(
+      `${baseUrl}/api/solo/leaderboards/daily?modeId=daily_cipher_clash&limit=20&userId=${encodeURIComponent(userA.userId)}`,
+      { headers: headersA }
+    );
     assert.strictEqual(leaderboard.status, 200, 'leaderboard endpoint should succeed');
     assert.strictEqual(Number(leaderboard.body.totalEntries) >= 2, true, 'leaderboard should include scored runs');
     assert.strictEqual(Boolean(leaderboard.body.percentileBands && typeof leaderboard.body.percentileBands === 'object'), true, 'percentile bands should exist');
@@ -283,14 +307,17 @@ async function main() {
     assert.strictEqual(Boolean(leaderboard.body.userEntry), true, 'leaderboard should include requested user entry');
 
     const userC = await createGuest(baseUrl, { displayName: 'Solo C', guestAlias: 'dev:solo-c' });
+    const headersC = { 'x-lw-session': userC.sessionToken };
     const startC = await requestJson(`${baseUrl}/api/solo/runs/start`, {
       method: 'POST',
-      body: { userId: userC, modeId: 'daily_cipher_clash' }
+      headers: headersC,
+      body: { userId: userC.userId, modeId: 'daily_cipher_clash' }
     });
     const invalidTimestampSubmit = await requestJson(`${baseUrl}/api/solo/runs/submit`, {
       method: 'POST',
+      headers: headersC,
       body: {
-        userId: userC,
+        userId: userC.userId,
         runId: startC.body.run.runId,
         idempotencyKey: 'c-invalid-ts',
         clientSubmittedAtMs: Date.now() + (10 * 60 * 1000),

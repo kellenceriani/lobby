@@ -537,9 +537,13 @@ const CATEGORY_SIGNAL_OVERRIDES = Object.freeze({
     negative: ['superhero', 'mythological god', 'fictional vigilante']
   }),
   'combat-sports': Object.freeze({
-    core: ['boxing', 'mma', 'kickboxing', 'muay thai', 'grappling', 'fight sport'],
-    related: ['fight camp', 'weight class', 'combat league'],
-    support: ['coach', 'cornerman', 'referee']
+    strictCore: ['muhammad ali', 'floyd mayweather', 'mike tyson', 'jon jones', 'amanda nunes', 'ronda rousey', 'khabib nurmagomedov'],
+    core: ['boxing', 'mma', 'kickboxing', 'muay thai', 'grappling', 'fight sport', 'ufc', 'combat sports'],
+    related: ['fight camp', 'weight class', 'combat league', 'octagon', 'heavyweight champion', 'mixed martial arts'],
+    support: ['coach', 'cornerman', 'referee', 'commentator', 'promoter', 'fight analyst'],
+    primaryName: ['muhammad ali', 'floyd mayweather', 'mike tyson', 'jon jones', 'amanda nunes', 'ronda rousey', 'khabib nurmagomedov', 'conor mcgregor'],
+    supportName: ['dana white', 'joe rogan', 'rocky balboa', 'boxer', 'fighter', 'martial artist', 'ufc commentator', 'fight promoter'],
+    negative: ['basketball', 'nba', 'soccer', 'baseball', 'anime villain', 'fictional ruler', 'superhero', 'fictional boxer', 'sports drama', 'film character']
   }),
   'team-sports': Object.freeze({
     core: ['team sport', 'franchise team', 'league team', 'club side'],
@@ -552,9 +556,31 @@ const CATEGORY_SIGNAL_OVERRIDES = Object.freeze({
     support: ['research team', 'academic institution']
   }),
   'world-leaders': Object.freeze({
-    core: ['head of state', 'prime minister', 'president', 'national leader'],
-    related: ['state policy', 'international summit', 'government leadership'],
-    support: ['diplomatic corps', 'cabinet']
+    strictCore: ['donald trump', 'theodore roosevelt', 'teddy roosevelt', 'john f kennedy', 'jfk', 'henry viii', 'king henry'],
+    core: ['head of state', 'prime minister', 'president', 'national leader', 'monarch', 'king'],
+    related: ['state policy', 'international summit', 'government leadership', 'executive government', 'statecraft'],
+    support: ['diplomatic corps', 'cabinet', 'politician', 'statesman'],
+    primaryName: ['donald trump', 'theodore roosevelt', 'teddy roosevelt', 'john f kennedy', 'john fitzgerald kennedy', 'jfk', 'henry viii', 'king henry', 'abraham lincoln', 'barack obama', 'winston churchill'],
+    supportName: ['president', 'prime minister', 'king', 'monarch', 'head of state', 'politician', 'statesman'],
+    negative: ['fictional ruler', 'fictional king', 'anime character', 'martial artist', 'basketball', 'superhero']
+  }),
+  'marvel-dc': Object.freeze({
+    strictCore: ['marvel', 'dc', 'dc comics', 'marvel comics', 'justice league', 'avengers', 'teen titans'],
+    core: ['superhero', 'comic book', 'comic universe', 'dc comics', 'marvel comics', 'justice league', 'avengers', 'teen titans'],
+    related: ['secret identity', 'superhuman', 'vigilante', 'costumed hero', 'comic continuity'],
+    support: ['hero', 'villain', 'sidekick', 'metahuman', 'mutant', 'bat family'],
+    primaryName: ['superman', 'batman', 'wonder woman', 'spider man', 'spider-man', 'iron man', 'captain america', 'the flash', 'flash', 'robin', 'starfire', 'raven', 'cyborg', 'nightwing', 'teen titans', 'hulk', 'thor', 'doctor strange'],
+    supportName: ['dc comics', 'marvel comics', 'superhero', 'comic book character', 'justice league', 'avengers', 'bat family'],
+    negative: ['one piece', 'nico robin', 'anime series', 'manga', 'basketball', 'politician']
+  }),
+  'scifi-franchises': Object.freeze({
+    strictCore: ['star wars', 'star trek', 'mass effect', 'dune', 'doctor who', 'battlestar galactica', 'the expanse', 'alien franchise'],
+    core: ['science fiction', 'sci fi', 'sci-fi', 'space opera', 'galactic', 'starship', 'interstellar', 'alien worlds'],
+    related: ['space travel', 'faster than light', 'future technology', 'galaxy', 'planetary system', 'extraterrestrial'],
+    support: ['franchise', 'fictional universe', 'video game franchise', 'film franchise'],
+    primaryName: ['star wars', 'star trek', 'mass effect', 'dune', 'doctor who', 'battlestar galactica', 'the expanse', 'blade runner', 'alien franchise', 'halo'],
+    supportName: ['science fiction', 'sci fi', 'sci-fi', 'space opera', 'galactic', 'starship', 'alien'],
+    negative: ['action thriller', 'crime thriller', 'archaeologist', 'adventure film', 'boxing', 'basketball', 'politician', 'fictional boxer']
   }),
   'historical-sites': Object.freeze({
     core: ['historic site', 'heritage site', 'ancient monument', 'archaeological site'],
@@ -598,7 +624,8 @@ const CATEGORY_DOMAIN_NAME_SIGNALS = Object.freeze({
   ]),
   combat_sports: Object.freeze([
     'boxing', 'mma', 'kickboxing', 'muay thai', 'judo', 'wrestling',
-    'Conor McGregor', 'Ronda Rousey', 'Khabib Nurmagomedov', 'Amanda Nunes', 'Floyd Mayweather', 'Jon Jones'
+    'Muhammad Ali', 'Mike Tyson', 'Floyd Mayweather', 'Conor McGregor', 'Ronda Rousey',
+    'Khabib Nurmagomedov', 'Amanda Nunes', 'Jon Jones', 'Dana White', 'Joe Rogan', 'UFC', 'Rocky Balboa'
   ]),
   medical: Object.freeze([
     'Florence Nightingale', 'Jonas Salk', 'Anthony Fauci', 'Atul Gawande', 'Paul Farmer', 'Harvey Cushing',
@@ -631,7 +658,8 @@ const CATEGORY_DOMAIN_NAME_SIGNALS = Object.freeze({
   ]),
   superheroes: Object.freeze([
     'Superman', 'Batman', 'Wonder Woman', 'Spider-Man', 'Iron Man', 'Captain America',
-    'Black Panther', 'Thor', 'Doctor Strange', 'The Flash', 'Hulk', 'Captain Marvel'
+    'Black Panther', 'Thor', 'Doctor Strange', 'The Flash', 'Hulk', 'Captain Marvel',
+    'Robin', 'Starfire', 'Raven', 'Cyborg', 'Nightwing', 'Teen Titans', 'Justice League'
   ]),
   anime: Object.freeze([
     'Naruto Uzumaki', 'Monkey D. Luffy', 'Goku', 'Sailor Moon', 'Eren Yeager', 'Tanjiro Kamado',
@@ -728,7 +756,8 @@ const CATEGORY_DOMAIN_NAME_SIGNALS = Object.freeze({
   ]),
   leaders: Object.freeze([
     'Nelson Mandela', 'Winston Churchill', 'Abraham Lincoln', 'Angela Merkel', 'Jacinda Ardern', 'Theodore Roosevelt',
-    'Margaret Thatcher', 'Barack Obama', 'Lee Kuan Yew', 'Volodymyr Zelenskyy', 'Mahatma Gandhi', 'Franklin D. Roosevelt'
+    'Donald Trump', 'John F. Kennedy', 'JFK', 'Henry VIII', 'King Henry', 'Margaret Thatcher',
+    'Barack Obama', 'Lee Kuan Yew', 'Volodymyr Zelenskyy', 'Mahatma Gandhi', 'Franklin D. Roosevelt'
   ]),
   diplomacy: Object.freeze([
     'Kofi Annan', 'Ban Ki-moon', 'Dag Hammarskjold', 'Henry Kissinger', 'Madeleine Albright', 'Richard Holbrooke',
@@ -1538,6 +1567,84 @@ function resolveCategoryFit({
     categoryFit = Math.min(categoryFit, 44);
   }
 
+  const categoryId = String(category.id || '').toLowerCase();
+  const scifiSpecificEvidenceHits = categoryId === 'scifi-franchises'
+    ? countRuleHits(corpusNormalized, [
+      'star wars',
+      'star trek',
+      'mass effect',
+      'dune',
+      'doctor who',
+      'battlestar galactica',
+      'the expanse',
+      'alien franchise',
+      'blade runner',
+      'science fiction',
+      'sci fi',
+      'sci-fi',
+      'space opera',
+      'galactic',
+      'starship',
+      'interstellar',
+      'alien worlds',
+      'future technology',
+      'extraterrestrial'
+    ], { allowLooseStem: false })
+    : 0;
+  const scifiGenericMediaHits = categoryId === 'scifi-franchises'
+    ? countRuleHits(corpusNormalized, ['franchise', 'film franchise', 'media franchise', 'film', 'series', 'fictional universe'])
+    : 0;
+  const scifiOffDomainHits = categoryId === 'scifi-franchises'
+    ? countRuleHits(corpusNormalized, ['action thriller', 'crime thriller', 'assassin', 'archaeologist', 'adventure film', 'boxing', 'basketball', 'politician', 'fictional boxer'])
+    : 0;
+  const scifiGenericOnlyGuard = categoryId === 'scifi-franchises'
+    && scifiSpecificEvidenceHits <= 0
+    && scifiGenericMediaHits > 0;
+  if (scifiGenericOnlyGuard) {
+    membershipConfidence = Math.min(membershipConfidence, scifiOffDomainHits > 0 ? 28 : 36);
+    categoryFit = Math.min(categoryFit, scifiOffDomainHits > 0 ? 34 : 42);
+    inCategoryBonus = 0;
+    netImpact = Math.min(netImpact, scifiOffDomainHits > 0 ? -10 : -4);
+  }
+
+  const combatRealCompetitorHits = categoryId === 'combat-sports'
+    ? countRuleHits(corpusNormalized, [
+      'muhammad ali',
+      'floyd mayweather',
+      'mike tyson',
+      'jon jones',
+      'amanda nunes',
+      'ronda rousey',
+      'khabib nurmagomedov',
+      'conor mcgregor',
+      'mixed martial artist',
+      'heavyweight champion'
+    ], { allowLooseStem: false })
+    : 0;
+  const combatFictionalOrOffRoleHits = categoryId === 'combat-sports'
+    ? countRuleHits(corpusNormalized, ['fictional boxer', 'sports drama', 'film character', 'anime villain', 'cursed spirit', 'animated character'])
+    : 0;
+  const combatSupportRoleHits = categoryId === 'combat-sports'
+    ? countRuleHits(corpusNormalized, ['promoter', 'executive', 'president', 'commentator', 'podcaster', 'fight analyst', 'combat sports media'])
+    : 0;
+  const combatFictionGuard = categoryId === 'combat-sports'
+    && combatFictionalOrOffRoleHits > 0
+    && combatRealCompetitorHits <= 1;
+  const combatSupportRoleGuard = categoryId === 'combat-sports'
+    && combatSupportRoleHits > 0
+    && combatRealCompetitorHits <= 0;
+  if (combatFictionGuard) {
+    membershipConfidence = Math.min(membershipConfidence, 34);
+    categoryFit = Math.min(categoryFit, 38);
+    inCategoryBonus = 0;
+    netImpact = Math.min(netImpact, -8);
+  } else if (combatSupportRoleGuard) {
+    membershipConfidence = Math.min(membershipConfidence, 48);
+    categoryFit = Math.min(categoryFit, 56);
+    inCategoryBonus = Math.min(inCategoryBonus, 3);
+    netImpact = Math.min(netImpact, 0);
+  }
+
   let categoryStatus = 'not_in_category';
   let categoryStatusLabel = 'NOT IN CATEGORY';
   let categoryStatusTone = 'negative';
@@ -1622,7 +1729,7 @@ function resolveCategoryFit({
     sportsAdjacentHits,
     anchorInclusionHits,
     anchorAliasHits,
-    explain: `Category ${category.displayName}: ${categoryStatusLabel} | fit ${categoryFit}/100, membership ${membershipConfidence}, rank ${withinCategoryPowerRank}, ambiguity ${ambiguityHandling}, impact ${netImpact >= 0 ? '+' : ''}${netImpact} (hits: strict ${strictCoreHits}, core ${coreHits}, related ${relatedHits}, support ${supportHits}, nameCore ${primaryNameHits}, nameSupport ${supportNameHits}, sportsAdj ${sportsAdjacentHits}, negSig ${negativeSignalHits}, inc ${anchorInclusionHits}, alias ${anchorAliasHits}, strong ${strongExampleHits}, weak ${weakExampleHits}, exc ${exclusionHits}).`
+    explain: `Category ${category.displayName}: ${categoryStatusLabel} | fit ${categoryFit}/100, membership ${membershipConfidence}, rank ${withinCategoryPowerRank}, ambiguity ${ambiguityHandling}, impact ${netImpact >= 0 ? '+' : ''}${netImpact} (hits: strict ${strictCoreHits}, core ${coreHits}, related ${relatedHits}, support ${supportHits}, nameCore ${primaryNameHits}, nameSupport ${supportNameHits}, sportsAdj ${sportsAdjacentHits}, negSig ${negativeSignalHits}, inc ${anchorInclusionHits}, alias ${anchorAliasHits}, strong ${strongExampleHits}, weak ${weakExampleHits}, exc ${exclusionHits}${scifiGenericOnlyGuard ? ', scifiGenericGuard 1' : ''}${combatFictionGuard ? ', combatFictionGuard 1' : ''}${combatSupportRoleGuard ? ', combatSupportRoleGuard 1' : ''}).`
   };
 }
 

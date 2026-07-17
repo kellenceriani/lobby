@@ -1475,7 +1475,23 @@ async function fetchCharacterInfo(character, options = {}) {
   const fastRoundMode = mode === 'round' && options && options.fastRoundMode !== false;
   const skipImageEnrichment = Boolean(options && options.skipImageEnrichment);
   const cacheKey = normalizeName(character).toLowerCase();
-  const inflightKey = `${cacheKey}:${mode}${forceRefresh ? ':refresh' : ''}`;
+  const inflightKey = JSON.stringify({
+    c: cacheKey,
+    mode,
+    lane: fastRoundMode ? 'fast' : 'full',
+    img: skipImageEnrichment ? 0 : 1,
+    contextHints: (Array.isArray(options.contextHints) ? options.contextHints : [])
+      .map((hint) => normalizeName(hint).toLowerCase())
+      .filter(Boolean)
+      .slice(0, 8),
+    entityHints: (Array.isArray(options.entityHints) ? options.entityHints : [])
+      .map((hint) => normalizeName(hint).toLowerCase())
+      .filter(Boolean)
+      .slice(0, 8),
+    scenario: normalizeName(options.scenario || '').toLowerCase().slice(0, 120),
+    twist: normalizeName(options.twist || '').toLowerCase().slice(0, 120),
+    refresh: forceRefresh ? 1 : 0
+  });
 
   if (!forceRefresh) {
     const cached = getCachedCharacter(character);
@@ -1573,12 +1589,12 @@ async function fetchCharacterInfo(character, options = {}) {
 
     const stageOneFetches = [
       () => fetchFromWikipediaEnhanced(baseName),
+      () => fetchFromWikipediaSummary(baseName),
       () => fetchFromWikipediaContextualTitle(baseName, contextHints),
       () => fetchFromWikipediaSearchEnhanced(baseName, contextHints, entityHints),
       ...(!isRoundMode ? [() => fetchFromWikipediaOpenSearch(baseName, contextHints)] : []),
       () => fetchFromWikipediaPrefixSearch(baseName),
       ...(!isRoundMode ? [() => fetchFromWikipediaFuzzyToken(baseName)] : []),
-      () => fetchFromWikipediaSummary(baseName),
       () => fetchFromWikidata(baseName, contextHints, entityHints)
     ];
     if (fastRoundMode) {

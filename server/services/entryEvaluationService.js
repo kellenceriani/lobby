@@ -92,7 +92,34 @@ function buildContextCacheKey(character, scenario, twist, options = {}) {
       ? options.teamPool.map((v) => String(v || '').trim().toLowerCase())
       : [],
     categoryId: String(categoryContext && categoryContext.id || '').trim().toLowerCase(),
-    categoryVersion: String(categoryContext && categoryContext.version || '').trim().toLowerCase()
+    categoryVersion: String(categoryContext && categoryContext.version || '').trim().toLowerCase(),
+    fastRoundMode: options && Object.prototype.hasOwnProperty.call(options, 'fastRoundMode')
+      ? options.fastRoundMode === true
+      : null,
+    fastAliasOverride: options && Object.prototype.hasOwnProperty.call(options, 'fastAliasOverride')
+      ? options.fastAliasOverride === true
+      : null,
+    roundQualityPass: options && Object.prototype.hasOwnProperty.call(options, 'roundQualityPass')
+      ? options.roundQualityPass === true
+      : null,
+    skipImageEnrichment: options && Object.prototype.hasOwnProperty.call(options, 'skipImageEnrichment')
+      ? options.skipImageEnrichment === true
+      : null,
+    skipImageBackfill: options && Object.prototype.hasOwnProperty.call(options, 'skipImageBackfill')
+      ? options.skipImageBackfill === true
+      : null,
+    skipSyntheticImageUpgrade: options && Object.prototype.hasOwnProperty.call(options, 'skipSyntheticImageUpgrade')
+      ? options.skipSyntheticImageUpgrade === true
+      : null,
+    skipExternalFactEnrichment: options && Object.prototype.hasOwnProperty.call(options, 'skipExternalFactEnrichment')
+      ? options.skipExternalFactEnrichment === true
+      : null,
+    roundResolveTimeoutMs: Number(options && options.roundResolveTimeoutMs) || 0,
+    roundAliasOverrideTimeoutMs: Number(options && options.roundAliasOverrideTimeoutMs) || 0,
+    imageBackfillTimeoutMs: Number(options && options.imageBackfillTimeoutMs) || 0,
+    imageBackfillBudgetMs: Number(options && options.imageBackfillBudgetMs) || 0,
+    maxImageBackfillQueries: Number(options && options.maxImageBackfillQueries) || 0,
+    externalFactTimeoutMs: Number(options && options.externalFactTimeoutMs) || 0
   });
 }
 

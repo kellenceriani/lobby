@@ -120,7 +120,7 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   kimpossible: ['Kim Possible (character)', 'Kim Possible'],
   peach: ['Princess Peach', 'Peach'],
   princesspeach: ['Princess Peach', 'Princess Peach (character)', 'Mario'],
-  robin: ['Nico Robin (One Piece)', 'Nico Robin', 'Robin (DC Comics)', 'Robin'],
+  robin: ['Robin (DC Comics)', 'Robin', 'Nico Robin (One Piece)', 'Nico Robin'],
   clarkkent: ['Superman', 'Clark Kent'],
   elderwand: ['Elder Wand', 'The Elder Wand'],
   mjolnir: ['Mjölnir', 'Mjolnir'],
@@ -176,8 +176,9 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   sam: ['Samwise Gamgee', 'Sam (singer)', 'Sam'],
   fred: ['Fred Flintstone', 'Fred'],
   jimmy: ['Jimmy Neutron', 'Jimmy'],
-  saber: ['Saber (Fate/stay night)', 'Artoria Pendragon']
-  ,
+  saber: ['Saber (Fate/stay night)', 'Artoria Pendragon'],
+  saberfatestay: ['Saber (Fate/stay night)', 'Artoria Pendragon'],
+  saberfatestaynight: ['Saber (Fate/stay night)', 'Artoria Pendragon'],
   joanofarc: ['Joan of Arc'],
   kinghenry: ['Henry VIII of England', 'Henry V of England'],
   guts: ['Guts (Berserk)'],
@@ -195,6 +196,9 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   einstein: ['Albert Einstein', 'Einstein family'],
   thephantommenace: ['Star Wars: Episode I – The Phantom Menace', 'The Phantom Menace'],
   phantommenace: ['Star Wars: Episode I – The Phantom Menace', 'The Phantom Menace'],
+  masseffect: ['Mass Effect', 'Mass Effect (video game)', 'Mass Effect (franchise)'],
+  starwars: ['Star Wars', 'Star Wars (film)', 'Star Wars franchise'],
+  indianajones: ['Indiana Jones', 'Indiana Jones (franchise)'],
   cartman: ['Eric Cartman'],
   dexterslab: ["Dexter's Laboratory"],
   cowardthecouragelydog: ['Courage the Cowardly Dog'],
@@ -326,6 +330,26 @@ const IMAGE_BACKFILL_ALIAS_HINTS = {
   baymax: ['Baymax', 'Big Hero 6'],
   jeangrey: ['Jean Grey', 'Phoenix (Marvel Comics)'],
   johnwick: ['John Wick'],
+  muhammadali: ['Muhammad Ali'],
+  muhhamadali: ['Muhammad Ali'],
+  rocky: ['Rocky Balboa', 'Rocky'],
+  rockybalboa: ['Rocky Balboa', 'Rocky'],
+  sukuna: ['Ryomen Sukuna', 'Sukuna'],
+  jakethedog: ['Jake the Dog', 'Adventure Time'],
+  jakedog: ['Jake the Dog', 'Adventure Time'],
+  danawhite: ['Dana White', 'Ultimate Fighting Championship'],
+  joerogan: ['Joe Rogan'],
+  lebronjames: ['LeBron James'],
+  lebron: ['LeBron James'],
+  finnthehuman: ['Finn the Human', 'Adventure Time'],
+  brucelee: ['Bruce Lee'],
+  teddyroosevelt: ['Theodore Roosevelt'],
+  theodoreroosevelt: ['Theodore Roosevelt'],
+  jfk: ['John F. Kennedy'],
+  johnfkennedy: ['John F. Kennedy'],
+  donaldtrump: ['Donald Trump'],
+  lordfarquad: ['Lord Farquaad'],
+  lordfarquaad: ['Lord Farquaad'],
   ishigamisenky: ['Senku Ishigami', 'Dr. Stone'],
   krakenmyth: ['Kraken'],
   sherlockh: ['Sherlock Holmes'],
@@ -430,6 +454,21 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     queries: ['Ben 10', 'Ben Tennyson'],
     rejectTitles: ['Ben (disambiguation)'],
     allowTitles: ['Ben 10', 'Ben Tennyson']
+  },
+  masseffect: {
+    queries: ['Mass Effect', 'Mass Effect (video game)', 'Mass Effect (franchise)'],
+    rejectTitles: ['Mass effect (disambiguation)'],
+    allowTitles: ['Mass Effect', 'Mass Effect (video game)', 'Mass Effect (franchise)']
+  },
+  starwars: {
+    queries: ['Star Wars', 'Star Wars (film)', 'Star Wars franchise'],
+    rejectTitles: ['Star Wars (disambiguation)'],
+    allowTitles: ['Star Wars', 'Star Wars (film)', 'Star Wars franchise']
+  },
+  indianajones: {
+    queries: ['Indiana Jones', 'Indiana Jones (franchise)'],
+    rejectTitles: ['Indiana Jones (disambiguation)'],
+    allowTitles: ['Indiana Jones', 'Indiana Jones (franchise)']
   },
   poseidon: {
     queries: ['Poseidon', 'Poseidon (mythology)'],
@@ -952,6 +991,16 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     rejectTitles: ['Saber (disambiguation)'],
     allowTitles: ['Saber (Fate/stay night)', 'Artoria Pendragon']
   },
+  saberfatestay: {
+    queries: ['Saber (Fate/stay night)', 'Artoria Pendragon'],
+    rejectTitles: ['Saber (disambiguation)'],
+    allowTitles: ['Saber (Fate/stay night)', 'Artoria Pendragon']
+  },
+  saberfatestaynight: {
+    queries: ['Saber (Fate/stay night)', 'Artoria Pendragon'],
+    rejectTitles: ['Saber (disambiguation)'],
+    allowTitles: ['Saber (Fate/stay night)', 'Artoria Pendragon']
+  },
   joanofarc: {
     queries: ['Joan of Arc'],
     rejectTitles: ['Joan of Arc (disambiguation)'],
@@ -961,6 +1010,36 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     queries: ['Henry VIII of England', 'Henry V of England'],
     rejectTitles: ['Henry (disambiguation)'],
     allowTitles: ['Henry VIII of England', 'Henry V of England']
+  },
+  teddyroosevelt: {
+    queries: ['Theodore Roosevelt', 'Teddy Roosevelt'],
+    rejectTitles: ['Roosevelt (disambiguation)'],
+    allowTitles: ['Theodore Roosevelt', 'Teddy Roosevelt']
+  },
+  theodoreroosevelt: {
+    queries: ['Theodore Roosevelt', 'Teddy Roosevelt'],
+    rejectTitles: ['Roosevelt (disambiguation)'],
+    allowTitles: ['Theodore Roosevelt', 'Teddy Roosevelt']
+  },
+  jfk: {
+    queries: ['John F. Kennedy', 'John Fitzgerald Kennedy'],
+    rejectTitles: ['JFK (film)', 'JFK (disambiguation)'],
+    allowTitles: ['John F. Kennedy', 'John Fitzgerald Kennedy']
+  },
+  johnfkennedy: {
+    queries: ['John F. Kennedy', 'John Fitzgerald Kennedy'],
+    rejectTitles: ['JFK (film)', 'JFK (disambiguation)'],
+    allowTitles: ['John F. Kennedy', 'John Fitzgerald Kennedy']
+  },
+  donaldtrump: {
+    queries: ['Donald Trump'],
+    rejectTitles: ['Donald Trump (disambiguation)'],
+    allowTitles: ['Donald Trump']
+  },
+  brucelee: {
+    queries: ['Bruce Lee'],
+    rejectTitles: ['Bruce Lee (disambiguation)'],
+    allowTitles: ['Bruce Lee']
   },
   guts: {
     queries: ['Guts (Berserk)', 'Berserk (manga)'],
@@ -1382,6 +1461,76 @@ const RESOLUTION_ALIAS_OVERRIDES = {
     rejectTitles: ['John Wick (disambiguation)'],
     allowTitles: ['John Wick']
   },
+  muhammadali: {
+    queries: ['Muhammad Ali'],
+    rejectTitles: ['Ali (disambiguation)'],
+    allowTitles: ['Muhammad Ali']
+  },
+  muhhamadali: {
+    queries: ['Muhammad Ali'],
+    rejectTitles: ['Ali (disambiguation)'],
+    allowTitles: ['Muhammad Ali']
+  },
+  rocky: {
+    queries: ['Rocky Balboa', 'Rocky'],
+    rejectTitles: ['Rocky (disambiguation)', 'Rocky Mountains'],
+    allowTitles: ['Rocky Balboa', 'Rocky']
+  },
+  rockybalboa: {
+    queries: ['Rocky Balboa', 'Rocky'],
+    rejectTitles: ['Rocky (disambiguation)', 'Rocky Mountains'],
+    allowTitles: ['Rocky Balboa', 'Rocky']
+  },
+  sukuna: {
+    queries: ['Ryomen Sukuna', 'Sukuna'],
+    rejectTitles: ['Sukuna (disambiguation)'],
+    allowTitles: ['Ryomen Sukuna', 'Sukuna']
+  },
+  jakethedog: {
+    queries: ['Jake the Dog', 'Adventure Time'],
+    rejectTitles: ['Jake (disambiguation)'],
+    allowTitles: ['Jake the Dog', 'Adventure Time']
+  },
+  jakedog: {
+    queries: ['Jake the Dog', 'Adventure Time'],
+    rejectTitles: ['Jake (disambiguation)'],
+    allowTitles: ['Jake the Dog', 'Adventure Time']
+  },
+  danawhite: {
+    queries: ['Dana White', 'Ultimate Fighting Championship'],
+    rejectTitles: ['White (surname)', 'Dana (given name)'],
+    allowTitles: ['Dana White', 'Ultimate Fighting Championship']
+  },
+  joerogan: {
+    queries: ['Joe Rogan'],
+    rejectTitles: ['Joe (singer)', 'Rogan (surname)'],
+    allowTitles: ['Joe Rogan']
+  },
+  lebronjames: {
+    queries: ['LeBron James'],
+    rejectTitles: ['James (surname)'],
+    allowTitles: ['LeBron James']
+  },
+  lebron: {
+    queries: ['LeBron James'],
+    rejectTitles: ['James (surname)'],
+    allowTitles: ['LeBron James']
+  },
+  finnthehuman: {
+    queries: ['Finn the Human', 'Adventure Time'],
+    rejectTitles: ['Finn (disambiguation)'],
+    allowTitles: ['Finn the Human', 'Adventure Time']
+  },
+  lordfarquad: {
+    queries: ['Lord Farquaad'],
+    rejectTitles: ['Shrek (disambiguation)'],
+    allowTitles: ['Lord Farquaad']
+  },
+  lordfarquaad: {
+    queries: ['Lord Farquaad'],
+    rejectTitles: ['Shrek (disambiguation)'],
+    allowTitles: ['Lord Farquaad']
+  },
   krakenmyth: {
     queries: ['Kraken', 'Kraken (legendary creature)'],
     rejectTitles: ['The Kraken (disambiguation)'],
@@ -1619,8 +1768,338 @@ const RESOLUTION_ALIAS_OVERRIDES = {
   }
 };
 
+const FAST_KNOWN_ENTITY_RECORDS = Object.freeze({
+  masseffect: {
+    title: 'Mass Effect',
+    aliases: ['Mass Effect', 'Mass Effect franchise', 'Commander Shepard'],
+    categories: ['science fiction franchise', 'space opera', 'video game franchise'],
+    description: 'Mass Effect is a science fiction space-opera video game franchise about interstellar exploration, alien species, military command, survival decisions, and galaxy-scale technology.',
+    confidence: 0.9
+  },
+  starwars: {
+    title: 'Star Wars',
+    aliases: ['Star Wars', 'Star Wars franchise', 'Star Wars universe'],
+    categories: ['science fiction franchise', 'space opera', 'film franchise'],
+    description: 'Star Wars is a science fiction space-opera franchise centered on galactic conflict, starships, alien worlds, Jedi strategy, survival, and large-scale adventure.',
+    confidence: 0.92
+  },
+  johnwick: {
+    title: 'John Wick',
+    aliases: ['John Wick', 'Baba Yaga'],
+    categories: ['action film character', 'assassin', 'crime thriller franchise'],
+    description: 'John Wick is a fictional action-thriller assassin known for elite combat skill, tactical focus, weapons mastery, endurance, and improvising under pressure.',
+    confidence: 0.86
+  },
+  indianajones: {
+    title: 'Indiana Jones',
+    aliases: ['Indiana Jones', 'Henry Jones Jr.'],
+    categories: ['adventure film character', 'archaeologist', 'explorer'],
+    description: 'Indiana Jones is an adventure-film archaeologist and explorer known for field survival, ancient-site investigation, quick improvisation, and practical problem-solving.',
+    confidence: 0.86
+  },
+  theflash: {
+    title: 'The Flash (Barry Allen)',
+    aliases: ['The Flash', 'Barry Allen', 'Flash'],
+    categories: ['DC Comics superhero', 'speedster', 'Justice League'],
+    description: 'The Flash is a DC Comics superhero and Justice League speedster with superhuman speed, rapid reaction time, rescue ability, and time/physics-adjacent comic-book powers.',
+    confidence: 0.9
+  },
+  flash: {
+    title: 'The Flash (Barry Allen)',
+    aliases: ['The Flash', 'Barry Allen', 'Flash'],
+    categories: ['DC Comics superhero', 'speedster', 'Justice League'],
+    description: 'The Flash is a DC Comics superhero and Justice League speedster with superhuman speed, rapid reaction time, rescue ability, and time/physics-adjacent comic-book powers.',
+    confidence: 0.88
+  },
+  wonderwoman: {
+    title: 'Wonder Woman',
+    aliases: ['Wonder Woman', 'Diana Prince'],
+    categories: ['DC Comics superhero', 'Justice League', 'Amazon warrior'],
+    description: 'Wonder Woman is a DC Comics superhero and Justice League member with Amazon combat skill, durability, leadership, flight, and diplomatic judgment.',
+    confidence: 0.9
+  },
+  starfire: {
+    title: 'Starfire (Teen Titans)',
+    aliases: ['Starfire', "Koriand'r", 'Teen Titans'],
+    categories: ['DC Comics superhero', 'Teen Titans', 'alien princess'],
+    description: 'Starfire is a DC Comics and Teen Titans superhero with flight, energy projection, alien durability, combat ability, and team-centered decision-making.',
+    confidence: 0.86
+  },
+  muhammadali: {
+    title: 'Muhammad Ali',
+    aliases: ['Muhammad Ali', 'Cassius Clay'],
+    categories: ['boxing', 'combat sports', 'heavyweight champion'],
+    description: 'Muhammad Ali was a real heavyweight boxing champion and combat-sports icon known for elite striking, footwork, endurance, showmanship, and tactical ring intelligence.',
+    confidence: 0.93
+  },
+  muhhamadali: {
+    title: 'Muhammad Ali',
+    aliases: ['Muhammad Ali', 'Muhhamad Ali', 'Cassius Clay'],
+    categories: ['boxing', 'combat sports', 'heavyweight champion'],
+    description: 'Muhhamad Ali is treated as a typo for Muhammad Ali, the real heavyweight boxing champion and combat-sports icon known for striking, footwork, endurance, and tactical ring intelligence.',
+    confidence: 0.9
+  },
+  rocky: {
+    title: 'Rocky Balboa',
+    aliases: ['Rocky', 'Rocky Balboa'],
+    categories: ['fictional boxer', 'boxing film character', 'sports drama'],
+    description: 'Rocky Balboa is a fictional boxer from the Rocky films, defined by boxing training, stamina, grit, comeback mentality, and ring toughness.',
+    confidence: 0.82
+  },
+  rockybalboa: {
+    title: 'Rocky Balboa',
+    aliases: ['Rocky Balboa', 'Rocky'],
+    categories: ['fictional boxer', 'boxing film character', 'sports drama'],
+    description: 'Rocky Balboa is a fictional boxer from the Rocky films, defined by boxing training, stamina, grit, comeback mentality, and ring toughness.',
+    confidence: 0.84
+  },
+  sukuna: {
+    title: 'Ryomen Sukuna',
+    aliases: ['Sukuna', 'Ryomen Sukuna', 'Jujutsu Kaisen'],
+    categories: ['anime villain', 'Jujutsu Kaisen', 'cursed spirit'],
+    description: 'Ryomen Sukuna is a Jujutsu Kaisen antagonist with supernatural combat power, domain techniques, ruthless strategy, and high adaptability.',
+    confidence: 0.84
+  },
+  jakethedog: {
+    title: 'Jake the Dog',
+    aliases: ['Jake the Dog', 'Jake', 'Adventure Time'],
+    categories: ['animated character', 'Adventure Time', 'shape-shifter'],
+    description: 'Jake the Dog is an Adventure Time hero with magical stretching, shapeshifting, loyalty, improvisation, and relaxed problem-solving under strange conditions.',
+    confidence: 0.84
+  },
+  jakedog: {
+    title: 'Jake the Dog',
+    aliases: ['Jake the Dog', 'Jake', 'Adventure Time'],
+    categories: ['animated character', 'Adventure Time', 'shape-shifter'],
+    description: 'Jake the Dog is an Adventure Time hero with magical stretching, shapeshifting, loyalty, improvisation, and relaxed problem-solving under strange conditions.',
+    confidence: 0.82
+  },
+  danawhite: {
+    title: 'Dana White',
+    aliases: ['Dana White', 'UFC president', 'Ultimate Fighting Championship'],
+    categories: ['combat sports executive', 'UFC', 'mixed martial arts promoter'],
+    description: 'Dana White is a real combat-sports executive and UFC president tied to mixed martial arts promotion, fight matchmaking, event logistics, fighter assessment, and media commentary.',
+    confidence: 0.88
+  },
+  joerogan: {
+    title: 'Joe Rogan',
+    aliases: ['Joe Rogan', 'UFC commentator', 'martial arts commentator'],
+    categories: ['UFC commentator', 'martial arts', 'podcaster', 'combat sports media'],
+    description: 'Joe Rogan is a real UFC commentator, podcaster, and martial-arts practitioner known for fight analysis, live commentary, interviewing, and broad combat-sports literacy.',
+    confidence: 0.86
+  },
+  lebronjames: {
+    title: 'LeBron James',
+    aliases: ['LeBron James', 'LeBron'],
+    categories: ['basketball', 'NBA athlete', 'team sports'],
+    description: 'LeBron James is a real NBA basketball player known for athleticism, leadership, court vision, endurance, and team-sports performance.',
+    confidence: 0.9
+  },
+  lebron: {
+    title: 'LeBron James',
+    aliases: ['LeBron James', 'LeBron'],
+    categories: ['basketball', 'NBA athlete', 'team sports'],
+    description: 'LeBron James is a real NBA basketball player known for athleticism, leadership, court vision, endurance, and team-sports performance.',
+    confidence: 0.86
+  },
+  finnthehuman: {
+    title: 'Finn the Human',
+    aliases: ['Finn the Human', 'Finn', 'Adventure Time'],
+    categories: ['animated character', 'Adventure Time', 'hero'],
+    description: 'Finn the Human is an Adventure Time hero known for courage, sword-fighting, rescue instincts, moral decision-making, and adaptability in surreal fantasy situations.',
+    confidence: 0.84
+  },
+  ben10: {
+    title: 'Ben 10',
+    aliases: ['Ben 10', 'Ben Tennyson', 'Omnitrix'],
+    categories: ['animated superhero', 'science fiction', 'alien transformations'],
+    description: 'Ben 10 is an animated science-fiction superhero franchise/character built around the Omnitrix, alien transformations, improvisation, rescue action, and adapting to bizarre threats.',
+    confidence: 0.86
+  },
+  brucelee: {
+    title: 'Bruce Lee',
+    aliases: ['Bruce Lee', 'Lee Jun-fan'],
+    categories: ['martial artist', 'actor', 'combat performer'],
+    description: 'Bruce Lee was a martial artist, actor, and martial-arts innovator known for speed, discipline, combat skill, film performance, and physical control outside elected government office.',
+    confidence: 0.88
+  },
+  kinghenry: {
+    title: 'Henry VIII of England',
+    aliases: ['King Henry', 'Henry VIII', 'Henry VIII of England'],
+    categories: ['monarch', 'king', 'world leader', 'head of state'],
+    description: 'King Henry is resolved as Henry VIII of England, a real monarch and head of state whose reign involved government leadership, dynastic politics, religious policy, and state power.',
+    confidence: 0.84
+  },
+  saber: {
+    title: 'Saber (Fate/stay night)',
+    aliases: ['Saber', 'Artoria Pendragon', 'Fate/stay night'],
+    categories: ['anime character', 'Fate/stay night', 'fictional knight'],
+    description: 'Saber is Artoria Pendragon from Fate/stay night, a fictional heroic spirit and knight with sword combat, discipline, Arthurian command motifs, and magical endurance.',
+    confidence: 0.84
+  },
+  saberfatestay: {
+    title: 'Saber (Fate/stay night)',
+    aliases: ['Saber', 'Artoria Pendragon', 'Fate/stay night'],
+    categories: ['anime character', 'Fate/stay night', 'fictional knight'],
+    description: 'Saber (Fate Stay) is Artoria Pendragon from Fate/stay night, a fictional heroic spirit and knight with sword combat, discipline, leadership motifs, and magical endurance.',
+    confidence: 0.86
+  },
+  saberfatestaynight: {
+    title: 'Saber (Fate/stay night)',
+    aliases: ['Saber', 'Artoria Pendragon', 'Fate/stay night'],
+    categories: ['anime character', 'Fate/stay night', 'fictional knight'],
+    description: 'Saber (Fate/stay night) is Artoria Pendragon, a fictional heroic spirit and knight with sword combat, discipline, leadership motifs, and magical endurance.',
+    confidence: 0.88
+  },
+  donaldtrump: {
+    title: 'Donald Trump',
+    aliases: ['Donald Trump', 'President Donald Trump'],
+    categories: ['president', 'world leader', 'politician', 'head of state'],
+    description: 'Donald Trump is a real United States president and political leader associated with executive government, public persuasion, crisis messaging, state policy, and high-pressure political decision-making.',
+    confidence: 0.9
+  },
+  teddyroosevelt: {
+    title: 'Theodore Roosevelt',
+    aliases: ['Teddy Roosevelt', 'Theodore Roosevelt', 'President Roosevelt'],
+    categories: ['president', 'world leader', 'politician', 'head of state'],
+    description: 'Teddy Roosevelt is Theodore Roosevelt, a real United States president and world leader known for executive leadership, public charisma, crisis action, reform politics, and outdoor toughness.',
+    confidence: 0.9
+  },
+  theodoreroosevelt: {
+    title: 'Theodore Roosevelt',
+    aliases: ['Theodore Roosevelt', 'Teddy Roosevelt', 'President Roosevelt'],
+    categories: ['president', 'world leader', 'politician', 'head of state'],
+    description: 'Theodore Roosevelt was a real United States president and world leader known for executive leadership, public charisma, crisis action, reform politics, and outdoor toughness.',
+    confidence: 0.92
+  },
+  jfk: {
+    title: 'John F. Kennedy',
+    aliases: ['JFK', 'John F. Kennedy', 'John Fitzgerald Kennedy'],
+    categories: ['president', 'world leader', 'politician', 'head of state'],
+    description: 'JFK is John F. Kennedy, a real United States president and world leader known for executive decision-making, public communication, crisis leadership, and Cold War statecraft.',
+    confidence: 0.9
+  },
+  johnfkennedy: {
+    title: 'John F. Kennedy',
+    aliases: ['John F. Kennedy', 'John Fitzgerald Kennedy', 'JFK'],
+    categories: ['president', 'world leader', 'politician', 'head of state'],
+    description: 'John F. Kennedy was a real United States president and world leader known for executive decision-making, public communication, crisis leadership, and Cold War statecraft.',
+    confidence: 0.92
+  },
+  lordfarquad: {
+    title: 'Lord Farquaad',
+    aliases: ['Lord Farquaad', 'Lord Farquad', 'Duloc'],
+    categories: ['fictional ruler', 'Shrek character', 'animated villain'],
+    description: 'Lord Farquad is treated as a typo for Lord Farquaad, the fictional ruler of Duloc from Shrek. He has authoritarian command traits in an animated fantasy setting.',
+    confidence: 0.82
+  },
+  lordfarquaad: {
+    title: 'Lord Farquaad',
+    aliases: ['Lord Farquaad', 'Duloc'],
+    categories: ['fictional ruler', 'Shrek character', 'animated villain'],
+    description: 'Lord Farquaad is the fictional ruler of Duloc from Shrek. He has authoritarian command traits in an animated fantasy setting.',
+    confidence: 0.84
+  }
+});
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function uniqueResolverStrings(values = [], limit = 24) {
+  const out = [];
+  const seen = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const normalized = normalizeName(value);
+    const key = canonicalizeName(normalized);
+    if (!normalized || !key || seen.has(key)) return;
+    seen.add(key);
+    out.push(normalized);
+  });
+  return out.slice(0, limit);
+}
+
+function resolveFastKnownEntityRecord(character) {
+  const compact = canonicalizeName(character);
+  if (!compact) return null;
+  if (FAST_KNOWN_ENTITY_RECORDS[compact]) {
+    return { key: compact, record: FAST_KNOWN_ENTITY_RECORDS[compact] };
+  }
+  const leetCompact = canonicalizeName(String(character || '')
+    .replace(/[0]/g, 'o')
+    .replace(/[1]/g, 'i')
+    .replace(/[3]/g, 'e')
+    .replace(/[4]/g, 'a')
+    .replace(/[5]/g, 's')
+    .replace(/[7]/g, 't'));
+  if (leetCompact && FAST_KNOWN_ENTITY_RECORDS[leetCompact]) {
+    return { key: leetCompact, record: FAST_KNOWN_ENTITY_RECORDS[leetCompact] };
+  }
+  return null;
+}
+
+function buildFastKnownEntityInfo(character, fetchOptions = {}, existingInfo = null) {
+  const hit = resolveFastKnownEntityRecord(character);
+  if (!hit || !hit.record) return null;
+  const record = hit.record;
+  const title = normalizeName(record.title || character);
+  const existingRealImage = existingInfo && existingInfo.imageUrl && !existingInfo.imageSynthetic
+    ? existingInfo.imageUrl
+    : null;
+  const aliases = uniqueResolverStrings([
+    character,
+    title,
+    ...(Array.isArray(record.aliases) ? record.aliases : [])
+  ]);
+  const categories = uniqueResolverStrings(Array.isArray(record.categories) ? record.categories : [], 18);
+  const confidence = Math.max(0.72, Math.min(0.96, Number(record.confidence) || 0.82));
+  return {
+    source: 'known-entity-index',
+    title,
+    description: normalizeName(record.description || `${title} resolved from the built-in known entity index.`),
+    categories,
+    aliases,
+    confidence,
+    confidenceBand: confidence >= 0.86 ? 'high' : 'medium',
+    imageUrl: existingRealImage || null,
+    imageSynthetic: false,
+    lookupMeta: {
+      ...(existingInfo && existingInfo.lookupMeta && typeof existingInfo.lookupMeta === 'object' ? existingInfo.lookupMeta : {}),
+      knownEntityIndex: true,
+      knownEntityKey: hit.key,
+      externalSource: existingInfo && existingInfo.source ? existingInfo.source : null,
+      mode: fetchOptions && fetchOptions.mode ? fetchOptions.mode : undefined
+    }
+  };
+}
+
+function fetchedInfoIsStrongEnoughForKnownEntity(character, fetchedInfo, knownInfo) {
+  if (!fetchedInfo || typeof fetchedInfo !== 'object') return false;
+  const source = String(fetchedInfo.source || '').toLowerCase();
+  if (fetchedInfo.timeoutFallback || source.includes('fast-fallback') || source.includes('name-only')) return false;
+  if (source.includes('generic-name-fallback') || source.includes('low-signal-ambiguity')) return false;
+
+  const confidence = Number(fetchedInfo.confidence) || 0;
+  const descLen = String(fetchedInfo.description || '').replace(/\s+/g, ' ').trim().length;
+  const titleCompact = canonicalizeName(fetchedInfo.title || fetchedInfo.name);
+  const knownTitleCompact = canonicalizeName(knownInfo && knownInfo.title);
+  const inputCompact = canonicalizeName(character);
+  const knownKey = knownInfo && knownInfo.lookupMeta ? String(knownInfo.lookupMeta.knownEntityKey || '') : '';
+  const titleMatchesKnown = Boolean(titleCompact && knownTitleCompact && titleCompact === knownTitleCompact);
+  const titleMatchesInput = Boolean(titleCompact && inputCompact && titleCompact === inputCompact);
+  const realImage = Boolean(fetchedInfo.imageUrl && !fetchedInfo.imageSynthetic);
+
+  if ((knownKey === 'rocky' || knownKey === 'rockybalboa') && !titleMatchesKnown) return false;
+  if ((titleMatchesKnown || titleMatchesInput) && confidence >= 0.72 && descLen >= 70) return true;
+  if (source.includes('wikipedia') && confidence >= 0.76 && descLen >= 90) return true;
+  if (realImage && confidence >= 0.78 && descLen >= 75) return true;
+  return false;
+}
+
+function chooseKnownEntityFloor(character, fetchedInfo, knownInfo, fetchOptions = {}) {
+  if (!knownInfo) return fetchedInfo;
+  if (fetchedInfoIsStrongEnoughForKnownEntity(character, fetchedInfo, knownInfo)) return fetchedInfo;
+  return buildFastKnownEntityInfo(character, fetchOptions, fetchedInfo) || knownInfo;
 }
 
 function normalizeComparableName(raw = '') {
@@ -1945,13 +2424,39 @@ function buildLowSignalAmbiguityFallbackInfo(character, existingInfo = null) {
 }
 
 async function fetchCharacterInfoWithRoundBudget(character, fetchOptions = {}) {
-  const isFastRound = String(fetchOptions.mode || '').toLowerCase() === 'round'
-    && fetchOptions.fastRoundMode !== false;
-  if (!isFastRound) {
+  const isRoundMode = String(fetchOptions.mode || '').toLowerCase() === 'round';
+  const hasRoundBudget = Number(fetchOptions && fetchOptions.roundResolveTimeoutMs) > 0;
+  const isFastRound = isRoundMode && fetchOptions.fastRoundMode !== false;
+  const shouldUseRoundBudget = isRoundMode && (
+    isFastRound
+    || hasRoundBudget
+    || fetchOptions.roundQualityPass === true
+  );
+  if (!shouldUseRoundBudget) {
     return fetchCharacterInfo(character, fetchOptions);
   }
 
   const timeoutMs = Math.max(250, Number(fetchOptions.roundResolveTimeoutMs) || ROUND_RESOLVE_TIMEOUT_MS);
+  const knownFloor = fetchOptions.forceRefresh ? null : buildFastKnownEntityInfo(character, fetchOptions);
+  if (knownFloor) {
+    const probeTimeoutMs = Math.max(
+      300,
+      Math.min(
+        timeoutMs,
+        Number(fetchOptions && fetchOptions.roundKnownEntityProbeMs) || (fetchOptions.roundQualityPass === true ? 1350 : 650)
+      )
+    );
+    const probeTimeoutToken = { __knownProbeTimeout: true };
+    const probed = await Promise.race([
+      fetchCharacterInfo(character, fetchOptions).catch(() => null),
+      new Promise((resolve) => setTimeout(() => resolve(probeTimeoutToken), probeTimeoutMs))
+    ]);
+    if (probed && probed !== probeTimeoutToken) {
+      return chooseKnownEntityFloor(character, probed, knownFloor, fetchOptions);
+    }
+    return knownFloor;
+  }
+
   let timedOut = false;
   const timeoutToken = { __timeout: true };
   const fetched = await Promise.race([
@@ -2158,7 +2663,8 @@ async function tryBackfillImage(character, info, fetchOptions = {}) {
     return { ...info, imageUrl: cached.imageUrl, imageBackfilled: true };
   }
   if (IMAGE_BACKFILL_INFLIGHT.has(cacheKey)) {
-    const inflight = await IMAGE_BACKFILL_INFLIGHT.get(cacheKey);
+    const joinTimeoutMs = Math.max(150, Number(fetchOptions && fetchOptions.imageBackfillTimeoutMs) || IMAGE_BACKFILL_TIMEOUT_MS);
+    const inflight = await withTimeout(IMAGE_BACKFILL_INFLIGHT.get(cacheKey), joinTimeoutMs);
     return inflight && inflight.imageUrl ? { ...info, imageUrl: inflight.imageUrl, imageBackfilled: true } : info;
   }
 
@@ -2258,6 +2764,7 @@ async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
     || (inputCompact && IMAGE_BACKFILL_ALIAS_HINTS[inputCompact])
   );
   const source = String(info && info.source || '').toLowerCase();
+  const knownEntitySource = source.includes('known-entity-index');
   const trustedSpecificWiki = (mode === 'final' || mode === 'context')
     && titleWordCount >= 2
     && confidence >= (mode === 'final' ? 0.72 : 0.76)
@@ -2285,13 +2792,13 @@ async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
     imageBackfillBudgetMs: mode === 'final'
       ? (preferQualityUpgrade ? Math.max(1100, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS + 350) : Math.min(700, Math.max(550, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)))
       : (preferQualityUpgrade || prefersAliasIdentity ? Math.max(800, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS) : 0),
-    preferSummaryFirst: Boolean(preferQualityUpgrade)
+    preferSummaryFirst: Boolean(preferQualityUpgrade || knownEntitySource)
   };
   const upgraded = await withTimeout(
     tryBackfillImage(character, stripped, upgradeOptions),
     mode === 'final'
       ? (preferQualityUpgrade ? Math.max(1100, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS + 350) : FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)
-      : Math.max(500, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)
+      : Math.max(500, Number(upgradeOptions.imageBackfillBudgetMs) || FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)
   );
   if (upgraded && upgraded.imageUrl) {
     return {
@@ -2553,8 +3060,20 @@ function buildCategoryFetchHints(categoryContext = null) {
     push(entityHints, ['person', 'medical', 'equipment', 'technology']);
   }
   if (id.includes('sport') || id.includes('athlete') || id.includes('martial') || id.includes('combat')) {
-    push(contextHints, ['sports', 'competition', 'training', 'championship']);
-    push(entityHints, ['athlete', 'person', 'team']);
+    push(contextHints, ['sports', 'competition', 'training', 'championship', 'combat sports', 'boxing', 'mma', 'ufc']);
+    push(entityHints, ['athlete', 'person', 'team', 'fighter', 'boxer', 'commentator', 'promoter']);
+  }
+  if (id.includes('marvel') || id.includes('dc') || label.includes('marvel') || /\bdc\b/.test(label)) {
+    push(contextHints, ['marvel', 'dc comics', 'superhero', 'comic book', 'justice league', 'teen titans']);
+    push(entityHints, ['superhero', 'comic book character', 'dc comics', 'marvel comics', 'fictional character']);
+  }
+  if (id.includes('scifi') || id.includes('sci-fi') || label.includes('sci-fi') || label.includes('science fiction')) {
+    push(contextHints, ['science fiction', 'sci-fi', 'space opera', 'galactic', 'starship', 'alien worlds']);
+    push(entityHints, ['science fiction franchise', 'space opera', 'fictional universe', 'franchise']);
+  }
+  if (id.includes('leader') || label.includes('leader') || label.includes('president') || label.includes('prime minister')) {
+    push(contextHints, ['politics', 'government', 'head of state', 'president', 'prime minister', 'statecraft']);
+    push(entityHints, ['person', 'politician', 'world leader', 'head of state', 'monarch']);
   }
   if (id.includes('magic') || id.includes('wizard') || id.includes('sorcer') || label.includes('magic') || label.includes('wizard') || label.includes('sorcer')) {
     push(contextHints, ['magic', 'arcane', 'mystic', 'spellcaster', 'sorcery']);
@@ -3266,6 +3785,33 @@ function buildFetchOptions(character, options = {}, scenario, twist) {
   };
 }
 
+function buildResolverFetchCueText(fetchOptions = {}) {
+  const parts = [
+    ...(Array.isArray(fetchOptions && fetchOptions.contextHints) ? fetchOptions.contextHints : []),
+    ...(Array.isArray(fetchOptions && fetchOptions.entityHints) ? fetchOptions.entityHints : []),
+    ...(Array.isArray(fetchOptions && fetchOptions.nearbyEntries) ? fetchOptions.nearbyEntries : []),
+    fetchOptions && fetchOptions.scenario,
+    fetchOptions && fetchOptions.twist,
+    fetchOptions && fetchOptions.originalScenario,
+    fetchOptions && fetchOptions.originalTwist
+  ];
+  return normalizeName(parts.filter(Boolean).join(' ')).toLowerCase();
+}
+
+function fetchOptionsHaveMarvelDcCue(fetchOptions = {}) {
+  const cueText = buildResolverFetchCueText(fetchOptions);
+  const cueCompact = canonicalizeName(cueText);
+  return /marvel|dc comics|superhero|comic book|justice league|teen titans|batman|gotham/.test(cueText)
+    || /marveldc|dccomics|comicbook|justiceleague|teentitans/.test(cueCompact);
+}
+
+function fetchOptionsHaveOnePieceCue(fetchOptions = {}) {
+  const cueText = buildResolverFetchCueText(fetchOptions);
+  const cueCompact = canonicalizeName(cueText);
+  return /one piece|luffy|zoro|nami|sanji|straw hat/.test(cueText)
+    || /onepiece|strawhat/.test(cueCompact);
+}
+
 function buildDynamicAliasOverride(character, fetchOptions = {}) {
   const compact = canonicalizeName(character);
   if (!compact) return null;
@@ -3299,11 +3845,11 @@ function buildDynamicAliasOverride(character, fetchOptions = {}) {
   const hasMarioCues = ['mario', 'luigi', 'bowser', 'yoshi', 'toad', 'rosalina', 'wario', 'waluigi', 'princesspeach']
     .some((cue) => nearbyCanonicals.has(cue));
   const hasOnePieceCues = ['luffy', 'zoro', 'nami', 'sanji', 'usopp', 'chopper', 'franky', 'brook', 'jinbe', 'jinbei', 'onepiece']
-    .some((cue) => nearbyCanonicals.has(cue));
+    .some((cue) => nearbyCanonicals.has(cue)) || fetchOptionsHaveOnePieceCue(fetchOptions);
   const hasDcBatmanCues = ['batman', 'robin', 'nightwing', 'gotham', 'joker']
-    .some((cue) => nearbyCanonicals.has(cue));
+    .some((cue) => nearbyCanonicals.has(cue)) || fetchOptionsHaveMarvelDcCue(fetchOptions);
   const hasTeenTitansCues = ['raven', 'starfire', 'beastboy', 'cyborg', 'nightwing', 'robin']
-    .some((cue) => nearbyCanonicals.has(cue));
+    .some((cue) => nearbyCanonicals.has(cue)) || fetchOptionsHaveMarvelDcCue(fetchOptions);
 
   if (compact === 'peach' && hasMarioCues) {
     return {
@@ -3314,18 +3860,18 @@ function buildDynamicAliasOverride(character, fetchOptions = {}) {
   }
 
   if (compact === 'robin') {
+    if (hasDcBatmanCues) {
+      return {
+        queries: ['Robin (DC Comics)', 'Robin'],
+        rejectTitles: ['Robin (disambiguation)', 'Nico Robin'],
+        allowTitles: ['Robin (DC Comics)', 'Robin']
+      };
+    }
     if (hasOnePieceCues) {
       return {
         queries: ['Nico Robin (One Piece)', 'Nico Robin', 'Robin (One Piece)'],
         rejectTitles: ['Robin (disambiguation)'],
         allowTitles: ['Nico Robin (One Piece)', 'Nico Robin', 'Robin (One Piece)']
-      };
-    }
-    if (hasDcBatmanCues) {
-      return {
-        queries: ['Robin (DC Comics)', 'Robin'],
-        rejectTitles: ['Robin (disambiguation)'],
-        allowTitles: ['Robin (DC Comics)', 'Robin']
       };
     }
   }
@@ -3468,11 +4014,14 @@ async function tryAliasResolutionOverride(character, info, fetchOptions = {}) {
   return heldCandidate || info;
 }
 
-function applyKnownResolutionPatches(character, info) {
+function applyKnownResolutionPatches(character, info, fetchOptions = {}) {
   const safeInfo = info && typeof info === 'object' ? info : null;
   if (!safeInfo) return info;
   const compact = canonicalizeName(character);
   const title = String(safeInfo.title || '').trim();
+  const cueText = buildResolverFetchCueText(fetchOptions);
+  const hasMarvelDcCue = fetchOptionsHaveMarvelDcCue(fetchOptions);
+  const hasOnePieceCue = fetchOptionsHaveOnePieceCue(fetchOptions);
 
   if (compact === 'swampert' && /list of generation iii pok[eé]mon/i.test(title)) {
     return {
@@ -3495,6 +4044,11 @@ function applyKnownResolutionPatches(character, info) {
       ...safeInfo,
       description: `${String(safeInfo.description || '').replace(/\s+/g, ' ').trim()} Gear 5 refers to Luffy's awakened form with reality-bending, cartoon-like elasticity and a major combat/creativity power spike.`.trim()
     };
+  }
+
+  if (compact === 'rocky' || compact === 'rockybalboa') {
+    const knownRocky = buildFastKnownEntityInfo(character, fetchOptions, safeInfo);
+    if (knownRocky) return knownRocky;
   }
 
   if (compact === 'ashitaka' && (/mount ashitaka/i.test(title) || /princess mononoke/i.test(`${title} ${String(safeInfo.description || '')}`))) {
@@ -4206,17 +4760,29 @@ function applyKnownResolutionPatches(character, info) {
     };
   }
 
-  if (compact === 'starfire'
-    && !/starfire \(teen titans\)|koriand'?r|starfire\b/i.test(`${title} ${String(safeInfo.description || '')}`)
-    && /teen titans|dc/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+  if (compact === 'starfire') {
     return {
       ...safeInfo,
+      source: 'known-entity-index',
       title: 'Starfire (Teen Titans)',
-      description: 'Starfire (Koriand\'r) is a Teen Titans hero with energy projection, flight, and high-durability combat capability.',
+      description: 'Starfire (Koriand\'r) is a DC Comics and Teen Titans superhero with energy projection, flight, alien durability, combat ability, and team-centered judgment.',
+      categories: uniqueResolverStrings([
+        ...(Array.isArray(safeInfo.categories) ? safeInfo.categories : []),
+        'DC Comics superhero',
+        'Teen Titans',
+        'Marvel & DC'
+      ]),
+      aliases: uniqueResolverStrings([
+        ...(Array.isArray(safeInfo.aliases) ? safeInfo.aliases : []),
+        'Starfire',
+        "Koriand'r",
+        'Teen Titans'
+      ]),
       imageUrl: null,
       imageSynthetic: true,
-      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.78),
-      confidenceBand: 'medium'
+      timeoutFallback: false,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.86),
+      confidenceBand: 'high'
     };
   }
 
@@ -4362,7 +4928,38 @@ function applyKnownResolutionPatches(character, info) {
     };
   }
 
-  if (compact === 'robin' && !/nico robin|one piece/i.test(`${title} ${String(safeInfo.description || '')}`)) {
+  if (compact === 'robin' && hasMarvelDcCue) {
+    return {
+      ...safeInfo,
+      source: 'known-entity-index',
+      title: 'Robin (DC Comics)',
+      description: 'Robin is a DC Comics superhero identity associated with Batman, Gotham, the Bat-family, Teen Titans, detective work, agility, gadgets, and team combat.',
+      categories: uniqueResolverStrings([
+        ...(Array.isArray(safeInfo.categories) ? safeInfo.categories : []),
+        'DC Comics superhero',
+        'Batman',
+        'Teen Titans',
+        'Marvel & DC'
+      ]),
+      aliases: uniqueResolverStrings([
+        ...(Array.isArray(safeInfo.aliases) ? safeInfo.aliases : []),
+        'Robin',
+        'Robin (DC Comics)',
+        'Dick Grayson',
+        'Tim Drake',
+        'Damian Wayne'
+      ]),
+      imageUrl: null,
+      imageSynthetic: true,
+      timeoutFallback: false,
+      confidence: Math.max(Number(safeInfo.confidence) || 0, 0.84),
+      confidenceBand: 'high'
+    };
+  }
+
+  if (compact === 'robin'
+    && (hasOnePieceCue || /one piece|luffy|straw hat/i.test(`${title} ${String(safeInfo.description || '')} ${cueText}`))
+    && !/nico robin|one piece/i.test(`${title} ${String(safeInfo.description || '')}`)) {
     return {
       ...safeInfo,
       title: 'Nico Robin',
@@ -4608,7 +5205,13 @@ async function resolveEntryIdentity(input) {
 
   const startedAt = Date.now();
   const fetchOptions = buildFetchOptions(character, options, scenario, twist);
-  const isFastRound = String(fetchOptions.mode || '').toLowerCase() === 'round' && fetchOptions.fastRoundMode !== false;
+  const isRoundMode = String(fetchOptions.mode || '').toLowerCase() === 'round';
+  const isFastRound = isRoundMode && fetchOptions.fastRoundMode !== false;
+  const isBudgetedRound = isRoundMode && (
+    isFastRound
+    || fetchOptions.roundQualityPass === true
+    || Number(fetchOptions.roundResolveTimeoutMs) > 0
+  );
   const compactInput = canonicalizeName(character);
   const roundAliasTimeoutMs = Math.max(250, Number(fetchOptions.roundAliasOverrideTimeoutMs) || ROUND_ALIAS_OVERRIDE_TIMEOUT_MS);
   const roundResolveTimeoutMs = Math.max(250, Number(fetchOptions.roundResolveTimeoutMs) || ROUND_RESOLVE_TIMEOUT_MS);
@@ -4675,7 +5278,7 @@ async function resolveEntryIdentity(input) {
     && FAST_ROUND_GENERIC_NAME_SKIP_ALIAS.has(compactInput);
   if (!skipAliasFirst) {
     try {
-      if (isFastRound) {
+      if (isBudgetedRound) {
         aliasFirstInfo = await withTimeout(
           tryAliasResolutionOverride(character, null, fetchOptions),
           Math.min(roundAliasTimeoutMs, Math.max(250, roundResolveTimeoutMs - 300))
@@ -4691,11 +5294,11 @@ async function resolveEntryIdentity(input) {
   const fetchedInfo = aliasFirstInfo || await fetchCharacterInfoWithRoundBudget(character, fetchOptions);
   let aliasCorrectedInfo = aliasFirstInfo || fetchedInfo;
   if (!isFastRound && !aliasFirstInfo && !skipAliasFirst) {
-    aliasCorrectedInfo = isFastRound
-      ? (await withTimeout(
+    aliasCorrectedInfo = isBudgetedRound
+      ? ((await withTimeout(
         tryAliasResolutionOverride(character, fetchedInfo, fetchOptions),
         Math.min(roundAliasTimeoutMs, Math.max(250, roundResolveTimeoutMs - 300))
-      )) || fetchedInfo
+      )) || fetchedInfo)
       : await tryAliasResolutionOverride(character, fetchedInfo, fetchOptions);
   }
   const upgradedIdentityInfo = fetchOptions.skipIdentityUpgrade
@@ -4703,7 +5306,7 @@ async function resolveEntryIdentity(input) {
     : await tryUpgradeLowFidelityIdentity(character, aliasCorrectedInfo, fetchOptions);
   const ambiguitySafeInfo = applyGenericNameAmbiguityFallback(character, upgradedIdentityInfo, fetchOptions);
   const lowSignalSafeInfo = applyLowSignalAmbiguityFallback(character, ambiguitySafeInfo, fetchOptions);
-  const patchedInfo = applyKnownResolutionPatches(character, lowSignalSafeInfo);
+  const patchedInfo = applyKnownResolutionPatches(character, lowSignalSafeInfo, fetchOptions);
   const dangerousDiffRescuedInfo = fetchOptions.skipIdentityUpgrade
     ? patchedInfo
     : await tryRescueDangerousTitleDiffIdentity(character, patchedInfo, fetchOptions);

@@ -26,8 +26,14 @@ const SOLO_SLOT_FALLBACK_ENTRIES = Object.freeze([
   'Ada Lovelace',
   'Serena Williams'
 ]);
-const SOLO_EVAL_BATCH_CONCURRENCY = Math.max(1, Math.min(4, Number(process.env.SOLO_EVAL_BATCH_CONCURRENCY) || 2));
+const SOLO_EVAL_BATCH_CONCURRENCY = Math.max(1, Math.min(4, Number(process.env.SOLO_EVAL_BATCH_CONCURRENCY) || 4));
 const SOLO_EVAL_QUALITY_MODE = boolEnv('SOLO_EVAL_QUALITY_MODE', true);
+const SOLO_EVAL_QUALITY_RESOLVE_TIMEOUT_MS = Math.max(1200, Math.min(6500, Number(process.env.SOLO_EVAL_QUALITY_RESOLVE_TIMEOUT_MS) || 4200));
+const SOLO_EVAL_QUALITY_ALIAS_TIMEOUT_MS = Math.max(300, Math.min(1400, Number(process.env.SOLO_EVAL_QUALITY_ALIAS_TIMEOUT_MS) || 900));
+const SOLO_EVAL_QUALITY_IMAGE_TIMEOUT_MS = Math.max(350, Math.min(1500, Number(process.env.SOLO_EVAL_QUALITY_IMAGE_TIMEOUT_MS) || 1200));
+const SOLO_EVAL_QUALITY_IMAGE_BUDGET_MS = Math.max(500, Math.min(2200, Number(process.env.SOLO_EVAL_QUALITY_IMAGE_BUDGET_MS) || 1700));
+const SOLO_EVAL_QUALITY_MAX_BACKFILL_QUERIES = Math.max(2, Math.min(7, Number(process.env.SOLO_EVAL_QUALITY_MAX_BACKFILL_QUERIES) || 5));
+const SOLO_EVAL_QUALITY_EXTERNAL_FACT_TIMEOUT_MS = Math.max(180, Math.min(650, Number(process.env.SOLO_EVAL_QUALITY_EXTERNAL_FACT_TIMEOUT_MS) || 420));
 
 const DEFAULT_LIMITS = Object.freeze({
   maxAttempts: 2,
@@ -577,14 +583,20 @@ async function computeAttemptFeedback({
         originalTwist: twist,
         evaluationMode: 'round',
         categoryContext,
+        // Quality mode keeps image/fact enrichment on, but submit still has to honor round pacing.
         fastRoundMode: !SOLO_EVAL_QUALITY_MODE,
+        fastAliasOverride: SOLO_EVAL_QUALITY_MODE,
         roundQualityPass: SOLO_EVAL_QUALITY_MODE,
-        roundResolveTimeoutMs: SOLO_EVAL_QUALITY_MODE ? 2400 : 900,
-        roundAliasOverrideTimeoutMs: SOLO_EVAL_QUALITY_MODE ? 820 : 360,
+        roundResolveTimeoutMs: SOLO_EVAL_QUALITY_MODE ? SOLO_EVAL_QUALITY_RESOLVE_TIMEOUT_MS : 900,
+        roundAliasOverrideTimeoutMs: SOLO_EVAL_QUALITY_MODE ? SOLO_EVAL_QUALITY_ALIAS_TIMEOUT_MS : 360,
         skipImageEnrichment: false,
         skipImageBackfill: false,
         skipSyntheticImageUpgrade: false,
         skipExternalFactEnrichment: !SOLO_EVAL_QUALITY_MODE,
+        imageBackfillTimeoutMs: SOLO_EVAL_QUALITY_MODE ? SOLO_EVAL_QUALITY_IMAGE_TIMEOUT_MS : undefined,
+        imageBackfillBudgetMs: SOLO_EVAL_QUALITY_MODE ? SOLO_EVAL_QUALITY_IMAGE_BUDGET_MS : undefined,
+        maxImageBackfillQueries: SOLO_EVAL_QUALITY_MODE ? SOLO_EVAL_QUALITY_MAX_BACKFILL_QUERIES : undefined,
+        externalFactTimeoutMs: SOLO_EVAL_QUALITY_MODE ? SOLO_EVAL_QUALITY_EXTERNAL_FACT_TIMEOUT_MS : undefined,
         teamPool,
         roundPool: teamPool,
         fetchContext: {

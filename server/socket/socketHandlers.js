@@ -58,6 +58,10 @@ const ROUND4_EVAL_WATCHDOG_MS = Math.max(4000, Math.min(120000, Number(process.e
 const ROUND4_TIMEOUT_FALLBACK_ENABLED = !['0', 'false', 'no', 'off'].includes(
   String(process.env.ROUND4_TIMEOUT_FALLBACK_ENABLED || 'true').toLowerCase()
 );
+const ROUND4_IN_PROGRESS_STALE_MS = Math.max(
+  ROUND4_EVAL_WATCHDOG_MS + 1000,
+  Math.min(180000, Number(process.env.ROUND4_IN_PROGRESS_STALE_MS) || (ROUND4_EVAL_WATCHDOG_MS + 6000))
+);
 const ROUND4_FINAL_LOCK_TIMEOUT_MS = Math.max(8000, Math.min(180000, Number(process.env.ROUND4_FINAL_LOCK_TIMEOUT_MS) || 25000));
 const ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS = Math.max(0, Math.min(120000, Number(process.env.ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS) || 7000));
 const draftWarmupDedupe = new Map();
@@ -1826,8 +1830,19 @@ function registerSocketHandlers(io) {
       }
 
       if (game.round4InProgress) {
-        console.log(`[Round4 socket] Ignoring duplicate evaluateRound4 from ${name} in room ${room} (already in progress)`);
-        return;
+        const inProgressStartedAt = Number(game.round4InProgressStartedAtMs) || 0;
+        const inProgressElapsedMs = inProgressStartedAt > 0 ? Math.max(0, Date.now() - inProgressStartedAt) : 0;
+        const staleInProgress = inProgressStartedAt > 0 && inProgressElapsedMs >= ROUND4_IN_PROGRESS_STALE_MS;
+        if (!staleInProgress) {
+          console.log(`[Round4 socket] Ignoring duplicate evaluateRound4 from ${name} in room ${room} (already in progress)`);
+          return;
+        }
+        console.warn(
+          `[Round4 socket] Clearing stale Round 4 in-progress flag for room ${room} ` +
+          `after ${inProgressElapsedMs}ms without cached results.`
+        );
+        game.round4InProgress = false;
+        game.round4InProgressStartedAtMs = 0;
       }
 
       console.log(`🎮 Server-authoritative Round 4 evaluation requested by ${name} in room ${room}`);
@@ -1835,6 +1850,7 @@ function registerSocketHandlers(io) {
       try {
         const evalStartedAt = Date.now();
         game.round4InProgress = true;
+        game.round4InProgressStartedAtMs = evalStartedAt;
         const evaluationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const precomputeStore = game && game.evalPrecompute && typeof game.evalPrecompute === 'object'
           ? game.evalPrecompute
@@ -2010,7 +2026,10 @@ function registerSocketHandlers(io) {
         console.error('❌ Round 4 evaluation error:', error);
         socket.emit('round4EvaluationError', { message: 'Failed to evaluate Round 4 teams.' });
       } finally {
-        if (game) game.round4InProgress = false;
+        if (game) {
+          game.round4InProgress = false;
+          game.round4InProgressStartedAtMs = 0;
+        }
         markRoomsDirty();
       }
     });

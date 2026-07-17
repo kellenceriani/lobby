@@ -2707,6 +2707,7 @@ async function startFinalRound(io, roomCode) {
   const game = rooms[roomCode].gameState;
   setGamePhase(game, roomCode, 'AI_EVALUATION');
   game.round4InProgress = false;
+  game.round4InProgressStartedAtMs = 0;
   game.round4Applied = false;
   game.round4Results = null;
   game.finalResultsReady = {};

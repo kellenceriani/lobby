@@ -2,6 +2,7 @@ const path = require('path');
 
 process.env.ROUND4_EVAL_WATCHDOG_MS = process.env.ROUND4_EVAL_WATCHDOG_MS || '200';
 process.env.ROUND4_TIMEOUT_FALLBACK_ENABLED = process.env.ROUND4_TIMEOUT_FALLBACK_ENABLED || 'true';
+process.env.ROUND4_IN_PROGRESS_STALE_MS = process.env.ROUND4_IN_PROGRESS_STALE_MS || '450';
 process.env.ROUND4_FINAL_LOCK_TIMEOUT_MS = process.env.ROUND4_FINAL_LOCK_TIMEOUT_MS || '300';
 process.env.ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS = process.env.ROUND4_FINAL_AUTO_ADVANCE_GRACE_MS || '200';
 
@@ -181,6 +182,24 @@ async function run() {
     && Number.isFinite(Number(entry.payload.elapsedMs))
   ));
 
+  rooms[room].gameState = buildGameState();
+  rooms[room].gameState.round4InProgress = true;
+  rooms[room].gameState.round4InProgressStartedAtMs = Date.now() - 8000;
+
+  const staleEvalRequestedAtMs = Date.now();
+  await hostSocket.trigger('evaluateRound4');
+
+  let staleRound4EvaluatedEvent = null;
+  for (let i = 0; i < 80; i += 1) {
+    staleRound4EvaluatedEvent = io.roomEvents.find((entry) => (
+      entry.room === room
+      && entry.eventName === 'round4Evaluated'
+      && Number(entry.atMs) >= staleEvalRequestedAtMs
+    ));
+    if (staleRound4EvaluatedEvent) break;
+    await sleep(120);
+  }
+
   const checks = [
     {
       id: 'C1',
@@ -202,6 +221,11 @@ async function run() {
       id: 'C4',
       label: 'Final-results fail-safe emitted finalRoundResults with only host ready',
       pass: Boolean(finalRoundResultsEvent)
+    },
+    {
+      id: 'C5',
+      label: 'Stale round4InProgress state recovers instead of ignoring retries forever',
+      pass: Boolean(staleRound4EvaluatedEvent)
     }
   ];
 

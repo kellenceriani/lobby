@@ -18,6 +18,11 @@ const FINAL_REFINE_CONFIDENCE_THRESHOLD = 0.68;
 const MAX_REFINE_PER_TEAM = 1;
 const ROUND4_TEAM_CONCURRENCY = Math.max(1, Math.min(6, Number(process.env.ROUND4_TEAM_CONCURRENCY) || 3));
 const ROUND4_ENTRY_CONCURRENCY = Math.max(1, Math.min(6, Number(process.env.ROUND4_ENTRY_CONCURRENCY) || 3));
+const ROUND4_FINAL_RESOLVE_TIMEOUT_MS = Math.max(900, Math.min(6000, Number(process.env.ROUND4_FINAL_RESOLVE_TIMEOUT_MS) || 3600));
+const ROUND4_FINAL_ALIAS_TIMEOUT_MS = Math.max(300, Math.min(2000, Number(process.env.ROUND4_FINAL_ALIAS_TIMEOUT_MS) || 900));
+const ROUND4_FINAL_KNOWN_PROBE_MS = Math.max(300, Math.min(2500, Number(process.env.ROUND4_FINAL_KNOWN_PROBE_MS) || 1400));
+const ROUND4_FINAL_IMAGE_TIMEOUT_MS = Math.max(250, Math.min(2200, Number(process.env.ROUND4_FINAL_IMAGE_TIMEOUT_MS) || 1100));
+const ROUND4_FINAL_EXTERNAL_FACT_TIMEOUT_MS = Math.max(150, Math.min(1500, Number(process.env.ROUND4_FINAL_EXTERNAL_FACT_TIMEOUT_MS) || 450));
 
 function isRound4RefineEnabled() {
   const raw = process.env.ROUND4_REFINE_ENABLED;
@@ -161,6 +166,15 @@ function buildFinalEvalOptions({ char, draftedMeta, scenario, twist, teamPool, r
     categoryContext: categoryContext || null,
     teamPool: Array.isArray(teamPool) ? teamPool : [],
     roundPool: Array.isArray(roundPool) ? roundPool : [],
+    roundQualityPass: true,
+    fastRoundMode: false,
+    roundResolveTimeoutMs: ROUND4_FINAL_RESOLVE_TIMEOUT_MS,
+    roundAliasOverrideTimeoutMs: ROUND4_FINAL_ALIAS_TIMEOUT_MS,
+    roundKnownEntityProbeMs: ROUND4_FINAL_KNOWN_PROBE_MS,
+    imageBackfillTimeoutMs: ROUND4_FINAL_IMAGE_TIMEOUT_MS,
+    imageBackfillBudgetMs: ROUND4_FINAL_IMAGE_TIMEOUT_MS,
+    maxImageBackfillQueries: 2,
+    externalFactTimeoutMs: ROUND4_FINAL_EXTERNAL_FACT_TIMEOUT_MS,
     fetchContext: {
       scenario,
       twist,

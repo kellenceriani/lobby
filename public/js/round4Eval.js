@@ -1517,14 +1517,28 @@ async function runWithConcurrency(items, concurrency, mapper) {
   await Promise.all(workers);
 }
 
-function waitNextFrames(count = 2) {
+function waitNextFrames(count = 2, timeoutMs = 700) {
   const safeCount = Math.max(1, Number(count) || 1);
   return new Promise((resolve) => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      resolve();
+      return;
+    }
+
+    let settled = false;
     let remaining = safeCount;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timerId) window.clearTimeout(timerId);
+      resolve();
+    };
+    const timerId = window.setTimeout(finish, Math.max(80, Number(timeoutMs) || 700));
     const step = () => {
+      if (settled) return;
       remaining -= 1;
       if (remaining <= 0) {
-        resolve();
+        finish();
         return;
       }
       window.requestAnimationFrame(step);
@@ -1547,7 +1561,7 @@ function primeAnimationPipeline() {
       }
     }
 
-    await waitNextFrames(3);
+    await waitNextFrames(3, 700);
 
     const stage = document.querySelector('#round4EvalScreen .eval-cinematic-stage');
     const heroHost = document.getElementById('evalHeroHost');

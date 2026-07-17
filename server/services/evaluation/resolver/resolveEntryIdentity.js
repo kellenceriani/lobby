@@ -1783,6 +1783,118 @@ const FAST_KNOWN_ENTITY_RECORDS = Object.freeze({
     description: 'Star Wars is a science fiction space-opera franchise centered on galactic conflict, starships, alien worlds, Jedi strategy, survival, and large-scale adventure.',
     confidence: 0.92
   },
+  batman: {
+    title: 'Batman',
+    aliases: ['Batman', 'Bruce Wayne', 'The Dark Knight'],
+    categories: ['DC Comics superhero', 'detective', 'martial artist', 'Justice League'],
+    description: 'Batman is Bruce Wayne, a DC Comics superhero and detective known for tactical planning, investigation, stealth, martial arts, gadgets, intimidation, and crisis leadership.',
+    confidence: 0.92
+  },
+  superman: {
+    title: 'Superman',
+    aliases: ['Superman', 'Clark Kent', 'Kal-El'],
+    categories: ['DC Comics superhero', 'Justice League', 'Kryptonian'],
+    description: 'Superman is a DC Comics superhero with flight, super strength, speed, durability, heat vision, rescue instincts, moral restraint, and broad public trust.',
+    confidence: 0.93
+  },
+  spiderman: {
+    title: 'Spider-Man',
+    aliases: ['Spider-Man', 'Peter Parker', 'Miles Morales'],
+    categories: ['Marvel Comics superhero', 'Avengers', 'web-slinger'],
+    description: 'Spider-Man is a Marvel superhero known for agility, wall-crawling, spider-sense, web shooters, improvisation, rescue work, and strong responsibility under pressure.',
+    confidence: 0.91
+  },
+  narutouzumaki: {
+    title: 'Naruto Uzumaki',
+    aliases: ['Naruto Uzumaki', 'Naruto'],
+    categories: ['anime protagonist', 'Naruto', 'shinobi', 'ninja'],
+    description: 'Naruto Uzumaki is the Naruto anime and manga protagonist, a shinobi with shadow clones, chakra control, resilience, leadership growth, mobility, and high-pressure combat instincts.',
+    confidence: 0.9
+  },
+  naruto: {
+    title: 'Naruto Uzumaki',
+    aliases: ['Naruto', 'Naruto Uzumaki'],
+    categories: ['anime protagonist', 'Naruto', 'shinobi', 'ninja'],
+    description: 'Naruto is treated as Naruto Uzumaki, the shinobi protagonist known for shadow clones, chakra control, resilience, mobility, leadership growth, and high-pressure combat instincts.',
+    confidence: 0.88
+  },
+  monkeydluffy: {
+    title: 'Monkey D. Luffy',
+    aliases: ['Monkey D. Luffy', 'Luffy', 'Straw Hat Luffy'],
+    categories: ['anime protagonist', 'One Piece', 'pirate captain'],
+    description: 'Monkey D. Luffy is the One Piece protagonist and Straw Hat captain, known for rubber-like powers, extreme endurance, combat creativity, leadership, loyalty, and pirate adventure instincts.',
+    confidence: 0.9
+  },
+  luffy: {
+    title: 'Monkey D. Luffy',
+    aliases: ['Luffy', 'Monkey D. Luffy', 'Straw Hat Luffy'],
+    categories: ['anime protagonist', 'One Piece', 'pirate captain'],
+    description: 'Luffy is treated as Monkey D. Luffy, the One Piece protagonist known for rubber-like powers, endurance, combat creativity, leadership, loyalty, and pirate adventure instincts.',
+    confidence: 0.88
+  },
+  goku: {
+    title: 'Goku',
+    aliases: ['Goku', 'Son Goku', 'Dragon Ball'],
+    categories: ['anime protagonist', 'Dragon Ball', 'martial artist', 'Saiyan'],
+    description: 'Goku is the Dragon Ball martial artist and Saiyan hero known for superhuman strength, speed, energy attacks, battle adaptation, training discipline, and tournament combat.',
+    confidence: 0.9
+  },
+  aang: {
+    title: 'Aang',
+    aliases: ['Aang', 'Avatar Aang', 'Avatar: The Last Airbender'],
+    categories: ['animated hero', 'Avatar', 'airbender', 'elemental magic'],
+    description: 'Aang is the Avatar: The Last Airbender hero, an airbender and Avatar with elemental bending, mobility, diplomacy, spiritual awareness, restraint, and team leadership.',
+    confidence: 0.88
+  },
+  elsa: {
+    title: 'Elsa',
+    aliases: ['Elsa', 'Queen Elsa', 'Frozen'],
+    categories: ['Disney character', 'Frozen', 'ice magic', 'queen'],
+    description: 'Elsa is the Frozen queen with powerful ice magic, environmental control, emotional discipline, resilience, leadership duties, and strong protective instincts.',
+    confidence: 0.86
+  },
+  mario: {
+    title: 'Mario',
+    aliases: ['Mario', 'Super Mario', 'Mario Mario'],
+    categories: ['video game character', 'Nintendo', 'platforming hero'],
+    description: 'Mario is Nintendo Super Mario hero, known for platforming agility, jumping skill, durability, power-up use, rescue missions, kart racing, sports, and adaptable problem-solving.',
+    confidence: 0.88
+  },
+  link: {
+    title: 'Link',
+    aliases: ['Link', 'The Legend of Zelda', 'Hero of Hyrule'],
+    categories: ['video game character', 'The Legend of Zelda', 'swordsman', 'adventurer'],
+    description: 'Link is The Legend of Zelda hero, a swordsman and adventurer known for courage, puzzle solving, archery, tools, exploration, monster fighting, and survival instincts.',
+    confidence: 0.88
+  },
+  ashketchum: {
+    title: 'Ash Ketchum',
+    aliases: ['Ash Ketchum', 'Pokemon Trainer Ash', 'Satoshi'],
+    categories: ['anime protagonist', 'Pokemon', 'trainer'],
+    description: 'Ash Ketchum is the Pokemon anime trainer known for creature strategy, improvisation, team bonding, travel endurance, competitive battling, and persistent tournament growth.',
+    confidence: 0.86
+  },
+  spongebobsquarepants: {
+    title: 'SpongeBob SquarePants',
+    aliases: ['SpongeBob SquarePants', 'SpongeBob'],
+    categories: ['animated character', 'Nickelodeon', 'undersea comedy'],
+    description: 'SpongeBob SquarePants is an animated Nickelodeon character known for optimism, resilience, fast learning, unusual durability, teamwork, cooking skill, and chaotic problem-solving.',
+    confidence: 0.86
+  },
+  spongebob: {
+    title: 'SpongeBob SquarePants',
+    aliases: ['SpongeBob', 'SpongeBob SquarePants'],
+    categories: ['animated character', 'Nickelodeon', 'undersea comedy'],
+    description: 'SpongeBob is treated as SpongeBob SquarePants, an animated character known for optimism, resilience, unusual durability, teamwork, cooking skill, and chaotic problem-solving.',
+    confidence: 0.84
+  },
+  hermionegranger: {
+    title: 'Hermione Granger',
+    aliases: ['Hermione Granger', 'Hermione', 'Harry Potter'],
+    categories: ['Harry Potter character', 'witch', 'student leader'],
+    description: 'Hermione Granger is a Harry Potter character and skilled witch known for intelligence, research, spellcraft, planning, moral courage, loyalty, and rapid problem-solving.',
+    confidence: 0.9
+  },
   johnwick: {
     title: 'John Wick',
     aliases: ['John Wick', 'Baba Yaga'],
@@ -1793,9 +1905,65 @@ const FAST_KNOWN_ENTITY_RECORDS = Object.freeze({
   indianajones: {
     title: 'Indiana Jones',
     aliases: ['Indiana Jones', 'Henry Jones Jr.'],
-    categories: ['adventure film character', 'archaeologist', 'explorer'],
-    description: 'Indiana Jones is an adventure-film archaeologist and explorer known for field survival, ancient-site investigation, quick improvisation, and practical problem-solving.',
-    confidence: 0.86
+    categories: ['adventure film character', 'archaeologist', 'explorer', 'field survival', 'expedition leader'],
+    description: 'Indiana Jones is an adventure-film archaeologist and expedition leader known for field survival, navigation, ancient-site investigation, limited-supply improvisation, hazard response, and practical problem-solving.',
+    confidence: 0.9
+  },
+  serenawilliams: {
+    title: 'Serena Williams',
+    aliases: ['Serena Williams'],
+    categories: ['tennis', 'athlete', 'champion'],
+    description: 'Serena Williams is a real tennis champion known for elite power, serve quality, competitive resilience, athletic discipline, pressure performance, and tactical court awareness.',
+    confidence: 0.92
+  },
+  cleopatra: {
+    title: 'Cleopatra',
+    aliases: ['Cleopatra', 'Cleopatra VII'],
+    categories: ['historical figure', 'Egyptian queen', 'political leader'],
+    description: 'Cleopatra VII was a historical Egyptian queen known for political strategy, diplomacy, multilingual intelligence, alliance building, cultural leadership, and high-stakes crisis rule.',
+    confidence: 0.9
+  },
+  joanofarc: {
+    title: 'Joan of Arc',
+    aliases: ['Joan of Arc', 'Jeanne d Arc'],
+    categories: ['historical figure', 'military leader', 'saint'],
+    description: 'Joan of Arc was a historical French military figure known for morale leadership, battlefield courage, religious conviction, symbolic influence, and crisis-era command presence.',
+    confidence: 0.9
+  },
+  alberteinstein: {
+    title: 'Albert Einstein',
+    aliases: ['Albert Einstein', 'Einstein'],
+    categories: ['scientist', 'physicist', 'theorist'],
+    description: 'Albert Einstein was a real theoretical physicist known for relativity, scientific reasoning, creativity, mathematical insight, problem framing, and deep conceptual analysis.',
+    confidence: 0.94
+  },
+  katnisseverdeen: {
+    title: 'Katniss Everdeen',
+    aliases: ['Katniss Everdeen', 'Katniss', 'The Hunger Games'],
+    categories: ['fictional heroine', 'The Hunger Games', 'archer', 'survivor'],
+    description: 'Katniss Everdeen is The Hunger Games heroine known for archery, survival skills, stealth, resourcefulness, moral resolve, public symbolism, and resistance leadership.',
+    confidence: 0.88
+  },
+  laracroft: {
+    title: 'Lara Croft',
+    aliases: ['Lara Croft', 'Tomb Raider'],
+    categories: ['video game character', 'archaeologist', 'adventurer'],
+    description: 'Lara Croft is the Tomb Raider adventurer known for archaeology, climbing, marksmanship, puzzle solving, survival, exploration, and physical resilience under danger.',
+    confidence: 0.88
+  },
+  captainpicard: {
+    title: 'Jean-Luc Picard',
+    aliases: ['Captain Picard', 'Jean-Luc Picard', 'Star Trek'],
+    categories: ['science fiction character', 'Star Trek', 'starship captain'],
+    description: 'Captain Picard is Jean-Luc Picard from Star Trek, known for diplomacy, command judgment, strategic restraint, exploration, negotiation, ethics, and starship leadership.',
+    confidence: 0.9
+  },
+  jeanlucpicard: {
+    title: 'Jean-Luc Picard',
+    aliases: ['Jean-Luc Picard', 'Captain Picard', 'Star Trek'],
+    categories: ['science fiction character', 'Star Trek', 'starship captain'],
+    description: 'Jean-Luc Picard is a Star Trek captain known for diplomacy, command judgment, strategic restraint, exploration, negotiation, ethics, and starship leadership.',
+    confidence: 0.9
   },
   theflash: {
     title: 'The Flash (Barry Allen)',
@@ -1817,6 +1985,62 @@ const FAST_KNOWN_ENTITY_RECORDS = Object.freeze({
     categories: ['DC Comics superhero', 'Justice League', 'Amazon warrior'],
     description: 'Wonder Woman is a DC Comics superhero and Justice League member with Amazon combat skill, durability, leadership, flight, and diplomatic judgment.',
     confidence: 0.9
+  },
+  wolverine: {
+    title: 'Wolverine',
+    aliases: ['Wolverine', 'Logan', 'James Howlett'],
+    categories: ['Marvel Comics superhero', 'X-Men', 'mutant'],
+    description: 'Wolverine is a Marvel Comics X-Men mutant with adamantium claws, accelerated healing, heightened senses, combat experience, survival instincts, and relentless close-quarters fighting.',
+    confidence: 0.9
+  },
+  blackpanther: {
+    title: 'Black Panther',
+    aliases: ['Black Panther', "T'Challa", 'Wakanda'],
+    categories: ['Marvel Comics superhero', 'Avengers', 'Wakandan king'],
+    description: 'Black Panther is a Marvel superhero and Wakandan ruler known for enhanced physical ability, vibranium technology, stealth, martial arts, strategy, diplomacy, and leadership.',
+    confidence: 0.9
+  },
+  doctorstrange: {
+    title: 'Doctor Strange',
+    aliases: ['Doctor Strange', 'Stephen Strange', 'Dr. Strange'],
+    categories: ['Marvel Comics superhero', 'sorcerer', 'Avengers'],
+    description: 'Doctor Strange is a Marvel sorcerer and former surgeon with mystic arts, portals, protective spells, medical knowledge, dimensional awareness, and strategic crisis management.',
+    confidence: 0.9
+  },
+  drstrange: {
+    title: 'Doctor Strange',
+    aliases: ['Dr. Strange', 'Doctor Strange', 'Stephen Strange'],
+    categories: ['Marvel Comics superhero', 'sorcerer', 'Avengers'],
+    description: 'Dr. Strange is treated as Doctor Strange, a Marvel sorcerer with mystic arts, portals, protective spells, medical knowledge, dimensional awareness, and strategic crisis management.',
+    confidence: 0.88
+  },
+  greenlantern: {
+    title: 'Green Lantern',
+    aliases: ['Green Lantern', 'Hal Jordan', 'John Stewart'],
+    categories: ['DC Comics superhero', 'Justice League', 'power ring'],
+    description: 'Green Lantern is a DC Comics superhero identity powered by a will-based ring, known for flight, energy constructs, space operations, discipline, and emergency response.',
+    confidence: 0.88
+  },
+  raven: {
+    title: 'Raven',
+    aliases: ['Raven', 'Rachel Roth', 'Teen Titans'],
+    categories: ['DC Comics superhero', 'Teen Titans', 'empath', 'magic'],
+    description: 'Raven is a DC Comics and Teen Titans hero with empathic power, shadow magic, teleportation, defensive barriers, emotional control, and supernatural combat ability.',
+    confidence: 0.86
+  },
+  deadpool: {
+    title: 'Deadpool',
+    aliases: ['Deadpool', 'Wade Wilson'],
+    categories: ['Marvel Comics antihero', 'mercenary', 'mutant'],
+    description: 'Deadpool is Marvel antihero Wade Wilson, known for healing factor, weapons skill, improvisational combat, endurance, tactical unpredictability, and irreverent problem-solving.',
+    confidence: 0.88
+  },
+  ironman: {
+    title: 'Iron Man',
+    aliases: ['Iron Man', 'Tony Stark'],
+    categories: ['Marvel Comics superhero', 'Avengers', 'inventor', 'powered armor'],
+    description: 'Iron Man is Tony Stark, a Marvel superhero and engineer with powered armor, advanced weapons systems, tactical computing, flight, leadership, and crisis-response technology.',
+    confidence: 0.92
   },
   starfire: {
     title: 'Starfire (Teen Titans)',
@@ -2427,12 +2651,12 @@ async function fetchCharacterInfoWithRoundBudget(character, fetchOptions = {}) {
   const isRoundMode = String(fetchOptions.mode || '').toLowerCase() === 'round';
   const hasRoundBudget = Number(fetchOptions && fetchOptions.roundResolveTimeoutMs) > 0;
   const isFastRound = isRoundMode && fetchOptions.fastRoundMode !== false;
-  const shouldUseRoundBudget = isRoundMode && (
-    isFastRound
+  const shouldUseResolveBudget = (
+    (isRoundMode && isFastRound)
     || hasRoundBudget
     || fetchOptions.roundQualityPass === true
   );
-  if (!shouldUseRoundBudget) {
+  if (!shouldUseResolveBudget) {
     return fetchCharacterInfo(character, fetchOptions);
   }
 
@@ -2765,16 +2989,27 @@ async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
   );
   const source = String(info && info.source || '').toLowerCase();
   const knownEntitySource = source.includes('known-entity-index');
+  const requestedImageTimeoutMs = Math.max(
+    300,
+    Number(fetchOptions && fetchOptions.imageBackfillTimeoutMs) || IMAGE_BACKFILL_TIMEOUT_MS
+  );
+  const requestedImageBudgetMs = Math.max(
+    300,
+    Number(fetchOptions && fetchOptions.imageBackfillBudgetMs) || FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS
+  );
   const trustedSpecificWiki = (mode === 'final' || mode === 'context')
     && titleWordCount >= 2
     && confidence >= (mode === 'final' ? 0.72 : 0.76)
     && (source.includes('wikipedia') || source.includes('wiki'));
+  const trustedKnownEntity = (mode === 'final' || mode === 'context')
+    && knownEntitySource
+    && confidence >= (mode === 'final' ? 0.72 : 0.78);
   const prefersAliasIdentity = hasAliasHints
     && confidence >= (mode === 'final' ? 0.52 : 0.6);
   const preferQualityUpgrade = (mode === 'final' || mode === 'context')
-    && (hasAliasHints || trustedSpecificWiki)
+    && (hasAliasHints || trustedSpecificWiki || trustedKnownEntity)
     && !((inputCompact && FAST_ROUND_GENERIC_NAME_SKIP_ALIAS.has(inputCompact)) || (compact && FAST_ROUND_GENERIC_NAME_SKIP_ALIAS.has(compact)))
-    && !(titleWordCount <= 1 && !hasAliasHints);
+    && !(titleWordCount <= 1 && !hasAliasHints && !trustedKnownEntity);
 
   const stripped = {
     ...info,
@@ -2784,20 +3019,20 @@ async function tryUpgradeSyntheticImage(character, info, fetchOptions = {}) {
     ...fetchOptions,
     skipImageBackfill: false,
     imageBackfillTimeoutMs: mode === 'final'
-      ? (preferQualityUpgrade ? Math.max(900, Math.min(1200, IMAGE_BACKFILL_TIMEOUT_MS + 250)) : Math.min(650, Math.max(550, IMAGE_BACKFILL_TIMEOUT_MS)))
+      ? (preferQualityUpgrade ? Math.max(900, Math.min(1800, requestedImageTimeoutMs)) : Math.min(650, Math.max(550, requestedImageTimeoutMs)))
       : (preferQualityUpgrade || prefersAliasIdentity ? Math.max(700, IMAGE_BACKFILL_TIMEOUT_MS) : IMAGE_BACKFILL_TIMEOUT_MS),
     maxImageBackfillQueries: mode === 'final'
-      ? (preferQualityUpgrade ? 4 : 2)
+      ? (preferQualityUpgrade ? Math.max(3, Math.min(6, Number(fetchOptions && fetchOptions.maxImageBackfillQueries) || 4)) : 2)
       : (preferQualityUpgrade || prefersAliasIdentity ? 5 : 4),
     imageBackfillBudgetMs: mode === 'final'
-      ? (preferQualityUpgrade ? Math.max(1100, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS + 350) : Math.min(700, Math.max(550, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)))
+      ? (preferQualityUpgrade ? Math.max(1100, Math.min(2200, requestedImageBudgetMs)) : Math.min(700, Math.max(550, requestedImageBudgetMs)))
       : (preferQualityUpgrade || prefersAliasIdentity ? Math.max(800, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS) : 0),
     preferSummaryFirst: Boolean(preferQualityUpgrade || knownEntitySource)
   };
   const upgraded = await withTimeout(
     tryBackfillImage(character, stripped, upgradeOptions),
     mode === 'final'
-      ? (preferQualityUpgrade ? Math.max(1100, FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS + 350) : FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)
+      ? (preferQualityUpgrade ? Math.max(1100, Math.min(2200, Number(upgradeOptions.imageBackfillBudgetMs) || requestedImageBudgetMs)) : requestedImageBudgetMs)
       : Math.max(500, Number(upgradeOptions.imageBackfillBudgetMs) || FINAL_SYNTHETIC_UPGRADE_TIMEOUT_MS)
   );
   if (upgraded && upgraded.imageUrl) {
@@ -3780,6 +4015,7 @@ function buildFetchOptions(character, options = {}, scenario, twist) {
     preferSummaryFirst: hasOwn('preferSummaryFirst') ? Boolean(options.preferSummaryFirst) : undefined,
     identityUpgradeBudgetMs: Number(options && options.identityUpgradeBudgetMs) || undefined,
     roundResolveTimeoutMs: Number(options && options.roundResolveTimeoutMs) || undefined,
+    roundKnownEntityProbeMs: Number(options && options.roundKnownEntityProbeMs) || undefined,
     roundAliasOverrideTimeoutMs: Number(options && options.roundAliasOverrideTimeoutMs) || undefined,
     externalFactTimeoutMs: Number(options && options.externalFactTimeoutMs) || undefined
   };
@@ -5207,8 +5443,8 @@ async function resolveEntryIdentity(input) {
   const fetchOptions = buildFetchOptions(character, options, scenario, twist);
   const isRoundMode = String(fetchOptions.mode || '').toLowerCase() === 'round';
   const isFastRound = isRoundMode && fetchOptions.fastRoundMode !== false;
-  const isBudgetedRound = isRoundMode && (
-    isFastRound
+  const isBudgetedResolve = (
+    (isRoundMode && isFastRound)
     || fetchOptions.roundQualityPass === true
     || Number(fetchOptions.roundResolveTimeoutMs) > 0
   );
@@ -5278,7 +5514,7 @@ async function resolveEntryIdentity(input) {
     && FAST_ROUND_GENERIC_NAME_SKIP_ALIAS.has(compactInput);
   if (!skipAliasFirst) {
     try {
-      if (isBudgetedRound) {
+      if (isBudgetedResolve) {
         aliasFirstInfo = await withTimeout(
           tryAliasResolutionOverride(character, null, fetchOptions),
           Math.min(roundAliasTimeoutMs, Math.max(250, roundResolveTimeoutMs - 300))
@@ -5294,7 +5530,7 @@ async function resolveEntryIdentity(input) {
   const fetchedInfo = aliasFirstInfo || await fetchCharacterInfoWithRoundBudget(character, fetchOptions);
   let aliasCorrectedInfo = aliasFirstInfo || fetchedInfo;
   if (!isFastRound && !aliasFirstInfo && !skipAliasFirst) {
-    aliasCorrectedInfo = isBudgetedRound
+    aliasCorrectedInfo = isBudgetedResolve
       ? ((await withTimeout(
         tryAliasResolutionOverride(character, fetchedInfo, fetchOptions),
         Math.min(roundAliasTimeoutMs, Math.max(250, roundResolveTimeoutMs - 300))
